@@ -1,22 +1,31 @@
 const GATEWAY = "http://127.0.0.1:18789";
 
 // --- DOM refs ---
-const captureBtn    = document.getElementById("captureBtn");
-const sessionBtn    = document.getElementById("sessionBtn");
-const sessionBar    = document.getElementById("sessionBar");
-const sessionCount  = document.getElementById("sessionCount");
-const sessionFinish = document.getElementById("sessionFinish");
-const sessionCancel = document.getElementById("sessionCancel");
-const audioBar      = document.getElementById("audioBar");
-const stopAudio     = document.getElementById("stopAudio");
-const recTimer      = document.getElementById("recTimer");
-const resultArea    = document.getElementById("resultArea");
-const statusDot     = document.getElementById("statusDot");
-const titleInput    = document.getElementById("titleInput");
-const modeBtns      = document.querySelectorAll(".mode-btn");
+const captureBtn       = document.getElementById("captureBtn");
+const sessionBtn       = document.getElementById("sessionBtn");
+const sessionBar       = document.getElementById("sessionBar");
+const sessionCount     = document.getElementById("sessionCount");
+const sessionFinish    = document.getElementById("sessionFinish");
+const sessionCancel    = document.getElementById("sessionCancel");
+const audioBar         = document.getElementById("audioBar");
+const stopAudio        = document.getElementById("stopAudio");
+const recTimer         = document.getElementById("recTimer");
+const resultArea       = document.getElementById("resultArea");
+const statusDot        = document.getElementById("statusDot");
+const titleInput       = document.getElementById("titleInput");
+const modeTrigger      = document.getElementById("modeTrigger");
+const modeDropdown     = document.getElementById("modeDropdown");
+const modeLabel        = document.getElementById("modeLabel");
+const dropdownItems    = document.querySelectorAll(".dropdown-item");
+const dashboardBtn     = document.getElementById("dashboardBtn");
+const selectionBar     = document.getElementById("selectionBar");
+const selectionPreview = document.getElementById("selectionPreview");
+const askBtn           = document.getElementById("askBtn");
+const selectionDismiss = document.getElementById("selectionDismiss");
 
 // --- State ---
 let selectedMode  = "summary";
+let selectedText  = "";
 let sessionFrames = [];
 let inSession     = false;
 let mediaRecorder = null;
@@ -24,15 +33,43 @@ let audioChunks   = [];
 let timerInterval = null;
 let recSeconds    = 0;
 
-// ── Mode selection ──────────────────────────────────────────────────────────
-modeBtns.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    if (mediaRecorder) return; // lock while recording
-    modeBtns.forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    selectedMode = btn.dataset.mode;
-    captureBtn.textContent = selectedMode === "audio" ? "Start Recording" : "Capture & Analyze";
-    sessionBtn.style.display = selectedMode === "audio" ? "none" : "";
+// ── Dashboard link ───────────────────────────────────────────────────────────
+dashboardBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: "http://localhost:3000" });
+});
+
+// ── Mode dropdown ────────────────────────────────────────────────────────────
+modeTrigger.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (mediaRecorder) return;
+  const isOpen = modeDropdown.classList.toggle("open");
+  modeTrigger.classList.toggle("open", isOpen);
+});
+
+document.addEventListener("click", () => {
+  modeDropdown.classList.remove("open");
+  modeTrigger.classList.remove("open");
+});
+
+dropdownItems.forEach((item) => {
+  item.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (mediaRecorder) return;
+
+    selectedMode = item.dataset.mode;
+
+    modeTrigger.querySelector(".mode-icon").textContent = item.dataset.icon;
+    modeLabel.textContent = item.querySelector(".d-name").textContent;
+    modeTrigger.style.setProperty("--mode-color", item.dataset.color);
+
+    dropdownItems.forEach((d) => d.classList.remove("active"));
+    item.classList.add("active");
+
+    modeDropdown.classList.remove("open");
+    modeTrigger.classList.remove("open");
+
+    resetCaptureBtn();
+    sessionBtn.classList.toggle("hidden", selectedMode === "audio");
   });
 });
 
@@ -60,7 +97,6 @@ captureBtn.addEventListener("click", async () => {
 
   captureBtn.disabled = true;
 
-  // Session mode: accumulate slides
   if (inSession) {
     showSpinner("Capturing slide…");
     try {
@@ -73,7 +109,6 @@ captureBtn.addEventListener("click", async () => {
     return;
   }
 
-  // Single capture
   showSpinner("Capturing screen…");
   try {
     const { base64, mimeType } = await captureTab();
@@ -100,13 +135,52 @@ captureBtn.addEventListener("click", async () => {
   captureBtn.disabled = false;
 });
 
+// ── Text selection (from content script) ───────────────────────────────────
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type !== "textSelection") return;
+  if (msg.text && msg.text.length >= 3) {
+    selectedText = msg.text;
+    selectionPreview.textContent = msg.text.length > 140 ? msg.text.slice(0, 140) + "…" : msg.text;
+    selectionBar.classList.add("active");
+  } else {
+    selectedText = "";
+    selectionBar.classList.remove("active");
+  }
+});
+
+selectionDismiss.addEventListener("click", () => {
+  selectedText = "";
+  selectionBar.classList.remove("active");
+});
+
+askBtn.addEventListener("click", async () => {
+  if (!selectedText) return;
+  askBtn.disabled = true;
+  showSpinner("Analyzing selected text…");
+  try {
+    const res = await fetch(`${GATEWAY}/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        selectedText,
+        mode: selectedMode,
+        title: titleInput.value.trim() || undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Gateway error");
+    showResult(data.markdown, data.filename);
+  } catch (err) { showError(err.message); }
+  askBtn.disabled = false;
+});
+
 // ── Session ─────────────────────────────────────────────────────────────────
 sessionBtn.addEventListener("click", () => {
   inSession = true;
   sessionFrames = [];
   sessionBar.classList.add("active");
   updateSessionBar();
-  captureBtn.textContent = "Add Slide";
+  captureBtn.textContent = "➕ Add Slide";
 });
 
 function updateSessionBar() {
@@ -119,7 +193,7 @@ sessionCancel.addEventListener("click", () => {
   inSession = false;
   sessionFrames = [];
   sessionBar.classList.remove("active");
-  captureBtn.textContent = "Capture & Analyze";
+  resetCaptureBtn();
 });
 
 sessionFinish.addEventListener("click", async () => {
@@ -141,7 +215,7 @@ sessionFinish.addEventListener("click", async () => {
 
   inSession = false;
   sessionFrames = [];
-  captureBtn.textContent = "Capture & Analyze";
+  resetCaptureBtn();
   captureBtn.disabled = false;
 });
 
@@ -157,10 +231,18 @@ async function startAudioCapture() {
       });
     });
 
+    const audioCtx = new AudioContext();
+    const source = audioCtx.createMediaStreamSource(stream);
+    source.connect(audioCtx.destination);
+
     audioChunks = [];
     mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
-    mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); finishAudio(); };
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      audioCtx.close();
+      finishAudio();
+    };
     mediaRecorder.start(1000);
 
     recSeconds = 0;
@@ -216,6 +298,10 @@ function blobToBase64(blob) {
 }
 
 // ── UI helpers ──────────────────────────────────────────────────────────────
+function resetCaptureBtn() {
+  captureBtn.textContent = selectedMode === "audio" ? "🎙️ Record" : "⚡ Capture";
+}
+
 function showSpinner(msg) {
   resultArea.innerHTML = `<div class="spinner">${escapeHtml(msg)}</div>`;
 }
@@ -223,8 +309,8 @@ function showSpinner(msg) {
 function showResult(markdown, filename) {
   resultArea.innerHTML = `
     <div class="result-card">
-      <span class="saved-badge">Saved: ${escapeHtml(filename)}</span>
-      <div>${escapeHtml(markdown)}</div>
+      <span class="saved-badge">✓ ${escapeHtml(filename)}</span>
+      <div class="md-body">${renderMarkdown(markdown)}</div>
     </div>`;
 }
 
@@ -242,7 +328,7 @@ function showFlashcards(cards, filename) {
   resultArea.innerHTML = `
     <div class="result-card" style="background:transparent;border:none;padding:0">
       <span class="saved-badge" style="margin-bottom:10px;display:block">
-        Saved: ${escapeHtml(filename)} — ${cards.length} cards
+        ✓ ${escapeHtml(filename)} — ${cards.length} cards
       </span>
       <div class="flashcard-grid">${grid}</div>
     </div>`;
@@ -262,4 +348,82 @@ function escapeHtml(str = "") {
   return String(str)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// ── Markdown renderer ────────────────────────────────────────────────────────
+function renderMarkdown(raw) {
+  const blocks = [];
+
+  // 1. Extract fenced code blocks → placeholder (before HTML escaping)
+  let text = raw.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, _lang, code) => {
+    const i = blocks.length;
+    const escaped = code.trim()
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    blocks.push(`<pre class="md-pre"><code>${escaped}</code></pre>`);
+    return `\x00B${i}\x00`;
+  });
+
+  // 2. Escape remaining HTML
+  text = text
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // 3. Extract inline code → placeholder (content already escaped)
+  text = text.replace(/`([^`\n]+)`/g, (_, c) => {
+    const i = blocks.length;
+    blocks.push(`<code class="md-code">${c}</code>`);
+    return `\x00B${i}\x00`;
+  });
+
+  // 4. Headers
+  text = text.replace(/^#### (.+)$/gm, '<h4 class="md-h4">$1</h4>');
+  text = text.replace(/^### (.+)$/gm,  '<h3 class="md-h3">$1</h3>');
+  text = text.replace(/^## (.+)$/gm,   '<h2 class="md-h2">$1</h2>');
+  text = text.replace(/^# (.+)$/gm,    '<h2 class="md-h2">$1</h2>');
+
+  // 5. Bold & italic
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/\*(.+?)\*/g,     '<em>$1</em>');
+  text = text.replace(/__(.+?)__/g,     '<strong>$1</strong>');
+  text = text.replace(/_(.+?)_/g,       '<em>$1</em>');
+
+  // 6. Horizontal rule
+  text = text.replace(/^---+$/gm, '<hr class="md-hr">');
+
+  // 7. Blockquote (&gt; after HTML escaping)
+  text = text.replace(/^&gt; (.+)$/gm, '<blockquote class="md-bq">$1</blockquote>');
+
+  // 8. Line-by-line: lists → <ul>/<ol>, everything else → <p>
+  const BLOCK_STARTS = ['<h2', '<h3', '<h4', '<hr', '<blockquote', '<pre', '\x00B'];
+  const lines = text.split('\n');
+  const out = [];
+  let inUl = false, inOl = false;
+
+  for (const line of lines) {
+    if (/^[*-] /.test(line)) {
+      if (inOl) { out.push('</ol>'); inOl = false; }
+      if (!inUl) { out.push('<ul class="md-ul">'); inUl = true; }
+      out.push(`<li>${line.replace(/^[*-] /, '')}</li>`);
+    } else if (/^\d+\. /.test(line)) {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (!inOl) { out.push('<ol class="md-ol">'); inOl = true; }
+      out.push(`<li>${line.replace(/^\d+\. /, '')}</li>`);
+    } else {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (inOl) { out.push('</ol>'); inOl = false; }
+      const t = line.trim();
+      if (!t) {
+        out.push('<div class="md-gap"></div>');
+      } else if (BLOCK_STARTS.some(b => t.startsWith(b))) {
+        out.push(t);
+      } else {
+        out.push(`<p class="md-p">${t}</p>`);
+      }
+    }
+  }
+  if (inUl) out.push('</ul>');
+  if (inOl) out.push('</ol>');
+
+  // 9. Restore code blocks
+  return out.join('').replace(/\x00B(\d+)\x00/g, (_, i) => blocks[+i]);
 }

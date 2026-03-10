@@ -1,36 +1,47 @@
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  --bg: #0f0f13;
-  --surface: #1a1a2e;
-  --border: #2a2a3e;
-  --accent: #7c6af5;
-  --accent2: #5eead4;
-  --text: #e8e8f0;
-  --muted: #888;
-}
+:root { color-scheme: dark; }
 
 body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  line-height: 1.6;
+  @apply bg-bg text-text font-sans;
+  min-height: 100vh;
 }
 
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
+/* Markdown prose */
+.prose h1, .prose h2, .prose h3 { @apply font-bold mt-5 mb-2; }
+.prose h2 { @apply text-xl text-teal; }
+.prose h3 { @apply text-lg text-accent; }
+.prose p  { @apply mb-3 leading-relaxed; }
+.prose ul, .prose ol { @apply pl-5 mb-3; }
+.prose li { @apply mb-1; }
+.prose code { @apply bg-border px-1.5 py-0.5 rounded text-sm; }
+.prose pre  { @apply bg-[#12121c] border border-border rounded-lg p-4 overflow-x-auto mb-4; }
+.prose pre code { @apply bg-transparent p-0; }
+.prose table { @apply w-full border-collapse mb-4; }
+.prose th, .prose td { @apply border border-border px-3 py-2 text-sm; }
+.prose th { @apply bg-surface font-semibold; }
+.prose blockquote { @apply border-l-2 border-accent pl-3 text-muted mb-3; }
+.prose a { @apply text-accent underline; }
 
-/* Markdown content styles */
-.prose h1, .prose h2, .prose h3 { margin: 1.2em 0 0.4em; font-weight: 700; }
-.prose h2 { font-size: 1.3rem; color: var(--accent2); }
-.prose h3 { font-size: 1.1rem; color: var(--accent); }
-.prose p { margin-bottom: 0.8em; }
-.prose ul, .prose ol { padding-left: 1.4em; margin-bottom: 0.8em; }
-.prose li { margin-bottom: 0.3em; }
-.prose code { background: #2a2a3e; padding: 2px 6px; border-radius: 4px; font-size: 0.88em; }
-.prose pre { background: #12121c; border: 1px solid var(--border); border-radius: 8px; padding: 14px; overflow-x: auto; margin-bottom: 1em; }
-.prose pre code { background: none; padding: 0; }
-.prose table { border-collapse: collapse; width: 100%; margin-bottom: 1em; }
-.prose th, .prose td { border: 1px solid var(--border); padding: 8px 12px; }
-.prose th { background: var(--surface); }
-.prose blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--muted); margin-bottom: 0.8em; }
+/* Flip cards (dashboard flashcard viewer) */
+.flip-card { perspective: 700px; cursor: pointer; user-select: none; }
+.flip-card-inner {
+  position: relative; width: 100%; height: 100%;
+  transition: transform 0.45s; transform-style: preserve-3d;
+}
+.flip-card.flipped .flip-card-inner { transform: rotateY(180deg); }
+.flip-card-front, .flip-card-back {
+  position: absolute; inset: 0; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px 24px; text-align: center; line-height: 1.5;
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+}
+.flip-card-front { background: #1a1a2e; border: 1px solid #7c6af5; font-weight: 600; }
+.flip-card-back  { background: #1a2a1a; border: 1px solid #5eead4; color: #a7f3d0; transform: rotateY(180deg); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }

@@ -3,7 +3,8 @@ import express from "express";
 import cors from "cors";
 import fs from "fs/promises";
 import path from "path";
-import { analyzeScreenshot, analyzeSession, transcribeAndSummarize } from "./groq.js";
+import { analyzeScreenshot, analyzeSession, analyzeText, transcribeAndSummarize } from "./groq.js";
+import { logActivity, getActivity, getStreak } from "./db.js";
 
 const app = express();
 const PORT = process.env.PORT || 18789;
@@ -57,10 +58,12 @@ app.post("/action", async (req, res) => {
       }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title, mode, markdown, cards });
+      logActivity();
       return res.json({ success: true, ...saved, markdown, cards });
     }
 
     const saved = await saveNote({ title, mode, markdown: raw });
+    logActivity();
     res.json({ success: true, ...saved, markdown: raw });
   } catch (err) {
     console.error(err);
@@ -78,6 +81,7 @@ app.post("/session", async (req, res) => {
   try {
     const markdown = await analyzeSession(frames);
     const saved = await saveNote({ title: title ?? `Session (${frames.length} slides)`, mode: "session", markdown });
+    logActivity();
     res.json({ success: true, ...saved, markdown });
   } catch (err) {
     console.error(err);
@@ -94,7 +98,24 @@ app.post("/transcribe", async (req, res) => {
     const buffer = Buffer.from(audio, "base64");
     const { transcript, markdown } = await transcribeAndSummarize(buffer, mode);
     const saved = await saveNote({ title: title ?? "Audio recording", mode: `audio-${mode}`, markdown });
+    logActivity();
     res.json({ success: true, ...saved, transcript, markdown });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- POST /ask — text selection query (no screenshot) ---
+app.post("/ask", async (req, res) => {
+  const { selectedText, mode = "summary", title } = req.body;
+  if (!selectedText) return res.status(400).json({ error: "selectedText is required" });
+
+  try {
+    const markdown = await analyzeText(selectedText, mode);
+    const saved = await saveNote({ title: title ?? "Selected text", mode, markdown });
+    logActivity();
+    res.json({ success: true, ...saved, markdown });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -131,6 +152,32 @@ app.get("/notes/:filename", async (req, res) => {
     res.type(filename.endsWith(".json") ? "application/json" : "text/markdown").send(content);
   } catch {
     res.status(404).json({ error: "Not found" });
+  }
+});
+
+// --- GET /stats ---
+app.get("/stats", async (_req, res) => {
+  try {
+    const files = await fs.readdir(NOTES_DIR);
+    const totalNotes = files.filter(f => f.endsWith(".md")).length;
+    const streak = getStreak();
+
+    const weekActivity = getActivity(7);
+    const thisWeek = weekActivity.reduce((sum, r) => sum + r.count, 0);
+
+    res.json({ totalNotes, streak, thisWeek });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- GET /activity ---
+app.get("/activity", (_req, res) => {
+  try {
+    const data = getActivity(365);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

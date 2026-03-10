@@ -1,135 +1,102 @@
 import fs from "fs/promises";
 import path from "path";
-import Link from "next/link";
+import { BookOpen, Flame, Calendar, Zap, type LucideIcon } from "lucide-react";
+import NotesList from "./components/NotesList";
+import Heatmap from "./components/Heatmap";
+
+export const revalidate = 0; // always fresh
 
 const NOTES_DIR = path.resolve(process.cwd(), "../notes");
+const GATEWAY   = "http://127.0.0.1:18789";
 
-interface NoteFile {
-  filename: string;
-  title: string;
-  date: string;
-  mode: string;
-  size: number;
-}
-
-async function getNotes(): Promise<NoteFile[]> {
+async function getNotes() {
   try {
     const files = await fs.readdir(NOTES_DIR);
-    const mdFiles = files.filter((f) => f.endsWith(".md"));
-
-    const notes = await Promise.all(
-      mdFiles.map(async (filename) => {
+    return await Promise.all(
+      files.filter((f) => f.endsWith(".md")).map(async (filename) => {
         const content = await fs.readFile(path.join(NOTES_DIR, filename), "utf-8");
-        const stat = await fs.stat(path.join(NOTES_DIR, filename));
-
-        // Parse frontmatter
-        const titleMatch = content.match(/^title:\s*"(.+)"/m);
-        const dateMatch = content.match(/^date:\s*"(.+)"/m);
-        const modeMatch = content.match(/^mode:\s*"(.+)"/m);
-
+        const stat    = await fs.stat(path.join(NOTES_DIR, filename));
         return {
           filename,
-          title: titleMatch?.[1] ?? filename,
-          date: dateMatch?.[1] ?? "",
-          mode: modeMatch?.[1] ?? "summary",
-          size: stat.size,
+          title:    content.match(/^title:\s*"(.+)"/m)?.[1] ?? filename,
+          mode:     content.match(/^mode:\s*"(.+)"/m)?.[1]  ?? "summary",
+          size:     stat.size,
+          modified: stat.mtime.toISOString(),
         };
       })
-    );
-
-    return notes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  } catch {
-    return [];
-  }
+    ).then((n) => n.sort((a, b) => b.modified.localeCompare(a.modified)));
+  } catch { return []; }
 }
 
-const modeColors: Record<string, string> = {
-  summary: "#7c6af5",
-  explain: "#5eead4",
-  quiz: "#f59e0b",
-};
+async function getStats() {
+  try {
+    const r = await fetch(`${GATEWAY}/stats`, { cache: "no-store" });
+    return r.ok ? r.json() : { totalNotes: 0, streak: 0, thisWeek: 0 };
+  } catch { return { totalNotes: 0, streak: 0, thisWeek: 0 }; }
+}
+
+async function getActivity() {
+  try {
+    const r = await fetch(`${GATEWAY}/activity`, { cache: "no-store" });
+    return r.ok ? r.json() : [];
+  } catch { return []; }
+}
+
+function StatCard({
+  icon: Icon, label, value, color,
+}: { icon: LucideIcon; label: string; value: string | number; color: string }) {
+  return (
+    <div className="flex items-center gap-3 bg-surface border border-border rounded-xl p-4">
+      <div className={`p-2 rounded-lg ${color}`}>
+        <Icon className="w-4 h-4" />
+      </div>
+      <div>
+        <p className="text-xl font-bold text-text leading-none">{value}</p>
+        <p className="text-xs text-muted mt-0.5">{label}</p>
+      </div>
+    </div>
+  );
+}
 
 export default async function HomePage() {
-  const notes = await getNotes();
+  const [notes, stats, activity] = await Promise.all([getNotes(), getStats(), getActivity()]);
 
   return (
-    <main style={{ maxWidth: 800, margin: "0 auto", padding: "32px 20px" }}>
-      <header style={{ marginBottom: 32 }}>
-        <h1
-          style={{
-            fontSize: 28,
-            fontWeight: 800,
-            background: "linear-gradient(135deg, #7c6af5, #5eead4)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            marginBottom: 6,
-          }}
-        >
-          LookUp — Study Sensei
+    <main className="max-w-3xl mx-auto px-5 py-8">
+
+      {/* Header */}
+      <header className="mb-8">
+        <h1 className="text-3xl font-extrabold bg-gradient-to-r from-accent to-teal bg-clip-text text-transparent">
+          LookUp
         </h1>
-        <p style={{ color: "#888", fontSize: 14 }}>
-          {notes.length} note{notes.length !== 1 ? "s" : ""} saved
-        </p>
+        <p className="text-muted text-sm mt-1">Your personal study knowledge base</p>
       </header>
 
-      {notes.length === 0 ? (
-        <div
-          style={{
-            textAlign: "center",
-            padding: "60px 20px",
-            color: "#555",
-            border: "1px dashed #2a2a3e",
-            borderRadius: 12,
-          }}
-        >
-          <p style={{ fontSize: 16, marginBottom: 8 }}>No notes yet.</p>
-          <p style={{ fontSize: 13 }}>
-            Use the Chrome Extension to capture your first screen.
-          </p>
+      {/* Stats row */}
+      <div className="grid grid-cols-3 gap-3 mb-8">
+        <StatCard icon={BookOpen} label="Total notes"   value={stats.totalNotes} color="bg-accent/15 text-accent" />
+        <StatCard icon={Flame}    label="Day streak"    value={stats.streak}     color="bg-orange-500/15 text-orange-400" />
+        <StatCard icon={Zap}      label="This week"     value={stats.thisWeek}   color="bg-teal/15 text-teal" />
+      </div>
+
+      {/* Heatmap */}
+      <section className="bg-surface border border-border rounded-xl p-5 mb-8">
+        <div className="flex items-center gap-2 mb-4">
+          <Calendar className="w-4 h-4 text-muted" />
+          <h2 className="text-sm font-semibold text-text">Capture Activity</h2>
+          <span className="ml-auto text-xs text-muted">Last 365 days</span>
         </div>
-      ) : (
-        <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: 12 }}>
-          {notes.map((note) => (
-            <li key={note.filename}>
-              <Link
-                href={`/note/${encodeURIComponent(note.filename)}`}
-                style={{
-                  display: "block",
-                  background: "#1a1a2e",
-                  border: "1px solid #2a2a3e",
-                  borderRadius: 12,
-                  padding: "16px 20px",
-                  transition: "border-color 0.2s",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                  <span
-                    style={{
-                      padding: "2px 8px",
-                      borderRadius: 6,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      background: modeColors[note.mode] ?? "#7c6af5",
-                      color: "#fff",
-                    }}
-                  >
-                    {note.mode}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#e8e8f0" }}>
-                    {note.title}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: "#666" }}>
-                  {note.date ? new Date(note.date).toLocaleString() : ""}
-                  {" · "}
-                  {(note.size / 1024).toFixed(1)} KB
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+        <Heatmap data={activity} />
+      </section>
+
+      {/* Notes list with search */}
+      <section>
+        <h2 className="text-sm font-semibold text-muted uppercase tracking-widest mb-4">
+          Notes — {notes.length}
+        </h2>
+        <NotesList notes={notes} />
+      </section>
+
     </main>
   );
 }
