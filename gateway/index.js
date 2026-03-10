@@ -338,7 +338,7 @@ app.patch("/notes/:filename", async (req, res) => {
   if (!filename.endsWith(".md") || filename.includes("..")) {
     return res.status(400).json({ error: "Invalid filename" });
   }
-  const allowed = ["course", "title"];
+  const allowed = ["course", "title", "folder_id"];
   const updates = Object.fromEntries(
     Object.entries(req.body).filter(([k]) => allowed.includes(k))
   );

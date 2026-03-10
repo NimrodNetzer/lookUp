@@ -15,13 +15,15 @@ async function getNotes() {
       files.filter((f) => f.endsWith(".md")).map(async (filename) => {
         const content = await fs.readFile(path.join(NOTES_DIR, filename), "utf-8");
         const stat    = await fs.stat(path.join(NOTES_DIR, filename));
+        const folderIdMatch = content.match(/^folder_id:\s*"?(\d+)"?/m);
         return {
           filename,
-          title:    content.match(/^title:\s*"(.+)"/m)?.[1]  ?? filename,
-          mode:     content.match(/^mode:\s*"(.+)"/m)?.[1]   ?? "summary",
-          course:   content.match(/^course:\s*"(.+)"/m)?.[1] ?? undefined,
-          size:     stat.size,
-          modified: stat.mtime.toISOString(),
+          title:     content.match(/^title:\s*"(.+)"/m)?.[1]  ?? filename,
+          mode:      content.match(/^mode:\s*"(.+)"/m)?.[1]   ?? "summary",
+          course:    content.match(/^course:\s*"(.+)"/m)?.[1] ?? undefined,
+          folder_id: folderIdMatch ? parseInt(folderIdMatch[1]) : undefined,
+          size:      stat.size,
+          modified:  stat.mtime.toISOString(),
         };
       })
     ).then((n) => n.sort((a, b) => b.modified.localeCompare(a.modified)));

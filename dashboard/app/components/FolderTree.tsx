@@ -19,6 +19,7 @@ interface FolderTreeProps {
   onSelectFolder: (id: number | null) => void;
   onRefresh: () => void;
   noteCounts: Record<number, number>;
+  onDropNote?: (filename: string, folderId: number) => void;
 }
 
 // ── Inline input used for create & rename ─────────────────────────────────────
@@ -52,7 +53,7 @@ function InlineInput({
 
 // ── Single folder row ─────────────────────────────────────────────────────────
 function FolderNode({
-  node, depth, activeFolderId, onSelectFolder, onRefresh, noteCounts,
+  node, depth, activeFolderId, onSelectFolder, onRefresh, noteCounts, onDropNote,
 }: {
   node: FolderNode;
   depth: number;
@@ -60,11 +61,13 @@ function FolderNode({
   onSelectFolder: (id: number | null) => void;
   onRefresh: () => void;
   noteCounts: Record<number, number>;
+  onDropNote?: (filename: string, folderId: number) => void;
 }) {
   const [expanded,    setExpanded]    = useState(false);
   const [renaming,    setRenaming]    = useState(false);
   const [addingChild, setAddingChild] = useState(false);
   const [confirming,  setConfirming]  = useState(false);
+  const [dragOver,    setDragOver]    = useState(false);
 
   const hasChildren = node.children.length > 0;
   const isActive    = activeFolderId === node.id;
@@ -104,10 +107,20 @@ function FolderNode({
           "group flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer transition-colors text-xs select-none",
           isActive
             ? "bg-accent/20 text-accent font-semibold"
-            : "text-muted hover:text-text hover:bg-surface/60"
+            : dragOver
+              ? "bg-teal/20 text-teal border border-teal/40"
+              : "text-muted hover:text-text hover:bg-surface/60"
         )}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
         onClick={() => onSelectFolder(isActive ? null : node.id)}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const filename = e.dataTransfer.getData("text/plain");
+          if (filename && onDropNote) onDropNote(filename, node.id);
+        }}
       >
         {/* Chevron */}
         <button
@@ -182,6 +195,7 @@ function FolderNode({
               onSelectFolder={onSelectFolder}
               onRefresh={onRefresh}
               noteCounts={noteCounts}
+              onDropNote={onDropNote}
             />
           ))}
           {addingChild && (
@@ -200,7 +214,7 @@ function FolderNode({
 }
 
 // ── Root tree ─────────────────────────────────────────────────────────────────
-export default function FolderTree({ folders, activeFolderId, onSelectFolder, onRefresh, noteCounts }: FolderTreeProps) {
+export default function FolderTree({ folders, activeFolderId, onSelectFolder, onRefresh, noteCounts, onDropNote }: FolderTreeProps) {
   const [addingRoot, setAddingRoot] = useState(false);
 
   async function handleAddRoot(name: string) {
@@ -224,6 +238,7 @@ export default function FolderTree({ folders, activeFolderId, onSelectFolder, on
           onSelectFolder={onSelectFolder}
           onRefresh={onRefresh}
           noteCounts={noteCounts}
+          onDropNote={onDropNote}
         />
       ))}
 

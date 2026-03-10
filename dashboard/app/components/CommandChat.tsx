@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Sparkles, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useRef } from "react";
+import { Sparkles } from "lucide-react";
 import clsx from "clsx";
 
 const GATEWAY = "http://127.0.0.1:18789";
@@ -12,30 +12,10 @@ interface LogEntry {
 }
 
 export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
-  const [input,       setInput]       = useState("");
-  const [log,         setLog]         = useState<LogEntry[]>([]);
-  const [loading,     setLoading]     = useState(false);
-  const [showPrefs,   setShowPrefs]   = useState(false);
-  const [preferences, setPreferences] = useState("");
-  const [savingPrefs, setSavingPrefs] = useState(false);
+  const [input,   setInput]   = useState("");
+  const [log,     setLog]     = useState<LogEntry[]>([]);
+  const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    fetch(`${GATEWAY}/settings/preferences`)
-      .then((r) => r.json())
-      .then((d) => { if (d.preferences) setPreferences(d.preferences); })
-      .catch(() => {});
-  }, []);
-
-  async function savePreferences() {
-    setSavingPrefs(true);
-    await fetch(`${GATEWAY}/settings/preferences`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preferences }),
-    }).catch(() => {});
-    setSavingPrefs(false);
-  }
 
   async function send() {
     const cmd = input.trim();
@@ -124,34 +104,6 @@ export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
         </div>
       </div>
 
-      {/* Preferences toggle */}
-      <div className="border-t border-border">
-        <button
-          onClick={() => setShowPrefs((s) => !s)}
-          className="w-full flex items-center justify-between px-4 py-2.5 text-xs text-muted hover:text-text transition-colors"
-        >
-          <span>Preferences</span>
-          {showPrefs ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-        </button>
-        {showPrefs && (
-          <div className="px-3 pb-3 flex flex-col gap-2">
-            <textarea
-              value={preferences}
-              onChange={(e) => setPreferences(e.target.value)}
-              placeholder="e.g. Always prefix networking notes with [NET]. Name OS notes starting with 'OS:'."
-              rows={3}
-              className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-xs text-text placeholder:text-muted/50 outline-none focus:border-accent resize-none transition-colors"
-            />
-            <button
-              onClick={savePreferences}
-              disabled={savingPrefs}
-              className="self-end px-3 py-1.5 text-xs font-semibold bg-accent/15 text-accent border border-accent/30 rounded-lg hover:bg-accent/25 transition-colors disabled:opacity-50"
-            >
-              {savingPrefs ? "Saving…" : "Save"}
-            </button>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

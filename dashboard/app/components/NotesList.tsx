@@ -12,6 +12,7 @@ interface Note {
   title?: string;
   mode?: string;
   course?: string;
+  folder_id?: number;
   size: number;
   modified: string;
 }
@@ -406,9 +407,12 @@ export default function NotesList({ notes, onRefresh }: { notes: Note[]; onRefre
                     <div className="border-t border-border">
                       {groupNotes.map((note) => (
                         <div key={note.filename}
+                          draggable={!selectMode}
+                          onDragStart={(e) => { e.dataTransfer.setData("text/plain", note.filename); e.dataTransfer.effectAllowed = "move"; }}
                           onClick={selectMode ? () => toggleNote(note.filename) : undefined}
                           className={clsx(
                             "group flex items-center gap-3 px-4 py-3 hover:bg-surface/40 transition-colors border-b border-border last:border-b-0",
+                            !selectMode && "cursor-grab active:cursor-grabbing",
                             selectMode && "cursor-pointer",
                             selectMode && selected.has(note.filename) && "bg-accent/10"
                           )}>
