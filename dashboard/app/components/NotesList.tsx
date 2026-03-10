@@ -46,7 +46,7 @@ export default function NotesList({ notes }: { notes: Note[] }) {
   const [query,          setQuery]          = useState("");
   const [dateFilter,     setDateFilter]     = useState<DateFilter>("all");
   const [sortMode,       setSortMode]       = useState<SortMode>("date");
-  const [expandedGroups, setExpandedGroups] = useState<Set<GroupKey>>(new Set(GROUP_ORDER));
+  const [expandedGroups, setExpandedGroups] = useState<Set<GroupKey>>(new Set());
   const [showRange,      setShowRange]      = useState(false);
   const [rangeFrom,      setRangeFrom]      = useState("");
   const [rangeTo,        setRangeTo]        = useState("");

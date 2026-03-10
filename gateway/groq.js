@@ -30,9 +30,6 @@ One paragraph stating what this is about and why it matters.
 - **Term or concept**: Clear, brief explanation
 (Include 4–8 bullet points covering the most important ideas)
 
-## Formulas & Equations
-(Only if math is present — use LaTeX: inline $...$ or block $$...$$)
-
 ## Connections
 1–2 sentences on how this topic connects to broader ideas or other concepts.`,
 
@@ -109,13 +106,15 @@ export async function analyzeScreenshot(base64Image, mimeType = "image/png", mod
 }
 
 /**
- * Analyze multiple screenshots in one message (session mode)
+ * Analyze multiple screenshots with any mode prompt
  */
-export async function analyzeSession(frames) {
+export async function analyzeMulti(frames, mode = "session") {
   const imageContent = frames.map(({ base64, mimeType = "image/png" }) => ({
     type: "image_url",
     image_url: { url: `data:${mimeType};base64,${base64}` },
   }));
+
+  const prompt = modePrompts[mode] ?? modePrompts.session;
 
   const response = await groq.chat.completions.create({
     model: "meta-llama/llama-4-scout-17b-16e-instruct",
@@ -123,12 +122,33 @@ export async function analyzeSession(frames) {
       { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
-        content: [...imageContent, { type: "text", text: modePrompts.session }],
+        content: [...imageContent, { type: "text", text: prompt }],
       },
     ],
     temperature: 0.4,
   });
 
+  return response.choices[0].message.content;
+}
+
+/**
+ * Answer a specific user question about a screenshot
+ */
+export async function analyzeWithQuestion(base64Image, mimeType = "image/png", question) {
+  const response = await groq.chat.completions.create({
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+          { type: "text", text: question },
+        ],
+      },
+    ],
+    temperature: 0.4,
+  });
   return response.choices[0].message.content;
 }
 
@@ -194,4 +214,19 @@ export async function transcribeAndSummarize(audioBuffer, mode = "summary") {
   });
 
   return { transcript, markdown: response.choices[0].message.content };
+}
+
+/**
+ * Multi-turn chat — messages is [{role:"user"|"assistant", content:string}]
+ */
+export async function chat(messages) {
+  const response = await groq.chat.completions.create({
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...messages,
+    ],
+    temperature: 0.6,
+  });
+  return response.choices[0].message.content;
 }

@@ -3,12 +3,15 @@ import express from "express";
 import cors from "cors";
 import fs from "fs/promises";
 import path from "path";
-import { analyzeScreenshot, analyzeSession, analyzeText, transcribeAndSummarize } from "./groq.js";
+import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, transcribeAndSummarize, chat } from "./groq.js";
 import { logActivity, getActivity, getStreak } from "./db.js";
 
 const app = express();
 const PORT = process.env.PORT || 18789;
 const NOTES_DIR = path.resolve("../notes");
+
+// Shared chat history (persists for the lifetime of the gateway process)
+let chatHistory = [];
 
 app.use(cors({
   origin: (origin, cb) => {
@@ -71,18 +74,33 @@ app.post("/action", async (req, res) => {
   }
 });
 
-// --- POST /session — multi-slide session ---
+// --- POST /session — multi-page capture ---
 app.post("/session", async (req, res) => {
-  const { frames, title } = req.body;
+  const { frames, title, mode = "session" } = req.body;
   if (!Array.isArray(frames) || frames.length === 0) {
     return res.status(400).json({ error: "frames array is required" });
   }
 
   try {
-    const markdown = await analyzeSession(frames);
-    const saved = await saveNote({ title: title ?? `Session (${frames.length} slides)`, mode: "session", markdown });
+    const raw = await analyzeMulti(frames, mode);
+
+    if (mode === "flashcard") {
+      let cards;
+      try {
+        const jsonStr = raw.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+        cards = JSON.parse(jsonStr);
+      } catch {
+        cards = [{ front: "Parse error", back: raw }];
+      }
+      const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
+      const saved = await saveNote({ title: title ?? `Multi (${frames.length} pages)`, mode, markdown, cards });
+      logActivity();
+      return res.json({ success: true, ...saved, markdown, cards });
+    }
+
+    const saved = await saveNote({ title: title ?? `Multi (${frames.length} pages)`, mode, markdown: raw });
     logActivity();
-    res.json({ success: true, ...saved, markdown });
+    res.json({ success: true, ...saved, markdown: raw });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -100,6 +118,22 @@ app.post("/transcribe", async (req, res) => {
     const saved = await saveNote({ title: title ?? "Audio recording", mode: `audio-${mode}`, markdown });
     logActivity();
     res.json({ success: true, ...saved, transcript, markdown });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- POST /ask-screen — screenshot + natural language question ---
+app.post("/ask-screen", async (req, res) => {
+  const { screenshot, mimeType = "image/png", question, title } = req.body;
+  if (!screenshot || !question) return res.status(400).json({ error: "screenshot and question are required" });
+
+  try {
+    const markdown = await analyzeWithQuestion(screenshot, mimeType, question);
+    const saved = await saveNote({ title: title ?? question.slice(0, 60), mode: "summary", markdown });
+    logActivity();
+    res.json({ success: true, ...saved, markdown });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -179,6 +213,34 @@ app.get("/activity", (_req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- POST /chat — multi-turn conversation (server-side history) ---
+app.post("/chat", async (req, res) => {
+  const { message } = req.body;
+  if (!message) return res.status(400).json({ error: "message is required" });
+
+  chatHistory.push({ role: "user", content: message });
+  try {
+    const reply = await chat(chatHistory);
+    chatHistory.push({ role: "assistant", content: reply });
+    res.json({ success: true, reply, history: chatHistory });
+  } catch (err) {
+    chatHistory.pop(); // remove failed user message
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- GET /chat/history ---
+app.get("/chat/history", (_req, res) => {
+  res.json(chatHistory);
+});
+
+// --- POST /chat/clear ---
+app.post("/chat/clear", (_req, res) => {
+  chatHistory = [];
+  res.json({ success: true });
 });
 
 // --- GET /health ---

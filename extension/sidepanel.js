@@ -22,6 +22,9 @@ const selectionBar     = document.getElementById("selectionBar");
 const selectionPreview = document.getElementById("selectionPreview");
 const askBtn           = document.getElementById("askBtn");
 const selectionDismiss = document.getElementById("selectionDismiss");
+const chatSendBtn      = document.getElementById("chatSendBtn");
+const chatExpandBtn    = document.getElementById("chatExpandBtn");
+const addPageBtn       = document.getElementById("addPageBtn");
 
 // --- State ---
 let selectedMode  = "summary";
@@ -33,9 +36,12 @@ let audioChunks   = [];
 let timerInterval = null;
 let recSeconds    = 0;
 
-// ── Dashboard link ───────────────────────────────────────────────────────────
+// ── Dashboard / Chat links ───────────────────────────────────────────────────
 dashboardBtn.addEventListener("click", () => {
   chrome.tabs.create({ url: "http://localhost:3000" });
+});
+chatExpandBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: "http://localhost:3000/chat" });
 });
 
 // ── Mode dropdown ────────────────────────────────────────────────────────────
@@ -73,6 +79,39 @@ dropdownItems.forEach((item) => {
   });
 });
 
+// ── Shared chat send logic ────────────────────────────────────────────────────
+async function sendChatMessage() {
+  const message = titleInput.value.trim();
+  if (!message) { captureBtn.click(); return; }
+
+  titleInput.disabled = true;
+  chatSendBtn.disabled = true;
+  showSpinner("Thinking…");
+  try {
+    const res = await fetch(`${GATEWAY}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Gateway error");
+    // Show only the latest reply in result area (full history lives in /chat page)
+    resultArea.innerHTML = `
+      <div class="result-card">
+        <div class="md-body">${renderMarkdown(data.reply)}</div>
+      </div>`;
+    titleInput.value = "";
+  } catch (err) { showError(err.message); }
+  titleInput.disabled = false;
+  chatSendBtn.disabled = false;
+}
+
+titleInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); sendChatMessage(); }
+});
+
+chatSendBtn.addEventListener("click", sendChatMessage);
+
 // ── Gateway health check ────────────────────────────────────────────────────
 async function checkGateway() {
   try {
@@ -92,22 +131,23 @@ async function captureTab() {
 }
 
 // ── Main capture button ─────────────────────────────────────────────────────
+// ── Add Page button (multi-page session) ─────────────────────────────────────
+addPageBtn.addEventListener("click", async () => {
+  addPageBtn.disabled = true;
+  showSpinner("Capturing page…");
+  try {
+    const frame = await captureTab();
+    sessionFrames.push(frame);
+    updateSessionBar();
+    showSpinner(`${sessionFrames.length} page${sessionFrames.length > 1 ? "s" : ""} captured — add more or click Done ✓`);
+  } catch (err) { showError(err.message); }
+  addPageBtn.disabled = false;
+});
+
 captureBtn.addEventListener("click", async () => {
   if (selectedMode === "audio") { startAudioCapture(); return; }
 
   captureBtn.disabled = true;
-
-  if (inSession) {
-    showSpinner("Capturing slide…");
-    try {
-      const frame = await captureTab();
-      sessionFrames.push(frame);
-      updateSessionBar();
-      showSpinner(`${sessionFrames.length} slide${sessionFrames.length > 1 ? "s" : ""} captured — keep going or click Finish.`);
-    } catch (err) { showError(err.message); }
-    captureBtn.disabled = false;
-    return;
-  }
 
   showSpinner("Capturing screen…");
   try {
@@ -129,7 +169,7 @@ captureBtn.addEventListener("click", async () => {
     if (selectedMode === "flashcard" && data.cards) {
       showFlashcards(data.cards, data.filename);
     } else {
-      showResult(data.markdown, data.filename);
+      showResult(data.markdown, data.filename, selectedMode);
     }
   } catch (err) { showError(err.message); }
   captureBtn.disabled = false;
@@ -169,7 +209,7 @@ askBtn.addEventListener("click", async () => {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
-    showResult(data.markdown, data.filename);
+    showResult(data.markdown, data.filename, selectedMode);
   } catch (err) { showError(err.message); }
   askBtn.disabled = false;
 });
@@ -180,12 +220,11 @@ sessionBtn.addEventListener("click", () => {
   sessionFrames = [];
   sessionBar.classList.add("active");
   updateSessionBar();
-  captureBtn.textContent = "➕ Add Slide";
 });
 
 function updateSessionBar() {
   const n = sessionFrames.length;
-  sessionCount.textContent = `${n} slide${n !== 1 ? "s" : ""}`;
+  sessionCount.textContent = `${n} page${n !== 1 ? "s" : ""}`;
   sessionFinish.disabled = n === 0;
 }
 
@@ -200,17 +239,22 @@ sessionFinish.addEventListener("click", async () => {
   if (sessionFrames.length === 0) return;
   sessionBar.classList.remove("active");
   captureBtn.disabled = true;
-  showSpinner(`Analyzing ${sessionFrames.length} slides as one session…`);
+  showSpinner(`Analyzing ${sessionFrames.length} pages…`);
 
   try {
     const res = await fetch(`${GATEWAY}/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ frames: sessionFrames, title: titleInput.value.trim() || undefined }),
+      body: JSON.stringify({ frames: sessionFrames, mode: selectedMode, title: titleInput.value.trim() || undefined }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
-    showResult(data.markdown, data.filename);
+
+    if (selectedMode === "flashcard" && data.cards) {
+      showFlashcards(data.cards, data.filename);
+    } else {
+      showResult(data.markdown, data.filename, selectedMode);
+    }
   } catch (err) { showError(err.message); }
 
   inSession = false;
@@ -306,12 +350,27 @@ function showSpinner(msg) {
   resultArea.innerHTML = `<div class="spinner">${escapeHtml(msg)}</div>`;
 }
 
-function showResult(markdown, filename) {
+function showResult(markdown, filename, mode) {
+  const bodyHtml = (mode === "quiz")
+    ? renderQuiz(markdown)
+    : `<div class="md-body">${renderMarkdown(markdown)}</div>`;
+
   resultArea.innerHTML = `
     <div class="result-card">
       <span class="saved-badge">✓ ${escapeHtml(filename)}</span>
-      <div class="md-body">${renderMarkdown(markdown)}</div>
+      ${bodyHtml}
     </div>`;
+
+  if (mode === "quiz") {
+    resultArea.querySelectorAll(".quiz-reveal-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const el = document.getElementById(btn.dataset.answerId);
+        const hidden = el.style.display === "none";
+        el.style.display = hidden ? "block" : "none";
+        btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+      });
+    });
+  }
 }
 
 function showFlashcards(cards, filename) {
@@ -348,6 +407,39 @@ function escapeHtml(str = "") {
   return String(str)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// ── Quiz renderer — shows questions with hidden answers ──────────────────────
+function renderQuiz(markdown) {
+  const blocks = markdown.split(/\n---\n/);
+  let html = "";
+  let qNum = 0;
+
+  for (const block of blocks) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+
+    const answerIdx = trimmed.indexOf("**Answer:**");
+    if (answerIdx === -1) {
+      // Non-Q&A block (e.g. intro text) — render normally
+      html += `<div class="md-body">${renderMarkdown(trimmed)}</div>`;
+      continue;
+    }
+
+    qNum++;
+    const questionPart = trimmed.slice(0, answerIdx).trim();
+    const answerPart   = trimmed.slice(answerIdx + "**Answer:**".length).trim();
+    const id = `quiz-ans-${qNum}`;
+
+    html += `
+      <div class="quiz-block">
+        <div class="quiz-question md-body">${renderMarkdown(questionPart)}</div>
+        <button class="quiz-reveal-btn" data-answer-id="${id}">▶ Show Answer</button>
+        <div class="quiz-answer md-body" id="${id}" style="display:none">${renderMarkdown(answerPart)}</div>
+      </div>`;
+  }
+
+  return html || `<div class="md-body">${renderMarkdown(markdown)}</div>`;
 }
 
 // ── Markdown renderer ────────────────────────────────────────────────────────
