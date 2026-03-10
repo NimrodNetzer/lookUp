@@ -4,14 +4,13 @@ import cors from "cors";
 import fs from "fs/promises";
 import path from "path";
 import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, transcribeAndSummarize, chat, processCommand } from "./groq.js";
-import { logActivity, getActivity, getStreak, getSetting, setSetting } from "./db.js";
+import { logActivity, getActivity, getStreak, getSetting, setSetting,
+         getActiveConversation, createConversation, saveConversation, getConversation,
+         getFolderTree, createFolder, renameFolder, deleteFolder } from "./db.js";
 
 const app = express();
 const PORT = process.env.PORT || 18789;
 const NOTES_DIR = path.resolve("../notes");
-
-// Shared chat history (persists for the lifetime of the gateway process)
-let chatHistory = [];
 
 app.use(cors({
   origin: (origin, cb) => {
@@ -65,7 +64,14 @@ async function mergeNotes(filenames, title) {
     .join("\n\n---\n\n");
 
   const mergeTitle = title ?? `Merged: ${parts.map((p) => p.title).join(" + ").slice(0, 80)}`;
-  return saveNote({ title: mergeTitle, mode, markdown: combined, course });
+  const saved = await saveNote({ title: mergeTitle, mode, markdown: combined, course });
+
+  // Delete originals — the merged note replaces them
+  await Promise.all(
+    filenames.map((f) => fs.unlink(path.join(NOTES_DIR, f)).catch(() => {}))
+  );
+
+  return saved;
 }
 
 async function updateNoteFrontmatter(filename, updates) {
@@ -256,32 +262,58 @@ app.get("/activity", (_req, res) => {
   }
 });
 
-// --- POST /chat — multi-turn conversation (server-side history) ---
+// --- GET /conversations/active ---
+app.get("/conversations/active", (_req, res) => {
+  try {
+    const conv = getActiveConversation();
+    res.json({ id: conv.id, messages: conv.messages, title: conv.title });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- POST /chat — multi-turn conversation (DB-persisted) ---
 app.post("/chat", async (req, res) => {
-  const { message } = req.body;
+  const { message, conversationId } = req.body;
   if (!message) return res.status(400).json({ error: "message is required" });
 
-  chatHistory.push({ role: "user", content: message });
+  // Load or create conversation
+  let conv = conversationId ? getConversation(conversationId) : null;
+  if (!conv) conv = getActiveConversation();
+
+  const messages = [...conv.messages, { role: "user", content: message }];
   try {
-    const reply = await chat(chatHistory);
-    chatHistory.push({ role: "assistant", content: reply });
-    res.json({ success: true, reply, history: chatHistory });
+    const reply = await chat(messages);
+    const updatedMessages = [...messages, { role: "assistant", content: reply }];
+    // Auto-title from first user message
+    const title = conv.messages.length === 0 ? message.slice(0, 60) : conv.title;
+    saveConversation(conv.id, updatedMessages, title);
+    res.json({ success: true, reply, history: updatedMessages, conversationId: conv.id });
   } catch (err) {
-    chatHistory.pop(); // remove failed user message
     console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // --- GET /chat/history ---
-app.get("/chat/history", (_req, res) => {
-  res.json(chatHistory);
+app.get("/chat/history", (req, res) => {
+  try {
+    const convId = req.query.conversationId ? Number(req.query.conversationId) : null;
+    const conv = convId ? getConversation(convId) : getActiveConversation();
+    res.json(conv ? conv.messages : []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- POST /chat/clear ---
 app.post("/chat/clear", (_req, res) => {
-  chatHistory = [];
-  res.json({ success: true });
+  try {
+    const conv = createConversation();
+    res.json({ success: true, conversationId: conv.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- POST /notes/merge — combine multiple notes into one ---
@@ -315,6 +347,23 @@ app.patch("/notes/:filename", async (req, res) => {
   }
   try {
     await updateNoteFrontmatter(filename, updates);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- DELETE /notes/:filename — permanently delete a note (and companion .cards.json) ---
+app.delete("/notes/:filename", async (req, res) => {
+  const { filename } = req.params;
+  if (!filename.endsWith(".md") || filename.includes("..")) {
+    return res.status(400).json({ error: "Invalid filename" });
+  }
+  try {
+    await fs.unlink(path.join(NOTES_DIR, filename));
+    // Also remove companion cards file if it exists
+    const cardsFile = filename.replace(".md", ".cards.json");
+    await fs.unlink(path.join(NOTES_DIR, cardsFile)).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -391,6 +440,51 @@ app.post("/settings/preferences", (req, res) => {
   const { preferences } = req.body;
   setSetting("preferences", preferences ?? "");
   res.json({ success: true });
+});
+
+// --- GET /folders ---
+app.get("/folders", (_req, res) => {
+  try {
+    res.json(getFolderTree());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- POST /folders ---
+app.post("/folders", (req, res) => {
+  const { name, parentId } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: "name is required" });
+  try {
+    const folder = createFolder(name.trim(), parentId ?? null);
+    res.json({ success: true, folder });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- PATCH /folders/:id ---
+app.patch("/folders/:id", (req, res) => {
+  const id = Number(req.params.id);
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: "name is required" });
+  try {
+    renameFolder(id, name.trim());
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- DELETE /folders/:id ---
+app.delete("/folders/:id", (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    deleteFolder(id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- GET /health ---

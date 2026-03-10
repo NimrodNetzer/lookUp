@@ -29,17 +29,21 @@ function renderMd(raw: string) {
 }
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput]       = useState("");
-  const [loading, setLoading]   = useState(false);
+  const [messages,        setMessages]        = useState<Message[]>([]);
+  const [input,           setInput]           = useState("");
+  const [loading,         setLoading]         = useState(false);
+  const [conversationId,  setConversationId]  = useState<number | null>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load shared history from gateway on mount
+  // Load persistent conversation from gateway on mount
   useEffect(() => {
-    fetch(`${GATEWAY}/chat/history`)
+    fetch(`${GATEWAY}/conversations/active`)
       .then((r) => r.json())
-      .then((data: Message[]) => { if (Array.isArray(data)) setMessages(data); })
+      .then((data) => {
+        if (data.id) setConversationId(data.id);
+        if (Array.isArray(data.messages)) setMessages(data.messages);
+      })
       .catch(() => {});
   }, []);
 
@@ -57,10 +61,11 @@ export default function ChatPage() {
       const res = await fetch(`${GATEWAY}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, conversationId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Gateway error");
+      if (data.conversationId) setConversationId(data.conversationId);
       if (Array.isArray(data.history)) setMessages(data.history);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -70,7 +75,9 @@ export default function ChatPage() {
   }
 
   async function clearChat() {
-    await fetch(`${GATEWAY}/chat/clear`, { method: "POST" }).catch(() => {});
+    const r = await fetch(`${GATEWAY}/chat/clear`, { method: "POST" }).catch(() => null);
+    const data = r ? await r.json().catch(() => null) : null;
+    if (data?.conversationId) setConversationId(data.conversationId);
     setMessages([]);
   }
 

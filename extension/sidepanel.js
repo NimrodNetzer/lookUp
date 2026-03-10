@@ -27,14 +27,15 @@ const chatExpandBtn    = document.getElementById("chatExpandBtn");
 const addPageBtn       = document.getElementById("addPageBtn");
 
 // --- State ---
-let selectedMode  = "summary";
-let selectedText  = "";
-let sessionFrames = [];
-let inSession     = false;
-let mediaRecorder = null;
-let audioChunks   = [];
-let timerInterval = null;
-let recSeconds    = 0;
+let selectedMode        = "summary";
+let selectedText        = "";
+let sessionFrames       = [];
+let inSession           = false;
+let mediaRecorder       = null;
+let audioChunks         = [];
+let timerInterval       = null;
+let recSeconds          = 0;
+let activeConversationId = null;
 
 // ── Dashboard / Chat links ───────────────────────────────────────────────────
 dashboardBtn.addEventListener("click", () => {
@@ -91,10 +92,11 @@ async function sendChatMessage() {
     const res = await fetch(`${GATEWAY}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, conversationId: activeConversationId }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
+    if (data.conversationId) activeConversationId = data.conversationId;
     // Show only the latest reply in result area (full history lives in /chat page)
     resultArea.innerHTML = `
       <div class="result-card">
@@ -121,6 +123,26 @@ async function checkGateway() {
 }
 checkGateway();
 setInterval(checkGateway, 10_000);
+
+// ── Restore conversation on open ─────────────────────────────────────────────
+async function loadActiveConversation() {
+  try {
+    const r = await fetch(`${GATEWAY}/conversations/active`);
+    if (!r.ok) return;
+    const { id, messages } = await r.json();
+    activeConversationId = id;
+    // Show last AI reply if there is one
+    const lastAI = [...messages].reverse().find(m => m.role === "assistant");
+    if (lastAI) {
+      resultArea.innerHTML = `
+        <div class="result-card">
+          <span class="saved-badge" style="background:#1e1e36;color:#888">↩ Previous conversation</span>
+          <div class="md-body">${renderMarkdown(lastAI.content)}</div>
+        </div>`;
+    }
+  } catch { /* gateway not running yet */ }
+}
+loadActiveConversation();
 
 // ── Tab capture helper ──────────────────────────────────────────────────────
 async function captureTab() {

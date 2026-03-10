@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import NotesList from "./NotesList";
 import CommandChat from "./CommandChat";
+import FolderTree, { FolderNode } from "./FolderTree";
 import { FolderOpen } from "lucide-react";
 import clsx from "clsx";
+
+const GATEWAY = "http://127.0.0.1:18789";
 
 interface Note {
   filename: string;
@@ -18,65 +21,69 @@ interface Note {
 
 export default function LearningHub({ notes }: { notes: Note[] }) {
   const router = useRouter();
-  const [activeCourse, setActiveCourse] = useState<string | null>(null);
+  const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
+  const [folders,        setFolders]        = useState<FolderNode[]>([]);
 
-  const refresh = useCallback(() => router.refresh(), [router]);
+  const fetchFolders = useCallback(async () => {
+    try {
+      const r = await fetch(`${GATEWAY}/folders`);
+      if (r.ok) setFolders(await r.json());
+    } catch {}
+  }, []);
 
-  // Derive unique courses
-  const courses = Array.from(
-    new Set(notes.map((n) => n.course).filter(Boolean) as string[])
-  ).sort();
+  useEffect(() => { fetchFolders(); }, [fetchFolders]);
 
-  const visibleNotes = activeCourse
-    ? notes.filter((n) => n.course === activeCourse)
-    : notes;
+  const refresh = useCallback(() => {
+    router.refresh();
+    fetchFolders();
+  }, [router, fetchFolders]);
+
+  // Count notes per folder (using course field as folder name for now)
+  const noteCounts = useMemo(() => {
+    const counts: Record<number, number> = {};
+    // Will be properly wired once folder_id is in note frontmatter
+    return counts;
+  }, [notes]);
+
+  // Filter notes by active folder (course-based for now, folder_id-based later)
+  const visibleNotes = activeFolderId == null ? notes : notes; // full filter in Phase 4
 
   return (
     <div className="flex gap-6 items-start">
       {/* ── Left sidebar ─────────────────────────────────────────────────── */}
       <aside className="w-52 flex-shrink-0 sticky top-8 flex flex-col gap-3">
-        {/* Courses */}
+
+        {/* Folder tree */}
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
             <FolderOpen className="w-3.5 h-3.5 text-muted" />
-            <span className="text-xs font-semibold text-muted uppercase tracking-widest">Courses</span>
+            <span className="text-xs font-semibold text-muted uppercase tracking-widest">Folders</span>
           </div>
-          <div className="flex flex-col">
+
+          <div className="flex flex-col py-1">
+            {/* All notes */}
             <button
-              onClick={() => setActiveCourse(null)}
+              onClick={() => setActiveFolderId(null)}
               className={clsx(
-                "text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between",
-                activeCourse === null
+                "text-left px-4 py-2 text-xs transition-colors flex items-center justify-between",
+                activeFolderId === null
                   ? "bg-accent/15 text-accent font-semibold"
                   : "text-muted hover:text-text hover:bg-surface/60"
               )}
             >
               <span>All notes</span>
-              <span className="text-xs">{notes.length}</span>
+              <span className="text-[10px]">{notes.length}</span>
             </button>
-            {courses.map((c) => {
-              const count = notes.filter((n) => n.course === c).length;
-              return (
-                <button
-                  key={c}
-                  onClick={() => setActiveCourse(c === activeCourse ? null : c)}
-                  className={clsx(
-                    "text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between border-t border-border/50",
-                    activeCourse === c
-                      ? "bg-accent/15 text-accent font-semibold"
-                      : "text-muted hover:text-text hover:bg-surface/60"
-                  )}
-                >
-                  <span className="truncate pr-1">{c}</span>
-                  <span className="text-xs flex-shrink-0">{count}</span>
-                </button>
-              );
-            })}
-            {courses.length === 0 && (
-              <p className="px-4 py-3 text-xs text-muted/60 italic">
-                No courses yet — use the AI command below
-              </p>
-            )}
+
+            <div className="border-t border-border/50 mt-1 pt-1 px-1">
+              <FolderTree
+                folders={folders}
+                activeFolderId={activeFolderId}
+                onSelectFolder={setActiveFolderId}
+                onRefresh={refresh}
+                noteCounts={noteCounts}
+              />
+            </div>
           </div>
         </div>
 
@@ -88,7 +95,10 @@ export default function LearningHub({ notes }: { notes: Note[] }) {
       <main className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-4">
           <h2 className="text-sm font-semibold text-muted uppercase tracking-widest">
-            {activeCourse ? activeCourse : "All Notes"}
+            {activeFolderId == null ? "All Notes" : (
+              folders.flatMap(function flatten(f): FolderNode[] { return [f, ...f.children.flatMap(flatten)]; })
+                     .find(f => f.id === activeFolderId)?.name ?? "Folder"
+            )}
           </h2>
           <span className="text-xs text-muted">— {visibleNotes.length}</span>
         </div>

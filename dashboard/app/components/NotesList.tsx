@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
-import { Search, FileText, Mic, Layers, BookOpen, HelpCircle, CreditCard, FolderSymlink, GitMerge } from "lucide-react";
+import { Search, FileText, Mic, Layers, BookOpen, HelpCircle, CreditCard, FolderSymlink, GitMerge, Trash2 } from "lucide-react";
 import clsx from "clsx";
 
 const GATEWAY = "http://127.0.0.1:18789";
@@ -106,6 +106,51 @@ function MoveToButton({ note, courses, onRefresh }: { note: Note; courses: strin
       >✓</button>
       <button
         onClick={() => setOpen(false)}
+        className="text-xs text-muted hover:text-text"
+      >✕</button>
+    </div>
+  );
+}
+
+// ── Delete button ─────────────────────────────────────────────────────────────
+function DeleteButton({ note, onRefresh }: { note: Note; onRefresh: () => void }) {
+  const [confirm, setConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await fetch(`${GATEWAY}/notes/${encodeURIComponent(note.filename)}`, { method: "DELETE" });
+      onRefresh();
+    } catch {}
+    setDeleting(false);
+  }
+
+  if (!confirm) {
+    return (
+      <button
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirm(true); }}
+        title="Delete note"
+        className="opacity-0 group-hover:opacity-100 flex items-center gap-1 text-xs text-muted hover:text-red-400 transition-all px-2 py-0.5 rounded border border-transparent hover:border-red-400/30"
+      >
+        <Trash2 className="w-3 h-3" />
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="flex items-center gap-1"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+    >
+      <span className="text-xs text-red-400">Delete?</span>
+      <button
+        onClick={handleDelete}
+        disabled={deleting}
+        className="text-xs text-red-400 hover:text-red-300 font-bold disabled:opacity-40"
+      >✓</button>
+      <button
+        onClick={() => setConfirm(false)}
         className="text-xs text-muted hover:text-text"
       >✕</button>
     </div>
@@ -393,7 +438,12 @@ export default function NotesList({ notes, onRefresh }: { notes: Note[]; onRefre
                               )}
                             </p>
                           </Link>
-                          {!selectMode && <MoveToButton note={note} courses={courses} onRefresh={onRefresh} />}
+                          {!selectMode && (
+                            <>
+                              <MoveToButton note={note} courses={courses} onRefresh={onRefresh} />
+                              <DeleteButton note={note} onRefresh={onRefresh} />
+                            </>
+                          )}
                         </div>
                       ))}
                     </div>
