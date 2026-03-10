@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Environment — NEVER commit this
+gateway/.env
+**/.env
+**/.env.local
+
+# Next.js
+dashboard/.next/
+dashboard/out/
+
+# Notes — local only, don't commit study content
+notes/
+
+# OS
+.DS_Store
+Thumbs.db
