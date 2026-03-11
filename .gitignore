@@ -16,3 +16,6 @@ notes/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime database — local only
+data/
