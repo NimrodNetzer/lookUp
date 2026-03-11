@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Search, FileText, Mic, Layers, BookOpen, HelpCircle, CreditCard, FolderSymlink, GitMerge, Trash2 } from "lucide-react";
+import { Search, FileText, Mic, Layers, BookOpen, HelpCircle, CreditCard, FolderSymlink, GitMerge, Trash2, Pencil } from "lucide-react";
 import clsx from "clsx";
+import { FolderNode } from "./FolderTree";
 
 const GATEWAY = "http://127.0.0.1:18789";
 
@@ -45,70 +46,110 @@ const DATE_LABELS: Record<DateFilter, string> = {
   all:   "All time",
 };
 
-// ── Move-to inline form ───────────────────────────────────────────────────────
-function MoveToButton({ note, courses, onRefresh }: { note: Note; courses: string[]; onRefresh: () => void }) {
-  const [open,    setOpen]    = useState(false);
-  const [val,     setVal]     = useState(note.course ?? "");
-  const [saving,  setSaving]  = useState(false);
+// ── Flatten folder tree ────────────────────────────────────────────────────────
+function flattenFolders(nodes: FolderNode[], depth = 0): { folder: FolderNode; depth: number }[] {
+  return nodes.flatMap((n) => [{ folder: n, depth }, ...flattenFolders(n.children, depth + 1)]);
+}
 
-  async function save() {
-    if (!val.trim()) return;
-    setSaving(true);
-    try {
-      await fetch(`${GATEWAY}/notes/${encodeURIComponent(note.filename)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ course: val.trim() }),
-      });
-      onRefresh();
-      setOpen(false);
-    } catch {}
-    setSaving(false);
-  }
+// ── Right-click context menu ───────────────────────────────────────────────────
+function ContextMenu({
+  note, x, y, folders, onClose, onStartRename, onAssign,
+}: {
+  note: Note;
+  x: number;
+  y: number;
+  folders: FolderNode[];
+  onClose: () => void;
+  onStartRename: () => void;
+  onAssign: (folderId: number | null) => void;
+}) {
+  const [view, setView] = useState<"menu" | "folders">("menu");
+  const ref = useRef<HTMLDivElement>(null);
+  const flatFolders = useMemo(() => flattenFolders(folders), [folders]);
 
-  if (!open) {
-    return (
-      <button
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(true); }}
-        title="Move to course"
-        className="opacity-0 group-hover:opacity-100 flex items-center gap-1 text-xs text-muted hover:text-accent transition-all px-2 py-0.5 rounded border border-transparent hover:border-accent/30"
-      >
-        <FolderSymlink className="w-3 h-3" />
-        <span>{note.course ? "Move" : "Assign"}</span>
-      </button>
-    );
-  }
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  // Nudge menu inside viewport
+  const [pos, setPos] = useState({ top: y, left: x });
+  useEffect(() => {
+    if (!ref.current) return;
+    const { width, height } = ref.current.getBoundingClientRect();
+    setPos({
+      top:  Math.min(y, window.innerHeight - height - 8),
+      left: Math.min(x, window.innerWidth  - width  - 8),
+    });
+  }, [x, y, view]);
 
   return (
     <div
-      className="flex items-center gap-1"
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      ref={ref}
+      style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
+      className="bg-surface border border-border rounded-xl shadow-2xl overflow-hidden min-w-[190px]"
+      onContextMenu={(e) => e.preventDefault()}
     >
-      <input
-        autoFocus
-        type="text"
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") save();
-          if (e.key === "Escape") setOpen(false);
-        }}
-        placeholder="Course name…"
-        list="course-list"
-        className="w-28 text-xs bg-bg border border-accent/50 rounded px-2 py-0.5 text-text outline-none"
-      />
-      <datalist id="course-list">
-        {courses.map((c) => <option key={c} value={c} />)}
-      </datalist>
-      <button
-        onClick={save}
-        disabled={saving}
-        className="text-xs text-teal hover:text-teal/70 font-bold disabled:opacity-40"
-      >✓</button>
-      <button
-        onClick={() => setOpen(false)}
-        className="text-xs text-muted hover:text-text"
-      >✕</button>
+      {view === "menu" ? (
+        <div className="py-1">
+          <button
+            onClick={() => { onStartRename(); onClose(); }}
+            className="w-full text-left px-4 py-2.5 text-sm text-text hover:bg-accent/10 flex items-center gap-2.5 transition-colors"
+          >
+            <Pencil className="w-3.5 h-3.5 text-muted" />
+            Rename
+          </button>
+          <button
+            onClick={() => setView("folders")}
+            className="w-full text-left px-4 py-2.5 text-sm text-text hover:bg-accent/10 flex items-center gap-2.5 transition-colors"
+          >
+            <FolderSymlink className="w-3.5 h-3.5 text-muted" />
+            Assign to folder
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+            <button
+              onClick={() => setView("menu")}
+              className="text-muted hover:text-text text-sm leading-none px-0.5 transition-colors"
+            >
+              ←
+            </button>
+            <span className="text-xs font-semibold text-muted uppercase tracking-widest">Assign to folder</span>
+          </div>
+          <div className="max-h-56 overflow-y-auto py-1">
+            <button
+              onClick={() => { onAssign(null); onClose(); }}
+              className={clsx(
+                "w-full text-left px-4 py-2 text-sm hover:bg-accent/10 transition-colors italic",
+                !note.folder_id ? "text-accent font-semibold" : "text-muted"
+              )}
+            >
+              None (unattached)
+            </button>
+            {flatFolders.map(({ folder, depth }) => (
+              <button
+                key={folder.id}
+                onClick={() => { onAssign(folder.id); onClose(); }}
+                style={{ paddingLeft: `${16 + depth * 14}px` }}
+                className={clsx(
+                  "w-full text-left text-sm py-2 pr-3 hover:bg-accent/10 transition-colors flex items-center gap-1.5",
+                  note.folder_id === folder.id ? "text-accent font-semibold" : "text-text"
+                )}
+              >
+                📁 {folder.name}
+              </button>
+            ))}
+            {flatFolders.length === 0 && (
+              <p className="text-xs text-muted px-4 py-3">No folders yet</p>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -205,8 +246,50 @@ function MergeBar({
   );
 }
 
+// ── Inline rename input ────────────────────────────────────────────────────────
+function InlineRename({ note, onConfirm, onCancel }: {
+  note: Note;
+  onConfirm: (title: string) => void;
+  onCancel: () => void;
+}) {
+  const [val, setVal] = useState(note.title ?? note.filename);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
+
+  return (
+    <div className="flex items-center gap-1.5 flex-1 min-w-0" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+      <input
+        ref={ref}
+        type="text"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && val.trim()) onConfirm(val.trim());
+          if (e.key === "Escape") onCancel();
+        }}
+        onBlur={() => onCancel()}
+        className="flex-1 min-w-0 bg-bg border border-accent/50 rounded px-2 py-0.5 text-sm text-text outline-none"
+      />
+      <button
+        onMouseDown={(e) => { e.preventDefault(); if (val.trim()) onConfirm(val.trim()); }}
+        className="text-teal hover:text-teal/70 shrink-0 text-xs font-bold"
+      >✓</button>
+      <button
+        onMouseDown={(e) => { e.preventDefault(); onCancel(); }}
+        className="text-muted hover:text-text shrink-0 text-xs"
+      >✕</button>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
-export default function NotesList({ notes, onRefresh }: { notes: Note[]; onRefresh: () => void }) {
+export default function NotesList({
+  notes, folders, onRefresh,
+}: {
+  notes: Note[];
+  folders: FolderNode[];
+  onRefresh: () => void;
+}) {
   const [query,          setQuery]          = useState("");
   const [dateFilter,     setDateFilter]     = useState<DateFilter>("all");
   const [sortMode,       setSortMode]       = useState<SortMode>("date");
@@ -218,10 +301,41 @@ export default function NotesList({ notes, onRefresh }: { notes: Note[]; onRefre
   const [selected,       setSelected]       = useState<Set<string>>(new Set());
   const [mergeError,     setMergeError]     = useState<string | null>(null);
 
-  const courses = useMemo(
-    () => Array.from(new Set(notes.map((n) => n.course).filter(Boolean) as string[])).sort(),
-    [notes]
-  );
+  // Context menu
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; note: Note } | null>(null);
+  // Inline rename
+  const [renamingFilename, setRenamingFilename] = useState<string | null>(null);
+
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  function handleContextMenu(e: React.MouseEvent, note: Note) {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY, note });
+  }
+
+  async function handleRenameNote(note: Note, title: string) {
+    try {
+      await fetch(`${GATEWAY}/notes/${encodeURIComponent(note.filename)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      onRefresh();
+    } catch {}
+    setRenamingFilename(null);
+  }
+
+  async function handleAssignFolder(note: Note, folderId: number | null) {
+    try {
+      await fetch(`${GATEWAY}/notes/${encodeURIComponent(note.filename)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folder_id: folderId }),
+      });
+      onRefresh();
+    } catch {}
+  }
 
   const groups = useMemo(() => {
     const now   = new Date();
@@ -405,51 +519,60 @@ export default function NotesList({ notes, onRefresh }: { notes: Note[]; onRefre
 
                   {expanded && (
                     <div className="border-t border-border">
-                      {groupNotes.map((note) => (
-                        <div key={note.filename}
-                          draggable={!selectMode}
-                          onDragStart={(e) => { e.dataTransfer.setData("text/plain", note.filename); e.dataTransfer.effectAllowed = "move"; }}
-                          onClick={selectMode ? () => toggleNote(note.filename) : undefined}
-                          className={clsx(
-                            "group flex items-center gap-3 px-4 py-3 hover:bg-surface/40 transition-colors border-b border-border last:border-b-0",
-                            !selectMode && "cursor-grab active:cursor-grabbing",
-                            selectMode && "cursor-pointer",
-                            selectMode && selected.has(note.filename) && "bg-accent/10"
-                          )}>
-                          {selectMode && (
-                            <input
-                              type="checkbox"
-                              readOnly
-                              checked={selected.has(note.filename)}
-                              className="w-4 h-4 accent-[#7c6af5] shrink-0 pointer-events-none"
-                            />
-                          )}
-                          <Link
-                            href={selectMode ? "#" : `/note/${encodeURIComponent(note.filename)}`}
-                            onClick={selectMode ? (e) => e.preventDefault() : undefined}
-                            className="flex-1 min-w-0"
-                          >
-                            <p className="text-sm font-medium text-text truncate">{note.title ?? note.filename}</p>
-                            <p className="text-xs text-muted mt-0.5 flex items-center gap-2">
-                              <span>{new Date(note.modified).toLocaleString()}</span>
-                              <span>·</span>
-                              <span>{(note.size / 1024).toFixed(1)} KB</span>
-                              {note.course && (
-                                <>
+                      {groupNotes.map((note) => {
+                        const isRenaming = renamingFilename === note.filename;
+                        return (
+                          <div key={note.filename}
+                            draggable={!selectMode && !isRenaming}
+                            onDragStart={(e) => { e.dataTransfer.setData("text/plain", note.filename); e.dataTransfer.effectAllowed = "move"; }}
+                            onClick={selectMode ? () => toggleNote(note.filename) : undefined}
+                            onContextMenu={!selectMode ? (e) => handleContextMenu(e, note) : undefined}
+                            className={clsx(
+                              "group flex items-center gap-3 px-4 py-3 hover:bg-surface/40 transition-colors border-b border-border last:border-b-0",
+                              !selectMode && !isRenaming && "cursor-grab active:cursor-grabbing",
+                              selectMode && "cursor-pointer",
+                              selectMode && selected.has(note.filename) && "bg-accent/10"
+                            )}>
+                            {selectMode && (
+                              <input
+                                type="checkbox"
+                                readOnly
+                                checked={selected.has(note.filename)}
+                                className="w-4 h-4 accent-[#7c6af5] shrink-0 pointer-events-none"
+                              />
+                            )}
+                            {isRenaming ? (
+                              <InlineRename
+                                note={note}
+                                onConfirm={(title) => handleRenameNote(note, title)}
+                                onCancel={() => setRenamingFilename(null)}
+                              />
+                            ) : (
+                              <Link
+                                href={selectMode ? "#" : `/?note=${encodeURIComponent(note.filename)}`}
+                                onClick={selectMode ? (e) => e.preventDefault() : undefined}
+                                className="flex-1 min-w-0"
+                              >
+                                <p className="text-sm font-medium text-text truncate">{note.title ?? note.filename}</p>
+                                <p className="text-xs text-muted mt-0.5 flex items-center gap-2">
+                                  <span>{new Date(note.modified).toLocaleString()}</span>
                                   <span>·</span>
-                                  <span className="text-accent/70 font-medium">{note.course}</span>
-                                </>
-                              )}
-                            </p>
-                          </Link>
-                          {!selectMode && (
-                            <>
-                              <MoveToButton note={note} courses={courses} onRefresh={onRefresh} />
+                                  <span>{(note.size / 1024).toFixed(1)} KB</span>
+                                  {note.course && (
+                                    <>
+                                      <span>·</span>
+                                      <span className="text-accent/70 font-medium">{note.course}</span>
+                                    </>
+                                  )}
+                                </p>
+                              </Link>
+                            )}
+                            {!selectMode && !isRenaming && (
                               <DeleteButton note={note} onRefresh={onRefresh} />
-                            </>
-                          )}
-                        </div>
-                      ))}
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -457,6 +580,19 @@ export default function NotesList({ notes, onRefresh }: { notes: Note[]; onRefre
             })}
           </div>
         </>
+      )}
+
+      {/* Context menu */}
+      {ctxMenu && (
+        <ContextMenu
+          note={ctxMenu.note}
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          folders={folders}
+          onClose={closeCtxMenu}
+          onStartRename={() => setRenamingFilename(ctxMenu.note.filename)}
+          onAssign={(folderId) => handleAssignFolder(ctxMenu.note, folderId)}
+        />
       )}
     </div>
   );

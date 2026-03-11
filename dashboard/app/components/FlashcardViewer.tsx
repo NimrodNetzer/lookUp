@@ -53,7 +53,6 @@ export default function FlashcardViewer({ cards }: { cards: Card[] }) {
               </div>
             </div>
             <p className="text-center text-xs text-muted mt-1.5">
-              {flipped.has(i) ? "Click to hide answer" : "Click to reveal answer"}
             </p>
           </div>
         ))}
