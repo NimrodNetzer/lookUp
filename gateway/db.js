@@ -21,7 +21,25 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS folders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    parent_id  INTEGER REFERENCES folders(id) ON DELETE CASCADE,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS conversations (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    title      TEXT,
+    messages   TEXT NOT NULL DEFAULT '[]',
+    folder_id  INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
 `);
+
+// ── Activity ─────────────────────────────────────────────────────────────────
 
 /** Record one capture event for today */
 export function logActivity() {
@@ -59,7 +77,6 @@ export function getStreak() {
       streak++;
       cursor.setDate(cursor.getDate() - 1);
     } else if (streak === 0 && date === new Date(Date.now() - 86400000).toISOString().slice(0, 10)) {
-      // Allow streak to start from yesterday if nothing today yet
       streak++;
       cursor.setDate(cursor.getDate() - 1);
     } else {
@@ -68,6 +85,8 @@ export function getStreak() {
   }
   return streak;
 }
+
+// ── Settings ─────────────────────────────────────────────────────────────────
 
 /** Get or set a setting value */
 export function getSetting(key, fallback = null) {
@@ -80,6 +99,97 @@ export function setSetting(key, value) {
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `).run(key, String(value));
+}
+
+// ── Folders ──────────────────────────────────────────────────────────────────
+
+/** Return the full folder tree as nested objects */
+export function getFolderTree() {
+  const rows = db.prepare("SELECT id, name, parent_id FROM folders ORDER BY name ASC").all();
+  const map = new Map();
+  for (const r of rows) map.set(r.id, { ...r, children: [] });
+  const roots = [];
+  for (const node of map.values()) {
+    if (node.parent_id == null) roots.push(node);
+    else map.get(node.parent_id)?.children.push(node);
+  }
+  return roots;
+}
+
+/** Return a flat list of all folders {id, name, parent_id} */
+export function getFoldersFlat() {
+  return db.prepare("SELECT id, name, parent_id FROM folders ORDER BY name ASC").all();
+}
+
+export function getFolderById(id) {
+  return db.prepare("SELECT * FROM folders WHERE id = ?").get(id);
+}
+
+export function createFolder(name, parentId = null) {
+  const result = db.prepare(
+    "INSERT INTO folders (name, parent_id) VALUES (?, ?)"
+  ).run(name, parentId ?? null);
+  return db.prepare("SELECT * FROM folders WHERE id = ?").get(result.lastInsertRowid);
+}
+
+export function renameFolder(id, name) {
+  db.prepare("UPDATE folders SET name = ? WHERE id = ?").run(name, id);
+}
+
+export function deleteFolder(id) {
+  db.prepare("DELETE FROM folders WHERE id = ?").run(id);
+}
+
+// ── Conversations ─────────────────────────────────────────────────────────────
+
+export function listConversations() {
+  return db.prepare(
+    "SELECT id, title, folder_id, created_at, updated_at FROM conversations ORDER BY updated_at DESC"
+  ).all();
+}
+
+export function getConversation(id) {
+  const row = db.prepare("SELECT * FROM conversations WHERE id = ?").get(id);
+  if (!row) return null;
+  return { ...row, messages: JSON.parse(row.messages) };
+}
+
+/** Returns the most recently updated conversation, creating one if none exists */
+export function getActiveConversation() {
+  let row = db.prepare(
+    "SELECT * FROM conversations ORDER BY updated_at DESC LIMIT 1"
+  ).get();
+  if (!row) {
+    const result = db.prepare(
+      "INSERT INTO conversations (title, messages) VALUES (?, '[]')"
+    ).run("New conversation");
+    row = db.prepare("SELECT * FROM conversations WHERE id = ?").get(result.lastInsertRowid);
+  }
+  return { ...row, messages: JSON.parse(row.messages) };
+}
+
+export function createConversation(title = "New conversation", folderId = null) {
+  const result = db.prepare(
+    "INSERT INTO conversations (title, messages, folder_id) VALUES (?, '[]', ?)"
+  ).run(title, folderId ?? null);
+  return db.prepare("SELECT * FROM conversations WHERE id = ?").get(result.lastInsertRowid);
+}
+
+export function saveConversation(id, messages, title = null) {
+  const now = new Date().toISOString();
+  if (title) {
+    db.prepare(
+      "UPDATE conversations SET messages = ?, title = ?, updated_at = ? WHERE id = ?"
+    ).run(JSON.stringify(messages), title, now, id);
+  } else {
+    db.prepare(
+      "UPDATE conversations SET messages = ?, updated_at = ? WHERE id = ?"
+    ).run(JSON.stringify(messages), now, id);
+  }
+}
+
+export function deleteConversation(id) {
+  db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
 }
 
 export default db;

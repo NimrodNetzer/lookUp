@@ -30,9 +30,6 @@ One paragraph stating what this is about and why it matters.
 - **Term or concept**: Clear, brief explanation
 (Include 4–8 bullet points covering the most important ideas)
 
-## Formulas & Equations
-(Only if math is present — use LaTeX: inline $...$ or block $$...$$)
-
 ## Connections
 1–2 sentences on how this topic connects to broader ideas or other concepts.`,
 
@@ -109,13 +106,15 @@ export async function analyzeScreenshot(base64Image, mimeType = "image/png", mod
 }
 
 /**
- * Analyze multiple screenshots in one message (session mode)
+ * Analyze multiple screenshots with any mode prompt
  */
-export async function analyzeSession(frames) {
+export async function analyzeMulti(frames, mode = "session") {
   const imageContent = frames.map(({ base64, mimeType = "image/png" }) => ({
     type: "image_url",
     image_url: { url: `data:${mimeType};base64,${base64}` },
   }));
+
+  const prompt = modePrompts[mode] ?? modePrompts.session;
 
   const response = await groq.chat.completions.create({
     model: "meta-llama/llama-4-scout-17b-16e-instruct",
@@ -123,12 +122,33 @@ export async function analyzeSession(frames) {
       { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
-        content: [...imageContent, { type: "text", text: modePrompts.session }],
+        content: [...imageContent, { type: "text", text: prompt }],
       },
     ],
     temperature: 0.4,
   });
 
+  return response.choices[0].message.content;
+}
+
+/**
+ * Answer a specific user question about a screenshot
+ */
+export async function analyzeWithQuestion(base64Image, mimeType = "image/png", question) {
+  const response = await groq.chat.completions.create({
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+          { type: "text", text: question },
+        ],
+      },
+    ],
+    temperature: 0.4,
+  });
   return response.choices[0].message.content;
 }
 
@@ -194,4 +214,64 @@ export async function transcribeAndSummarize(audioBuffer, mode = "summary") {
   });
 
   return { transcript, markdown: response.choices[0].message.content };
+}
+
+/**
+ * Multi-turn chat — messages is [{role:"user"|"assistant", content:string}]
+ */
+export async function chat(messages) {
+  const response = await groq.chat.completions.create({
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...messages,
+    ],
+    temperature: 0.6,
+  });
+  return response.choices[0].message.content;
+}
+
+/**
+ * Process a natural-language organisation command.
+ * Returns a JSON string (array of action objects).
+ */
+export async function processCommand(command, notes, preferences) {
+  const list = notes
+    .slice(0, 60)
+    .map(n => `{"f":"${n.filename}","t":"${n.title}","m":"${n.mode}","c":"${n.course || ""}","d":"${(n.date || "").slice(0, 10)}"}`)
+    .join("\n");
+
+  const prompt = `You manage a student's LookUp study notes. Execute the command below by returning a JSON array of actions.
+
+NOTES (newest first):
+${list}
+
+USER PREFERENCES:
+${preferences || "none"}
+
+COMMAND: "${command}"
+
+ACTION TYPES (return as JSON array, pick what applies):
+{"action":"set_course","filename":"exact_filename.md","course":"Course Name"}
+{"action":"rename","filename":"exact_filename.md","title":"New Title"}
+{"action":"merge","filenames":["file1.md","file2.md"],"title":"Combined Note Title"}
+{"action":"message","text":"plain-English explanation if nothing to do or command is unclear"}
+
+RULES:
+- Use ONLY exact filenames from the list above
+- Course names should be title-cased clean strings, e.g. "Operating Systems"
+- For "last N captures" use the N most recent filenames
+- Apply user preferences (e.g. prefix rules) when renaming
+- For merge: include at least 2 filenames; pick a meaningful combined title
+- Return ONLY a valid JSON array, no markdown fences, no extra text
+
+JSON array:`;
+
+  const response = await groq.chat.completions.create({
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.1,
+  });
+
+  return response.choices[0].message.content;
 }

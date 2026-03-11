@@ -9,8 +9,8 @@
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f0f13;
-      color: #e8e8f0;
+      background: #1c1c28;
+      color: #eeeef8;
       height: 100vh;
       display: flex;
       flex-direction: column;
@@ -20,7 +20,7 @@
     /* ── HEADER ─────────────────────────────── */
     header {
       padding: 10px 14px;
-      border-bottom: 1px solid #1e1e2e;
+      border-bottom: 1px solid #2c2c42;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -33,19 +33,19 @@
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
-    .btn-dashboard {
-      margin-left: auto;
+    .btn-dashboard, .btn-chat {
       background: none;
-      border: 1px solid #2a2a3e;
+      border: 1px solid #38385a;
       border-radius: 6px;
-      color: #666;
+      color: #888;
       cursor: pointer;
       padding: 3px 8px;
       font-size: 12px;
       line-height: 1;
       transition: border-color 0.18s, color 0.18s;
     }
-    .btn-dashboard:hover { border-color: #7c6af5; color: #ccc; }
+    .btn-dashboard { margin-left: auto; }
+    .btn-dashboard:hover, .btn-chat:hover { border-color: #7c6af5; color: #ddd; }
     .status-dot {
       width: 7px; height: 7px;
       border-radius: 50%;
@@ -57,7 +57,7 @@
     /* ── TOOLBAR ────────────────────────────── */
     .toolbar {
       padding: 8px 12px 7px;
-      border-bottom: 1px solid #1e1e2e;
+      border-bottom: 1px solid #2c2c42;
       display: flex;
       flex-direction: column;
       gap: 6px;
@@ -76,10 +76,10 @@
       align-items: center;
       gap: 6px;
       padding: 6px 9px;
-      background: #1a1a2e;
-      border: 1px solid #2a2a3e;
+      background: #23233a;
+      border: 1px solid #38385a;
       border-radius: 8px;
-      color: #e8e8f0;
+      color: #eeeef8;
       cursor: pointer;
       font-size: 12px;
       font-weight: 600;
@@ -109,8 +109,8 @@
       top: calc(100% + 4px);
       left: 0;
       width: 230px;
-      background: #1a1a2e;
-      border: 1px solid #2a2a3e;
+      background: #23233a;
+      border: 1px solid #38385a;
       border-radius: 12px;
       padding: 6px;
       z-index: 100;
@@ -131,15 +131,15 @@
       cursor: pointer;
       transition: background 0.15s;
     }
-    .dropdown-item:hover  { background: #23233a; }
-    .dropdown-item.active { background: #23233a; }
+    .dropdown-item:hover  { background: #2e2e4a; }
+    .dropdown-item.active { background: #2e2e4a; }
     .dropdown-item .d-icon  { font-size: 15px; width: 22px; text-align: center; flex-shrink: 0; }
     .dropdown-item .d-text  { flex: 1; }
-    .dropdown-item .d-name  { font-size: 12px; font-weight: 700; color: #e8e8f0; display: block; }
-    .dropdown-item .d-desc  { font-size: 10px; color: #666; display: block; margin-top: 1px; }
+    .dropdown-item .d-name  { font-size: 12px; font-weight: 700; color: #eeeef8; display: block; }
+    .dropdown-item .d-desc  { font-size: 10px; color: #888; display: block; margin-top: 1px; }
     .dropdown-item .d-check { font-size: 11px; color: #7c6af5; opacity: 0; flex-shrink: 0; }
     .dropdown-item.active .d-check { opacity: 1; }
-    .dropdown-divider { height: 1px; background: #2a2a3e; margin: 4px; }
+    .dropdown-divider { height: 1px; background: #38385a; margin: 4px; }
 
     /* Capture button */
     .btn-capture {
@@ -164,10 +164,10 @@
       padding: 6px 9px;
       font-size: 11px;
       font-weight: 700;
-      border: 1px solid #2a2a3e;
+      border: 1px solid #38385a;
       border-radius: 8px;
       background: transparent;
-      color: #888;
+      color: #aaa;
       cursor: pointer;
       transition: all 0.18s;
       white-space: nowrap;
@@ -176,24 +176,51 @@
     .btn-session:hover  { border-color: #7c6af5; color: #ccc; }
     .btn-session.hidden { display: none; }
 
-    /* Title input */
-    .title-inline {
-      width: 100%;
-      padding: 4px 8px;
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: 6px;
-      color: #555;
-      font-size: 11px;
+    /* ── CHAT INPUT BAR (bottom) ─────────────── */
+    .chat-input-bar {
+      padding: 8px 12px 12px;
+      border-top: 1px solid #2c2c42;
+      flex-shrink: 0;
+    }
+    .chat-input-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #23233a;
+      border: 1px solid #38385a;
+      border-radius: 16px;
+      padding: 8px 8px 8px 14px;
+      transition: border-color 0.2s;
+    }
+    .chat-input-wrap:focus-within { border-color: #7c6af5; }
+    .chat-input {
+      flex: 1;
+      background: none;
+      border: none;
+      color: #777;
+      font-size: 13px;
       outline: none;
-      transition: border-color 0.2s, color 0.2s, background 0.2s;
+      min-width: 0;
+      transition: color 0.2s;
     }
-    .title-inline:focus {
-      border-color: #2a2a3e;
-      background: #1a1a2e;
-      color: #e8e8f0;
+    .chat-input::placeholder { color: #484868; font-size: 13px; }
+    .chat-input:focus { color: #eeeef8; }
+    .chat-send-btn {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      background: #7c6af5;
+      border: none;
+      color: #fff;
+      font-size: 15px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: opacity 0.15s, transform 0.1s;
+      line-height: 1;
     }
-    .title-inline::placeholder { color: #2e2e44; }
+    .chat-send-btn:hover  { opacity: 0.85; }
+    .chat-send-btn:active { transform: scale(0.92); }
+    .chat-send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
     /* ── SELECTION BAR ───────────────────────── */
     .selection-bar {
@@ -248,8 +275,8 @@
       align-items: center;
       gap: 8px;
       padding: 7px 12px;
-      background: #12122a;
-      border-bottom: 1px solid #1e1e2e;
+      background: #1e1e36;
+      border-bottom: 1px solid #2c2c42;
       font-size: 12px;
       flex-shrink: 0;
     }
@@ -262,8 +289,20 @@
       font-size: 11px;
       font-weight: 700;
     }
-    .session-finish {
+    .session-addpage {
       margin-left: auto;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      border: none;
+      border-radius: 6px;
+      background: #7c6af5;
+      color: #fff;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .session-addpage:hover { opacity: 0.85; }
+    .session-finish {
       padding: 4px 11px;
       font-size: 11px;
       font-weight: 700;
@@ -311,12 +350,12 @@
     /* ── RESULT AREA ────────────────────────── */
     .result-area { flex: 1; overflow-y: auto; padding: 12px; }
     .placeholder {
-      color: #333; font-size: 12px;
+      color: #666; font-size: 12px;
       text-align: center; margin-top: 32px; line-height: 1.8;
     }
     .result-card {
-      background: #1a1a2e;
-      border: 1px solid #2a2a3e;
+      background: #23233a;
+      border: 1px solid #38385a;
       border-radius: 11px;
       padding: 14px;
     }
@@ -346,41 +385,69 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ── MARKDOWN BODY ──────────────────────── */
-    .md-body { font-size: 12px; line-height: 1.65; word-break: break-word; }
+    .md-body { font-size: 14px; line-height: 1.7; word-break: break-word; }
     .md-body .md-h2 {
-      font-size: 13px; font-weight: 700; color: #a89af5;
-      margin: 14px 0 5px;
+      font-size: 15px; font-weight: 700; color: #a89af5;
+      margin: 16px 0 6px;
       padding-bottom: 4px;
-      border-bottom: 1px solid #2a2a3e;
+      border-bottom: 1px solid #38385a;
     }
     .md-body .md-h2:first-child { margin-top: 0; }
-    .md-body .md-h3 { font-size: 12px; font-weight: 700; color: #7c6af5; margin: 10px 0 3px; }
+    .md-body .md-h3 { font-size: 14px; font-weight: 700; color: #7c6af5; margin: 12px 0 4px; }
     .md-body .md-h4 {
-      font-size: 10px; font-weight: 700; color: #666;
+      font-size: 11px; font-weight: 700; color: #666;
       margin: 8px 0 2px; text-transform: uppercase; letter-spacing: 0.06em;
     }
-    .md-body .md-p  { margin: 4px 0; }
-    .md-body .md-gap { height: 5px; }
-    .md-body .md-ul { margin: 4px 0 4px 16px; list-style: disc; }
-    .md-body .md-ol { margin: 4px 0 4px 16px; list-style: decimal; }
-    .md-body li { margin: 3px 0; }
+    .md-body .md-p  { margin: 5px 0; }
+    .md-body .md-gap { height: 6px; }
+    .md-body .md-ul { margin: 5px 0 5px 18px; list-style: disc; }
+    .md-body .md-ol { margin: 5px 0 5px 18px; list-style: decimal; }
+    .md-body li { margin: 4px 0; }
     .md-body strong { color: #ddd8ff; font-weight: 700; }
     .md-body em     { color: #a8b8ff; font-style: italic; }
     .md-body .md-code {
-      background: #0a0a1a; padding: 1px 5px; border-radius: 3px;
-      font-size: 11px; font-family: monospace; color: #5eead4;
+      background: #14142a; padding: 2px 6px; border-radius: 3px;
+      font-size: 12.5px; font-family: monospace; color: #5eead4;
     }
     .md-body .md-pre {
-      background: #0a0a1a; border: 1px solid #1e1e2e;
-      border-radius: 7px; padding: 10px; margin: 8px 0; overflow-x: auto;
+      background: #14142a; border: 1px solid #2c2c42;
+      border-radius: 7px; padding: 12px; margin: 10px 0; overflow-x: auto;
     }
-    .md-body .md-pre code { background: none; padding: 0; color: #a7f3d0; font-size: 10.5px; font-family: monospace; }
+    .md-body .md-pre code { background: none; padding: 0; color: #a7f3d0; font-size: 12px; font-family: monospace; }
     .md-body .md-bq {
       border-left: 3px solid #7c6af5;
-      padding: 3px 10px; color: #888; margin: 5px 0;
-      font-style: italic; background: #14142a; border-radius: 0 4px 4px 0;
+      padding: 3px 10px; color: #aaa; margin: 5px 0;
+      font-style: italic; background: #1e1e36; border-radius: 0 4px 4px 0;
     }
-    .md-body .md-hr { border: none; border-top: 1px solid #2a2a3e; margin: 10px 0; }
+    .md-body .md-hr { border: none; border-top: 1px solid #38385a; margin: 10px 0; }
+
+    /* ── QUIZ ───────────────────────────────── */
+    .quiz-block {
+      margin-bottom: 14px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid #38385a;
+    }
+    .quiz-block:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+    .quiz-question { margin-bottom: 7px; }
+    .quiz-reveal-btn {
+      padding: 3px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      border: 1px solid #f59e0b;
+      border-radius: 6px;
+      background: transparent;
+      color: #f59e0b;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-bottom: 7px;
+    }
+    .quiz-reveal-btn:hover { background: rgba(245,158,11,0.12); }
+    .quiz-answer {
+      background: #2e2e48;
+      border-left: 3px solid #7c6af5;
+      padding: 8px 12px;
+      border-radius: 0 6px 6px 0;
+    }
 
     /* ── FLASHCARDS ─────────────────────────── */
     .flashcard-grid { display: flex; flex-direction: column; gap: 10px; }
@@ -397,8 +464,8 @@
       font-size: 12px; line-height: 1.5;
       backface-visibility: hidden; -webkit-backface-visibility: hidden;
     }
-    .flashcard-front { background: #1a1a2e; border: 1px solid #7c6af5; font-weight: 600; }
-    .flashcard-back  { background: #1a2a1a; border: 1px solid #5eead4; color: #a7f3d0; transform: rotateY(180deg); }
+    .flashcard-front { background: #26264a; border: 1px solid #7c6af5; font-weight: 600; }
+    .flashcard-back  { background: #1e342e; border: 1px solid #5eead4; color: #a7f3d0; transform: rotateY(180deg); }
     .card-hint { font-size: 10px; color: #444; text-align: center; margin-top: 4px; }
   </style>
 </head>
@@ -409,6 +476,7 @@
     <h1>LookUp</h1>
     <span style="font-size:10px;color:#444">Study Sensei</span>
     <button class="btn-dashboard" id="dashboardBtn" title="Open dashboard">📊</button>
+    <button class="btn-chat" id="chatExpandBtn" title="Open full chat">💬</button>
     <div class="status-dot" id="statusDot"></div>
   </header>
 
@@ -470,12 +538,10 @@
       <!-- Capture button (in toolbar) -->
       <button class="btn-capture" id="captureBtn">⚡ Capture</button>
 
-      <!-- Session button -->
-      <button class="btn-session" id="sessionBtn">+ Session</button>
+      <!-- Multi-page button -->
+      <button class="btn-session" id="sessionBtn">+ Multi</button>
     </div>
 
-    <!-- Title input — subtle, optional -->
-    <input class="title-inline" id="titleInput" type="text" placeholder="Note title (optional)…" maxlength="80" />
   </div>
 
   <!-- SELECTION BAR — appears when user selects text on page -->
@@ -486,11 +552,12 @@
     <button class="selection-dismiss" id="selectionDismiss">✕</button>
   </div>
 
-  <!-- SESSION BAR -->
+  <!-- MULTI-PAGE BAR -->
   <div class="session-bar" id="sessionBar">
-    <span>Session:</span>
-    <span class="session-count" id="sessionCount">0 slides</span>
-    <button class="session-finish" id="sessionFinish">Finish &amp; Summarize</button>
+    <span>Multi:</span>
+    <span class="session-count" id="sessionCount">0 pages</span>
+    <button class="session-addpage" id="addPageBtn">➕ Add Page</button>
+    <button class="session-finish" id="sessionFinish">Done ✓</button>
     <button class="session-cancel" id="sessionCancel">✕</button>
   </div>
 
@@ -508,6 +575,14 @@
       Choose a mode, then hit <strong>⚡ Capture</strong>.<br>
       Or select text on any page to <strong>Ask</strong> about it.
     </p>
+  </div>
+
+  <!-- CHAT INPUT BAR (bottom) -->
+  <div class="chat-input-bar">
+    <div class="chat-input-wrap">
+      <input class="chat-input" id="titleInput" type="text" placeholder="Ask a question… or leave empty to capture" maxlength="120" />
+      <button class="chat-send-btn" id="chatSendBtn">↑</button>
+    </div>
   </div>
 
   <script src="sidepanel.js"></script>
