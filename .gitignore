@@ -13,6 +13,9 @@ dashboard/out/
 # Notes — local only, don't commit study content
 notes/
 
+# Runtime database — local only
+data/
+
 # OS
 .DS_Store
 Thumbs.db
