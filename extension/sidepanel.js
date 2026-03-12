@@ -135,10 +135,24 @@ async function sendChatMessage() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
     if (data.conversationId) activeConversationId = data.conversationId;
+    const isQuiz = data.reply.includes("**Answer:**");
     appendCard(`
       <div class="result-card">
-        <div class="md-body">${renderMarkdown(data.reply)}</div>
-      </div>`);
+        ${isQuiz ? renderQuiz(data.reply) : `<div class="md-body">${renderMarkdown(data.reply)}</div>`}
+      </div>`,
+      isQuiz ? () => {
+        resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
+          btn.dataset.bound = "1";
+          btn.addEventListener("click", () => {
+            const el = document.getElementById(btn.dataset.answerId);
+            if (!el) return;
+            const hidden = el.style.display === "none";
+            el.style.display = hidden ? "block" : "none";
+            btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+          });
+        });
+      } : null
+    );
     loadConversations(); // refresh tab titles
   } catch (err) { showError(err.message); }
   titleInput.disabled = false;
@@ -778,7 +792,13 @@ function escapeHtml(str = "") {
 
 // ── Quiz renderer — shows questions with hidden answers ──────────────────────
 function renderQuiz(markdown) {
-  const blocks = markdown.split(/\n---\n/);
+  let blocks = markdown.split(/\n[ \t]*---[ \t]*\n/);
+
+  // If no --- separators but multiple **Answer:** found, split at question boundaries (**Q1., **Q2. etc.)
+  if (blocks.length <= 1 && (markdown.match(/\*\*Answer:\*\*/g) ?? []).length > 1) {
+    blocks = markdown.split(/\n\n(?=\*\*Q\d)/);
+  }
+
   let html = "";
   let qNum = 0;
   const quizPrefix = `qz${++_uid}`;
