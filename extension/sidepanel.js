@@ -42,6 +42,21 @@ const tabResults        = new Map(); // conversationId → saved resultArea inne
 let _uid = 0; // unique ID counter for quiz/flashcard elements
 const SPINNER_ID = "inlineSpinner";
 
+// ── Tab bar scroll arrows ─────────────────────────────────────────────────────
+const tabsArrowLeft  = document.getElementById("tabsArrowLeft");
+const tabsArrowRight = document.getElementById("tabsArrowRight");
+
+function updateTabArrows() {
+  const { scrollLeft, scrollWidth, clientWidth } = convTabs;
+  tabsArrowLeft.classList.toggle("visible",  scrollLeft > 2);
+  tabsArrowRight.classList.toggle("visible", scrollLeft + clientWidth < scrollWidth - 2);
+}
+
+tabsArrowLeft.addEventListener("click",  () => { convTabs.scrollBy({ left: -80, behavior: "smooth" }); });
+tabsArrowRight.addEventListener("click", () => { convTabs.scrollBy({ left:  80, behavior: "smooth" }); });
+convTabs.addEventListener("scroll", updateTabArrows);
+new ResizeObserver(updateTabArrows).observe(convTabs);
+
 // ── Dashboard / Chat links ───────────────────────────────────────────────────
 dashboardBtn.addEventListener("click", () => {
   chrome.tabs.create({ url: "http://localhost:3000" });
@@ -162,6 +177,7 @@ function renderConvTabs() {
 
     convTabs.insertBefore(tab, newConvBtn);
   }
+  updateTabArrows();
 }
 
 async function loadConversations() {
