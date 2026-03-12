@@ -175,6 +175,11 @@ export function createConversation(title = "New conversation", folderId = null) 
   return db.prepare("SELECT * FROM conversations WHERE id = ?").get(result.lastInsertRowid);
 }
 
+export function touchConversation(id) {
+  const now = new Date().toISOString();
+  db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(now, id);
+}
+
 export function saveConversation(id, messages, title = null) {
   const now = new Date().toISOString();
   if (title) {
@@ -190,6 +195,11 @@ export function saveConversation(id, messages, title = null) {
 
 export function deleteConversation(id) {
   db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+}
+
+export function renameConversation(id, title) {
+  db.prepare("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?")
+    .run(title, new Date().toISOString(), id);
 }
 
 export default db;
