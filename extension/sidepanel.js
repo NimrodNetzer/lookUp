@@ -190,17 +190,10 @@ function renderConvTabs() {
     label.textContent = conv.title ?? "New conversation";
     tab.appendChild(label);
 
-    const delBtn = document.createElement("span");
-    delBtn.className = "tab-del";
-    delBtn.textContent = "×";
-    delBtn.title = "Delete conversation";
-    delBtn.addEventListener("click", (e) => { e.stopPropagation(); deleteConvTab(conv.id); });
-    tab.appendChild(delBtn);
-
     tab.addEventListener("click", () => switchConversation(conv.id));
     tab.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      showTabContextMenu(e.clientX, e.clientY, conv.id, conv.title ?? "New conversation", label, delBtn);
+      showTabContextMenu(e.clientX, e.clientY, conv.id, conv.title ?? "New conversation", label);
     });
 
     // ── Drag to reorder / merge ──
@@ -354,7 +347,7 @@ async function mergeConvTabs(targetId, sourceId) {
   } catch (err) { console.error(err); }
 }
 
-function showTabContextMenu(x, y, convId, currentTitle, labelEl, delEl) {
+function showTabContextMenu(x, y, convId, currentTitle, labelEl) {
   document.getElementById("tabCtxMenu")?.remove();
 
   const menu = document.createElement("div");
@@ -363,12 +356,21 @@ function showTabContextMenu(x, y, convId, currentTitle, labelEl, delEl) {
   menu.style.left = x + "px";
   menu.style.top = y + "px";
 
+  const deleteItem = document.createElement("div");
+  deleteItem.className = "tab-ctx-item tab-ctx-delete";
+  deleteItem.textContent = "🗑️  Delete";
+  deleteItem.addEventListener("click", () => {
+    menu.remove();
+    deleteConvTab(convId);
+  });
+  menu.appendChild(deleteItem);
+
   const renameItem = document.createElement("div");
   renameItem.className = "tab-ctx-item";
   renameItem.textContent = "✏️  Rename";
   renameItem.addEventListener("click", () => {
     menu.remove();
-    startInlineRename(convId, currentTitle, labelEl, delEl);
+    startInlineRename(convId, currentTitle, labelEl);
   });
   menu.appendChild(renameItem);
 
@@ -386,9 +388,8 @@ function showTabContextMenu(x, y, convId, currentTitle, labelEl, delEl) {
   }, 0);
 }
 
-function startInlineRename(convId, currentTitle, labelEl, delEl) {
+function startInlineRename(convId, currentTitle, labelEl) {
   labelEl.style.display = "none";
-  delEl.style.display = "none";
 
   const input = document.createElement("input");
   input.className = "tab-rename-input";
@@ -405,7 +406,6 @@ function startInlineRename(convId, currentTitle, labelEl, delEl) {
     finished = true;
     input.remove();
     labelEl.style.display = "";
-    delEl.style.display = "";
     if (save && input.value.trim() && input.value.trim() !== currentTitle) {
       renameConvTab(convId, input.value.trim());
     }

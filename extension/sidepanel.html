@@ -128,18 +128,6 @@
       white-space: nowrap;
       min-width: 0;
     }
-    .tab-del {
-      flex-shrink: 0;
-      color: transparent;
-      font-size: 13px;
-      line-height: 1;
-      border-radius: 3px;
-      padding: 0 2px;
-      transition: color 0.15s, background 0.15s;
-    }
-    .conv-tab:hover .tab-del { color: #555; }
-    .tab-del:hover { color: #ef4444 !important; background: rgba(239,68,68,0.12); }
-
     /* ── TAB CONTEXT MENU ────────────────────── */
     .tab-ctx-menu {
       position: fixed;
@@ -164,6 +152,7 @@
       user-select: none;
     }
     .tab-ctx-item:hover { background: #2e2e4a; color: #eeeef8; }
+    .tab-ctx-delete:hover { background: rgba(239,68,68,0.12); color: #ef4444; }
 
     /* ── INLINE RENAME INPUT ─────────────────── */
     .tab-rename-input {
