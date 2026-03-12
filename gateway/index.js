@@ -25,6 +25,12 @@ app.use(cors({
 app.use(express.json({ limit: "50mb" }));
 await fs.mkdir(NOTES_DIR, { recursive: true });
 
+function saveCardsToConversation(conversationId, cards) {
+  if (!conversationId) return;
+  const conv = getConversation(Number(conversationId));
+  if (conv) saveConversation(conv.id, [...conv.messages, { role: "assistant", content: JSON.stringify(cards) }]);
+}
+
 // --- Helpers ---
 function makeTimestamp() { return new Date().toISOString().replace(/[:.]/g, "-"); }
 function makeSlug(str) { return str.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, ""); }
@@ -94,7 +100,7 @@ async function updateNoteFrontmatter(filename, updates) {
 
 // --- POST /action — single screenshot ---
 app.post("/action", async (req, res) => {
-  const { screenshot, mimeType = "image/png", mode = "summary", title } = req.body;
+  const { screenshot, mimeType = "image/png", mode = "summary", title, conversationId } = req.body;
   if (!screenshot) return res.status(400).json({ error: "screenshot is required" });
 
   try {
@@ -110,6 +116,7 @@ app.post("/action", async (req, res) => {
       }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title, mode, markdown, cards });
+      saveCardsToConversation(conversationId, cards);
       logActivity();
       return res.json({ success: true, ...saved, markdown, cards });
     }
@@ -125,7 +132,7 @@ app.post("/action", async (req, res) => {
 
 // --- POST /session — multi-page capture ---
 app.post("/session", async (req, res) => {
-  const { frames, title, mode = "session" } = req.body;
+  const { frames, title, mode = "session", conversationId } = req.body;
   if (!Array.isArray(frames) || frames.length === 0) {
     return res.status(400).json({ error: "frames array is required" });
   }
@@ -143,6 +150,7 @@ app.post("/session", async (req, res) => {
       }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title: title ?? `Multi (${frames.length} pages)`, mode, markdown, cards });
+      saveCardsToConversation(conversationId, cards);
       logActivity();
       return res.json({ success: true, ...saved, markdown, cards });
     }
@@ -158,12 +166,20 @@ app.post("/session", async (req, res) => {
 
 // --- POST /transcribe — audio capture ---
 app.post("/transcribe", async (req, res) => {
-  const { audio, mode = "summary", title } = req.body;
+  const { audio, mode = "summary", title, conversationId } = req.body;
   if (!audio) return res.status(400).json({ error: "audio (base64) is required" });
 
   try {
     const buffer = Buffer.from(audio, "base64");
     const { transcript, markdown } = await transcribeAndSummarize(buffer, mode);
+    if (mode === "flashcard") {
+      let cards;
+      try { cards = JSON.parse(markdown); } catch { cards = [{ front: "Parse error", back: markdown }]; }
+      const saved = await saveNote({ title: title ?? "Audio recording", mode: `audio-${mode}`, markdown, cards });
+      saveCardsToConversation(conversationId, cards);
+      logActivity();
+      return res.json({ success: true, ...saved, transcript, markdown, cards });
+    }
     const saved = await saveNote({ title: title ?? "Audio recording", mode: `audio-${mode}`, markdown });
     logActivity();
     res.json({ success: true, ...saved, transcript, markdown });
@@ -191,14 +207,26 @@ app.post("/ask-screen", async (req, res) => {
 
 // --- POST /ask — text selection query (no screenshot) ---
 app.post("/ask", async (req, res) => {
-  const { selectedText, mode = "summary", title } = req.body;
+  const { selectedText, mode = "summary", title, conversationId } = req.body;
   if (!selectedText) return res.status(400).json({ error: "selectedText is required" });
 
   try {
-    const markdown = await analyzeText(selectedText, mode);
-    const saved = await saveNote({ title: title ?? "Selected text", mode, markdown });
+    const raw = await analyzeText(selectedText, mode);
+    if (mode === "flashcard") {
+      let cards;
+      try {
+        const jsonStr = raw.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+        cards = JSON.parse(jsonStr);
+      } catch { cards = [{ front: "Parse error", back: raw }]; }
+      const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
+      const saved = await saveNote({ title: title ?? "Selected text", mode, markdown, cards });
+      saveCardsToConversation(conversationId, cards);
+      logActivity();
+      return res.json({ success: true, ...saved, markdown, cards });
+    }
+    const saved = await saveNote({ title: title ?? "Selected text", mode, markdown: raw });
     logActivity();
-    res.json({ success: true, ...saved, markdown });
+    res.json({ success: true, ...saved, markdown: raw });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
