@@ -830,6 +830,65 @@ function renderQuiz(markdown) {
   return html || `<div class="md-body">${renderMarkdown(markdown)}</div>`;
 }
 
+// ── Math renderer — converts LaTeX commands to Unicode/HTML ──────────────────
+const MATH_SYMBOLS = {
+  // Greek lowercase
+  '\\alpha':'α','\\beta':'β','\\gamma':'γ','\\delta':'δ','\\epsilon':'ε',
+  '\\varepsilon':'ε','\\zeta':'ζ','\\eta':'η','\\theta':'θ','\\vartheta':'ϑ',
+  '\\iota':'ι','\\kappa':'κ','\\lambda':'λ','\\mu':'μ','\\nu':'ν','\\xi':'ξ',
+  '\\pi':'π','\\varpi':'ϖ','\\rho':'ρ','\\varrho':'ϱ','\\sigma':'σ',
+  '\\varsigma':'ς','\\tau':'τ','\\upsilon':'υ','\\phi':'φ','\\varphi':'φ',
+  '\\chi':'χ','\\psi':'ψ','\\omega':'ω',
+  // Greek uppercase
+  '\\Gamma':'Γ','\\Delta':'Δ','\\Theta':'Θ','\\Lambda':'Λ','\\Xi':'Ξ',
+  '\\Pi':'Π','\\Sigma':'Σ','\\Upsilon':'Υ','\\Phi':'Φ','\\Psi':'Ψ','\\Omega':'Ω',
+  // Set theory
+  '\\cup':'∪','\\cap':'∩','\\in':'∈','\\notin':'∉','\\ni':'∋',
+  '\\subset':'⊂','\\subseteq':'⊆','\\supset':'⊃','\\supseteq':'⊇',
+  '\\emptyset':'∅','\\varnothing':'∅','\\setminus':'∖','\\complement':'∁',
+  // Relations
+  '\\leq':'≤','\\geq':'≥','\\neq':'≠','\\approx':'≈','\\equiv':'≡',
+  '\\sim':'∼','\\simeq':'≃','\\cong':'≅','\\ll':'≪','\\gg':'≫','\\propto':'∝',
+  // Arrows
+  '\\rightarrow':'→','\\leftarrow':'←','\\Rightarrow':'⇒','\\Leftarrow':'⇐',
+  '\\leftrightarrow':'↔','\\Leftrightarrow':'⟺','\\to':'→','\\gets':'←',
+  '\\uparrow':'↑','\\downarrow':'↓','\\mapsto':'↦',
+  // Logic
+  '\\forall':'∀','\\exists':'∃','\\nexists':'∄','\\neg':'¬',
+  '\\land':'∧','\\lor':'∨','\\top':'⊤','\\bot':'⊥','\\vdash':'⊢','\\models':'⊨',
+  // Operators
+  '\\cdot':'·','\\times':'×','\\div':'÷','\\pm':'±','\\mp':'∓',
+  '\\oplus':'⊕','\\otimes':'⊗','\\circ':'∘','\\bullet':'•',
+  // Misc math
+  '\\infty':'∞','\\partial':'∂','\\nabla':'∇','\\sqrt':'√',
+  '\\ldots':'…','\\cdots':'⋯','\\vdots':'⋮','\\ddots':'⋱',
+  '\\langle':'⟨','\\rangle':'⟩','\\lfloor':'⌊','\\rfloor':'⌋',
+  '\\lceil':'⌈','\\rceil':'⌉','\\{':'{','\\}':'}','\\|':'‖',
+};
+
+function renderMath(expr) {
+  let s = expr;
+  // \frac{a}{b} → (a/b)
+  s = s.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)');
+  // \text{...} → just the text
+  s = s.replace(/\\text\{([^}]*)\}/g, '$1');
+  // \mathbf, \mathrm, \mathcal etc. → strip wrapper
+  s = s.replace(/\\math\w+\{([^}]*)\}/g, '$1');
+  // symbol substitutions
+  for (const [cmd, sym] of Object.entries(MATH_SYMBOLS)) {
+    s = s.split(cmd).join(sym);
+  }
+  // superscripts: ^{...} or ^x
+  s = s.replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>');
+  s = s.replace(/\^([A-Za-z0-9])/g, '<sup>$1</sup>');
+  // subscripts: _{...} or _x
+  s = s.replace(/_\{([^}]+)\}/g, '<sub>$1</sub>');
+  s = s.replace(/_([A-Za-z0-9])/g, '<sub>$1</sub>');
+  // strip remaining lone backslashes before letters (unknown commands)
+  s = s.replace(/\\([A-Za-z]+)/g, '$1');
+  return s;
+}
+
 // ── Markdown renderer ────────────────────────────────────────────────────────
 function renderMarkdown(raw) {
   const blocks = [];
@@ -840,6 +899,20 @@ function renderMarkdown(raw) {
     const escaped = code.trim()
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     blocks.push(`<pre class="md-pre"><code>${escaped}</code></pre>`);
+    return `\x00B${i}\x00`;
+  });
+
+  // 1b. Extract block math $$...$$ → placeholder (before HTML escaping)
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
+    const i = blocks.length;
+    blocks.push(`<div class="math-block">${renderMath(math.trim())}</div>`);
+    return `\x00B${i}\x00`;
+  });
+
+  // 1c. Extract inline math $...$ → placeholder (before HTML escaping)
+  text = text.replace(/\$([^$\n]+?)\$/g, (_, math) => {
+    const i = blocks.length;
+    blocks.push(`<span class="math-inline">${renderMath(math.trim())}</span>`);
     return `\x00B${i}\x00`;
   });
 
