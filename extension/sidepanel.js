@@ -69,6 +69,7 @@ function updateTabArrows() {
 tabsArrowLeft.addEventListener("click",  () => { convTabs.scrollBy({ left: -80, behavior: "smooth" }); });
 tabsArrowRight.addEventListener("click", () => { convTabs.scrollBy({ left:  80, behavior: "smooth" }); });
 convTabs.addEventListener("scroll", updateTabArrows);
+convTabs.addEventListener("wheel", (e) => { e.preventDefault(); convTabs.scrollBy({ left: e.deltaY !== 0 ? e.deltaY : e.deltaX, behavior: "smooth" }); }, { passive: false });
 new ResizeObserver(updateTabArrows).observe(convTabs);
 
 // ── Dashboard / Chat links ───────────────────────────────────────────────────
@@ -191,6 +192,7 @@ function renderConvTabs() {
     tab.appendChild(label);
 
     tab.addEventListener("click", () => switchConversation(conv.id));
+    tab.addEventListener("mousedown", (e) => { if (e.button === 1) { e.preventDefault(); deleteConvTab(conv.id); } });
     tab.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       showTabContextMenu(e.clientX, e.clientY, conv.id, conv.title ?? "New conversation", label);
@@ -294,10 +296,20 @@ async function switchConversation(id) {
         const messages = await hr.json();
         const lastAI = [...messages].reverse().find(m => m.role === "assistant");
         if (lastAI) {
-          resultArea.innerHTML = `
-            <div class="result-card">
-              <div class="md-body">${renderMarkdown(lastAI.content)}</div>
-            </div>`;
+          let cards = null;
+          try {
+            const p = JSON.parse(lastAI.content);
+            if (Array.isArray(p) && p[0]?.front !== undefined) cards = p;
+          } catch {}
+          if (cards) {
+            resultArea.innerHTML = "";
+            showFlashcards(cards, null, "flashcard");
+          } else {
+            resultArea.innerHTML = `
+              <div class="result-card">
+                <div class="md-body">${renderMarkdown(lastAI.content)}</div>
+              </div>`;
+          }
         } else {
           resultArea.innerHTML = PLACEHOLDER_HTML;
         }
@@ -470,11 +482,20 @@ async function loadActiveConversation() {
     // Show last AI reply if there is one
     const lastAI = [...messages].reverse().find(m => m.role === "assistant");
     if (lastAI) {
-      resultArea.innerHTML = `
-        <div class="result-card">
-          <span class="saved-badge" style="background:#1e1e36;color:#888">↩ Previous conversation</span>
-          <div class="md-body">${renderMarkdown(lastAI.content)}</div>
-        </div>`;
+      let cards = null;
+      try {
+        const p = JSON.parse(lastAI.content);
+        if (Array.isArray(p) && p[0]?.front !== undefined) cards = p;
+      } catch {}
+      if (cards) {
+        showFlashcards(cards, null, "flashcard");
+      } else {
+        resultArea.innerHTML = `
+          <div class="result-card">
+            <span class="saved-badge" style="background:#1e1e36;color:#888">↩ Previous conversation</span>
+            <div class="md-body">${renderMarkdown(lastAI.content)}</div>
+          </div>`;
+      }
     }
   } catch { /* gateway not running yet */ }
 }
@@ -519,15 +540,16 @@ captureBtn.addEventListener("click", async () => {
         mimeType,
         mode: selectedMode,
         title: titleInput.value.trim() || undefined,
+        conversationId: activeConversationId,
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
 
     if (selectedMode === "flashcard" && data.cards) {
-      showFlashcards(data.cards, data.filename);
+      showFlashcards(data.cards, data.title, selectedMode);
     } else {
-      showResult(data.markdown, data.filename, selectedMode);
+      showResult(data.markdown, data.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
   captureBtn.disabled = false;
@@ -563,11 +585,16 @@ askBtn.addEventListener("click", async () => {
         selectedText,
         mode: selectedMode,
         title: titleInput.value.trim() || undefined,
+        conversationId: activeConversationId,
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
-    showResult(data.markdown, data.filename, selectedMode);
+    if (selectedMode === "flashcard" && data.cards) {
+      showFlashcards(data.cards, data.title, selectedMode);
+    } else {
+      showResult(data.markdown, data.title, selectedMode);
+    }
   } catch (err) { showError(err.message); }
   askBtn.disabled = false;
 });
@@ -603,15 +630,15 @@ sessionFinish.addEventListener("click", async () => {
     const res = await fetch(`${GATEWAY}/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ frames: sessionFrames, mode: selectedMode, title: titleInput.value.trim() || undefined }),
+      body: JSON.stringify({ frames: sessionFrames, mode: selectedMode, title: titleInput.value.trim() || undefined, conversationId: activeConversationId }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
 
     if (selectedMode === "flashcard" && data.cards) {
-      showFlashcards(data.cards, data.filename);
+      showFlashcards(data.cards, data.title, selectedMode);
     } else {
-      showResult(data.markdown, data.filename, selectedMode);
+      showResult(data.markdown, data.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
 
@@ -678,13 +705,18 @@ async function finishAudio() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         audio: base64,
-        mode: "summary",
+        mode: selectedMode,
         title: titleInput.value.trim() || undefined,
+        conversationId: activeConversationId,
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Transcription error");
-    showResult(data.markdown, data.filename);
+    if (selectedMode === "flashcard" && data.cards) {
+      showFlashcards(data.cards, data.title, selectedMode);
+    } else {
+      showResult(data.markdown, data.title, selectedMode);
+    }
   } catch (err) { showError(err.message); }
   mediaRecorder = null;
   captureBtn.disabled = false;
@@ -725,14 +757,23 @@ function showSpinner(msg) {
   resultArea.scrollTop = resultArea.scrollHeight;
 }
 
-function showResult(markdown, filename, mode) {
+const MODE_LABELS = { summary:"Summary", explain:"Explanation", quiz:"Quiz", flashcard:"Flashcards", session:"Session" };
+function resultHeadline(mode, title) {
+  const base = (mode ?? "summary").replace(/^audio-/, "");
+  const label = MODE_LABELS[base] ?? (base.charAt(0).toUpperCase() + base.slice(1));
+  const display = mode?.startsWith("audio-") ? `${label} · Audio` : label;
+  const hasTitle = title && title !== mode && title !== base;
+  return `<div class="result-headline">${display}${hasTitle ? `: ${escapeHtml(title)}` : ""}</div>`;
+}
+
+function showResult(markdown, title, mode) {
   const bodyHtml = (mode === "quiz")
     ? renderQuiz(markdown)
     : `<div class="md-body">${renderMarkdown(markdown)}</div>`;
 
   appendCard(`
     <div class="result-card">
-      <span class="saved-badge">✓ ${escapeHtml(filename)}</span>
+      ${resultHeadline(mode, title)}
       ${bodyHtml}
     </div>`,
     mode === "quiz" ? () => {
@@ -750,23 +791,20 @@ function showResult(markdown, filename, mode) {
   );
 }
 
-function showFlashcards(cards, filename) {
+function showFlashcards(cards, title, mode = "flashcard") {
   const prefix = `fc${++_uid}_`;
   const grid = cards.map((card, i) => `
     <div class="flashcard" id="${prefix}${i}">
       <div class="flashcard-inner">
-        <div class="flashcard-front">${escapeHtml(card.front)}</div>
-        <div class="flashcard-back">${escapeHtml(card.back)}</div>
+        <div class="flashcard-front">${renderMarkdown(card.front)}</div>
+        <div class="flashcard-back">${renderMarkdown(card.back)}</div>
       </div>
     </div>
-    <p class="card-hint">Tap to flip</p>
   `).join("");
 
   appendCard(`
     <div class="result-card" style="background:transparent;border:none;padding:0">
-      <span class="saved-badge" style="margin-bottom:10px;display:block">
-        ✓ ${escapeHtml(filename)} — ${cards.length} cards
-      </span>
+      ${resultHeadline(mode, title)}
       <div class="flashcard-grid">${grid}</div>
     </div>`,
     () => {
@@ -854,8 +892,9 @@ const MATH_SYMBOLS = {
   '\\leftrightarrow':'↔','\\Leftrightarrow':'⟺','\\to':'→','\\gets':'←',
   '\\uparrow':'↑','\\downarrow':'↓','\\mapsto':'↦',
   // Logic
-  '\\forall':'∀','\\exists':'∃','\\nexists':'∄','\\neg':'¬',
-  '\\land':'∧','\\lor':'∨','\\top':'⊤','\\bot':'⊥','\\vdash':'⊢','\\models':'⊨',
+  '\\forall':'∀','\\exists':'∃','\\nexists':'∄','\\neg':'¬','\\lnot':'¬',
+  '\\land':'∧','\\wedge':'∧','\\lor':'∨','\\vee':'∨',
+  '\\top':'⊤','\\bot':'⊥','\\vdash':'⊢','\\models':'⊨',
   // Operators
   '\\cdot':'·','\\times':'×','\\div':'÷','\\pm':'±','\\mp':'∓',
   '\\oplus':'⊕','\\otimes':'⊗','\\circ':'∘','\\bullet':'•',
@@ -916,10 +955,25 @@ function renderMarkdown(raw) {
     return `\x00B${i}\x00`;
   });
 
+  // 1d. Handle bare \begin{cases}...\end{cases} (AI sometimes skips $ delimiters)
+  text = text.replace(/\\begin\{cases\}([\s\S]*?)\\end\{cases\}/g, (_, body) => {
+    const i = blocks.length;
+    const lines = body.split(/\\\\/).map(l => renderMath(l.trim())).filter(Boolean);
+    blocks.push(`<div class="math-block">${lines.join('<br>')}</div>`);
+    return `\x00B${i}\x00`;
+  });
+
   // 2. Escape remaining HTML
   text = text
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // 2b. Apply bare LaTeX symbol substitution (AI output outside $...$)
+  for (const [cmd, sym] of Object.entries(MATH_SYMBOLS)) {
+    text = text.split(cmd).join(sym);
+  }
+  // Strip remaining bare \command sequences not in the symbol table
+  text = text.replace(/\\([A-Za-z]+)/g, '$1');
 
   // 3. Extract inline code → placeholder (content already escaped)
   text = text.replace(/`([^`\n]+)`/g, (_, c) => {
@@ -929,10 +983,10 @@ function renderMarkdown(raw) {
   });
 
   // 4. Headers
-  text = text.replace(/^#### (.+)$/gm, '<h4 class="md-h4">$1</h4>');
-  text = text.replace(/^### (.+)$/gm,  '<h3 class="md-h3">$1</h3>');
-  text = text.replace(/^## (.+)$/gm,   '<h2 class="md-h2">$1</h2>');
-  text = text.replace(/^# (.+)$/gm,    '<h2 class="md-h2">$1</h2>');
+  text = text.replace(/^#### (.+)$/gm, '<h4 class="md-h4" dir="auto">$1</h4>');
+  text = text.replace(/^### (.+)$/gm,  '<h3 class="md-h3" dir="auto">$1</h3>');
+  text = text.replace(/^## (.+)$/gm,   '<h2 class="md-h2" dir="auto">$1</h2>');
+  text = text.replace(/^# (.+)$/gm,    '<h2 class="md-h2" dir="auto">$1</h2>');
 
   // 5. Bold & italic
   text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
@@ -956,11 +1010,11 @@ function renderMarkdown(raw) {
     if (/^[*-] /.test(line)) {
       if (inOl) { out.push('</ol>'); inOl = false; }
       if (!inUl) { out.push('<ul class="md-ul">'); inUl = true; }
-      out.push(`<li>${line.replace(/^[*-] /, '')}</li>`);
+      out.push(`<li dir="auto">${line.replace(/^[*-] /, '')}</li>`);
     } else if (/^\d+\. /.test(line)) {
       if (inUl) { out.push('</ul>'); inUl = false; }
       if (!inOl) { out.push('<ol class="md-ol">'); inOl = true; }
-      out.push(`<li>${line.replace(/^\d+\. /, '')}</li>`);
+      out.push(`<li dir="auto">${line.replace(/^\d+\. /, '')}</li>`);
     } else {
       if (inUl) { out.push('</ul>'); inUl = false; }
       if (inOl) { out.push('</ol>'); inOl = false; }
@@ -970,7 +1024,7 @@ function renderMarkdown(raw) {
       } else if (BLOCK_STARTS.some(b => t.startsWith(b))) {
         out.push(t);
       } else {
-        out.push(`<p class="md-p">${t}</p>`);
+        out.push(`<p class="md-p" dir="auto">${t}</p>`);
       }
     }
   }
