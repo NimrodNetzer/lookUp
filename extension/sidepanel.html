@@ -102,6 +102,46 @@
     }
     .conv-tab:hover .tab-del { color: #555; }
     .tab-del:hover { color: #ef4444 !important; background: rgba(239,68,68,0.12); }
+
+    /* ── TAB CONTEXT MENU ────────────────────── */
+    .tab-ctx-menu {
+      position: fixed;
+      background: #23233a;
+      border: 1px solid #38385a;
+      border-radius: 8px;
+      padding: 4px;
+      z-index: 9999;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+      animation: dropIn 0.12s ease;
+    }
+    .tab-ctx-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      font-size: 12px;
+      color: #ccc;
+      border-radius: 5px;
+      cursor: pointer;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .tab-ctx-item:hover { background: #2e2e4a; color: #eeeef8; }
+
+    /* ── INLINE RENAME INPUT ─────────────────── */
+    .tab-rename-input {
+      background: #1c1c28;
+      border: 1px solid #7c6af5;
+      border-radius: 4px;
+      color: #eeeef8;
+      font-size: 11px;
+      font-weight: 600;
+      outline: none;
+      padding: 0 4px;
+      width: 88px;
+      height: 18px;
+      flex-shrink: 0;
+    }
     .conv-tab-new {
       padding: 3px 7px;
       border-radius: 6px;

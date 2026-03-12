@@ -157,8 +157,7 @@ function renderConvTabs() {
     tab.addEventListener("click", () => switchConversation(conv.id));
     tab.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const newName = prompt("Rename conversation:", conv.title ?? "New conversation");
-      if (newName?.trim()) renameConvTab(conv.id, newName.trim());
+      showTabContextMenu(e.clientX, e.clientY, conv.id, conv.title ?? "New conversation", label, delBtn);
     });
 
     convTabs.insertBefore(tab, newConvBtn);
@@ -229,6 +228,70 @@ async function deleteConvTab(id) {
       renderConvTabs();
     }
   } catch (err) { console.error(err); }
+}
+
+function showTabContextMenu(x, y, convId, currentTitle, labelEl, delEl) {
+  document.getElementById("tabCtxMenu")?.remove();
+
+  const menu = document.createElement("div");
+  menu.id = "tabCtxMenu";
+  menu.className = "tab-ctx-menu";
+  menu.style.left = x + "px";
+  menu.style.top = y + "px";
+
+  const renameItem = document.createElement("div");
+  renameItem.className = "tab-ctx-item";
+  renameItem.textContent = "✏️  Rename";
+  renameItem.addEventListener("click", () => {
+    menu.remove();
+    startInlineRename(convId, currentTitle, labelEl, delEl);
+  });
+  menu.appendChild(renameItem);
+
+  document.body.appendChild(menu);
+
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth)   menu.style.left = (x - rect.width) + "px";
+  if (rect.bottom > window.innerHeight) menu.style.top  = (y - rect.height) + "px";
+
+  setTimeout(() => {
+    const dismiss = (e) => {
+      if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener("click", dismiss, true); }
+    };
+    document.addEventListener("click", dismiss, true);
+  }, 0);
+}
+
+function startInlineRename(convId, currentTitle, labelEl, delEl) {
+  labelEl.style.display = "none";
+  delEl.style.display = "none";
+
+  const input = document.createElement("input");
+  input.className = "tab-rename-input";
+  input.type = "text";
+  input.value = currentTitle;
+  input.maxLength = 60;
+  labelEl.parentElement.insertBefore(input, labelEl);
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = (save) => {
+    if (finished) return;
+    finished = true;
+    input.remove();
+    labelEl.style.display = "";
+    delEl.style.display = "";
+    if (save && input.value.trim() && input.value.trim() !== currentTitle) {
+      renameConvTab(convId, input.value.trim());
+    }
+  };
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter")  { e.preventDefault(); finish(true); }
+    if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(true));
 }
 
 async function renameConvTab(id, title) {
