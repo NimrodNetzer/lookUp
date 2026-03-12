@@ -6,6 +6,8 @@ import path from "path";
 import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, transcribeAndSummarize, chat, processCommand } from "./groq.js";
 import { logActivity, getActivity, getStreak, getSetting, setSetting,
          getActiveConversation, createConversation, saveConversation, getConversation,
+         listConversations, touchConversation, deleteConversation, renameConversation,
+         reorderConversations, mergeConversations,
          getFolderTree, createFolder, renameFolder, deleteFolder } from "./db.js";
 
 const app = express();
@@ -270,6 +272,79 @@ app.get("/conversations/active", (_req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- GET /conversations/list ---
+app.get("/conversations/list", (_req, res) => {
+  try {
+    res.json(listConversations());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- POST /conversations/new ---
+app.post("/conversations/new", (_req, res) => {
+  try {
+    const conv = createConversation();
+    res.json({ id: conv.id, title: conv.title });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- POST /conversations/switch/:id ---
+app.post("/conversations/switch/:id", (req, res) => {
+  try {
+    touchConversation(Number(req.params.id));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- PATCH /conversations/:id — rename ---
+app.patch("/conversations/:id", (req, res) => {
+  const id = Number(req.params.id);
+  const { title } = req.body;
+  if (!title?.trim()) return res.status(400).json({ error: "title is required" });
+  try {
+    renameConversation(id, title.trim());
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- DELETE /conversations/:id ---
+app.delete("/conversations/:id", (req, res) => {
+  try {
+    deleteConversation(Number(req.params.id));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- POST /conversations/reorder ---
+app.post("/conversations/reorder", (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids)) return res.status(400).json({ error: "ids array required" });
+  try {
+    reorderConversations(ids.map(Number));
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- POST /conversations/:id/merge ---
+app.post("/conversations/:id/merge", (req, res) => {
+  const targetId = Number(req.params.id);
+  const { sourceId } = req.body;
+  if (!sourceId) return res.status(400).json({ error: "sourceId required" });
+  try {
+    mergeConversations(targetId, Number(sourceId));
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- POST /chat — multi-turn conversation (DB-persisted) ---

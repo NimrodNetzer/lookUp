@@ -1,6 +1,8 @@
 const GATEWAY = "http://127.0.0.1:18789";
 
 // --- DOM refs ---
+const convTabs         = document.getElementById("convTabs");
+const newConvBtn       = document.getElementById("newConvBtn");
 const captureBtn       = document.getElementById("captureBtn");
 const sessionBtn       = document.getElementById("sessionBtn");
 const sessionBar       = document.getElementById("sessionBar");
@@ -36,6 +38,38 @@ let audioChunks         = [];
 let timerInterval       = null;
 let recSeconds          = 0;
 let activeConversationId = null;
+const tabResults        = new Map(); // conversationId → saved resultArea innerHTML
+let _uid = 0; // unique ID counter for quiz/flashcard elements
+const SPINNER_ID = "inlineSpinner";
+
+// ── Tab drag state ────────────────────────────────────────────────────────────
+let dragConvId     = null;
+let mergeTimer     = null;
+let mergeTargetId  = null;
+
+function clearDropIndicators() {
+  convTabs.querySelectorAll(".tab-drop-before,.tab-drop-after,.tab-drop-merge")
+    .forEach(t => t.classList.remove("tab-drop-before","tab-drop-after","tab-drop-merge"));
+}
+function clearMergeTimer() {
+  if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = null; }
+  mergeTargetId = null;
+}
+
+// ── Tab bar scroll arrows ─────────────────────────────────────────────────────
+const tabsArrowLeft  = document.getElementById("tabsArrowLeft");
+const tabsArrowRight = document.getElementById("tabsArrowRight");
+
+function updateTabArrows() {
+  const { scrollLeft, scrollWidth, clientWidth } = convTabs;
+  tabsArrowLeft.classList.toggle("visible",  scrollLeft > 2);
+  tabsArrowRight.classList.toggle("visible", scrollLeft + clientWidth < scrollWidth - 2);
+}
+
+tabsArrowLeft.addEventListener("click",  () => { convTabs.scrollBy({ left: -80, behavior: "smooth" }); });
+tabsArrowRight.addEventListener("click", () => { convTabs.scrollBy({ left:  80, behavior: "smooth" }); });
+convTabs.addEventListener("scroll", updateTabArrows);
+new ResizeObserver(updateTabArrows).observe(convTabs);
 
 // ── Dashboard / Chat links ───────────────────────────────────────────────────
 dashboardBtn.addEventListener("click", () => {
@@ -87,7 +121,11 @@ async function sendChatMessage() {
 
   titleInput.disabled = true;
   chatSendBtn.disabled = true;
+
+  appendCard(`<div class="msg-user">${escapeHtml(message)}</div>`);
+  titleInput.value = "";
   showSpinner("Thinking…");
+
   try {
     const res = await fetch(`${GATEWAY}/chat`, {
       method: "POST",
@@ -97,12 +135,25 @@ async function sendChatMessage() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
     if (data.conversationId) activeConversationId = data.conversationId;
-    // Show only the latest reply in result area (full history lives in /chat page)
-    resultArea.innerHTML = `
+    const isQuiz = data.reply.includes("**Answer:**");
+    appendCard(`
       <div class="result-card">
-        <div class="md-body">${renderMarkdown(data.reply)}</div>
-      </div>`;
-    titleInput.value = "";
+        ${isQuiz ? renderQuiz(data.reply) : `<div class="md-body">${renderMarkdown(data.reply)}</div>`}
+      </div>`,
+      isQuiz ? () => {
+        resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
+          btn.dataset.bound = "1";
+          btn.addEventListener("click", () => {
+            const el = document.getElementById(btn.dataset.answerId);
+            if (!el) return;
+            const hidden = el.style.display === "none";
+            el.style.display = hidden ? "block" : "none";
+            btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+          });
+        });
+      } : null
+    );
+    loadConversations(); // refresh tab titles
   } catch (err) { showError(err.message); }
   titleInput.disabled = false;
   chatSendBtn.disabled = false;
@@ -124,6 +175,290 @@ async function checkGateway() {
 checkGateway();
 setInterval(checkGateway, 10_000);
 
+// ── Conversation tabs ─────────────────────────────────────────────────────────
+let conversations = [];
+
+function renderConvTabs() {
+  convTabs.querySelectorAll(".conv-tab").forEach(t => t.remove());
+  for (const conv of conversations) {
+    const tab = document.createElement("button");
+    tab.className = "conv-tab" + (conv.id === activeConversationId ? " active" : "");
+    tab.title = conv.title ?? "New conversation";
+
+    const label = document.createElement("span");
+    label.className = "tab-label";
+    label.textContent = conv.title ?? "New conversation";
+    tab.appendChild(label);
+
+    tab.addEventListener("click", () => switchConversation(conv.id));
+    tab.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      showTabContextMenu(e.clientX, e.clientY, conv.id, conv.title ?? "New conversation", label);
+    });
+
+    // ── Drag to reorder / merge ──
+    tab.draggable = true;
+    tab.addEventListener("dragstart", (e) => {
+      dragConvId = conv.id;
+      e.dataTransfer.effectAllowed = "move";
+      setTimeout(() => tab.classList.add("tab-drag-ghost"), 0);
+    });
+    tab.addEventListener("dragend", () => {
+      tab.classList.remove("tab-drag-ghost");
+      dragConvId = null;
+      clearDropIndicators();
+      clearMergeTimer();
+    });
+    tab.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (dragConvId === null || dragConvId === conv.id) return;
+      const { left, width } = tab.getBoundingClientRect();
+      const rel = (e.clientX - left) / width;
+      clearDropIndicators();
+      clearMergeTimer();
+      if (rel < 0.3) {
+        tab.classList.add("tab-drop-before");
+      } else if (rel > 0.7) {
+        tab.classList.add("tab-drop-after");
+      } else {
+        mergeTargetId = conv.id;
+        mergeTimer = setTimeout(() => {
+          clearDropIndicators();
+          convTabs.querySelector(`.conv-tab[data-id="${conv.id}"]`)?.classList.add("tab-drop-merge");
+        }, 350);
+      }
+    });
+    tab.addEventListener("dragleave", (e) => {
+      if (!tab.contains(e.relatedTarget)) {
+        tab.classList.remove("tab-drop-before","tab-drop-after","tab-drop-merge");
+        clearMergeTimer();
+      }
+    });
+    tab.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      if (dragConvId === null || dragConvId === conv.id) return;
+      const isMerge  = tab.classList.contains("tab-drop-merge");
+      const isBefore = tab.classList.contains("tab-drop-before");
+      clearDropIndicators();
+      clearMergeTimer();
+      if (isMerge) {
+        await mergeConvTabs(conv.id, dragConvId);
+      } else {
+        const srcIdx = conversations.findIndex(c => c.id === dragConvId);
+        const newArr = [...conversations];
+        const [removed] = newArr.splice(srcIdx, 1);
+        const tgtIdx = newArr.findIndex(c => c.id === conv.id);
+        newArr.splice(isBefore ? tgtIdx : tgtIdx + 1, 0, removed);
+        conversations = newArr;
+        renderConvTabs();
+        await fetch(`${GATEWAY}/conversations/reorder`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: conversations.map(c => c.id) }),
+        });
+      }
+    });
+    tab.dataset.id = String(conv.id);
+
+    convTabs.insertBefore(tab, newConvBtn);
+  }
+  updateTabArrows();
+}
+
+async function loadConversations() {
+  try {
+    const r = await fetch(`${GATEWAY}/conversations/list`);
+    if (!r.ok) return;
+    conversations = await r.json();
+    renderConvTabs();
+  } catch { /* gateway not running */ }
+}
+
+const PLACEHOLDER_HTML = `<p class="placeholder">Choose a mode, then hit <strong>⚡ Capture</strong>.<br>Or select text on any page to <strong>Ask</strong> about it.</p>`;
+
+async function switchConversation(id) {
+  // Save current tab's content before leaving
+  if (activeConversationId !== null) {
+    tabResults.set(activeConversationId, resultArea.innerHTML);
+  }
+  activeConversationId = id;
+
+  const cached = tabResults.get(id);
+  if (cached !== undefined) {
+    resultArea.innerHTML = cached;
+    reattachResultListeners();
+  } else {
+    try {
+      const hr = await fetch(`${GATEWAY}/chat/history?conversationId=${id}`);
+      if (hr.ok) {
+        const messages = await hr.json();
+        const lastAI = [...messages].reverse().find(m => m.role === "assistant");
+        if (lastAI) {
+          resultArea.innerHTML = `
+            <div class="result-card">
+              <div class="md-body">${renderMarkdown(lastAI.content)}</div>
+            </div>`;
+        } else {
+          resultArea.innerHTML = PLACEHOLDER_HTML;
+        }
+      }
+    } catch (err) { console.error(err); }
+  }
+  renderConvTabs();
+}
+
+async function deleteConvTab(id) {
+  try {
+    const r = await fetch(`${GATEWAY}/conversations/${id}`, { method: "DELETE" });
+    if (!r.ok) return;
+    tabResults.delete(id);
+    conversations = conversations.filter(c => c.id !== id);
+    if (activeConversationId === id) {
+      if (conversations.length > 0) {
+        await switchConversation(conversations[0].id);
+      } else {
+        const nr = await fetch(`${GATEWAY}/conversations/new`, { method: "POST" });
+        if (nr.ok) {
+          const { id: newId } = await nr.json();
+          activeConversationId = newId;
+          resultArea.innerHTML = PLACEHOLDER_HTML;
+          await loadConversations();
+        }
+      }
+    } else {
+      renderConvTabs();
+    }
+  } catch (err) { console.error(err); }
+}
+
+async function mergeConvTabs(targetId, sourceId) {
+  try {
+    const r = await fetch(`${GATEWAY}/conversations/${targetId}/merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceId }),
+    });
+    if (!r.ok) return;
+    tabResults.delete(sourceId);
+    tabResults.delete(targetId); // force re-fetch from DB
+    if (activeConversationId === sourceId) activeConversationId = targetId;
+    await loadConversations();
+    if (activeConversationId === targetId) await switchConversation(targetId);
+  } catch (err) { console.error(err); }
+}
+
+function showTabContextMenu(x, y, convId, currentTitle, labelEl) {
+  document.getElementById("tabCtxMenu")?.remove();
+
+  const menu = document.createElement("div");
+  menu.id = "tabCtxMenu";
+  menu.className = "tab-ctx-menu";
+  menu.style.left = x + "px";
+  menu.style.top = y + "px";
+
+  const deleteItem = document.createElement("div");
+  deleteItem.className = "tab-ctx-item tab-ctx-delete";
+  deleteItem.textContent = "🗑️  Delete";
+  deleteItem.addEventListener("click", () => {
+    menu.remove();
+    deleteConvTab(convId);
+  });
+  menu.appendChild(deleteItem);
+
+  const renameItem = document.createElement("div");
+  renameItem.className = "tab-ctx-item";
+  renameItem.textContent = "✏️  Rename";
+  renameItem.addEventListener("click", () => {
+    menu.remove();
+    startInlineRename(convId, currentTitle, labelEl);
+  });
+  menu.appendChild(renameItem);
+
+  document.body.appendChild(menu);
+
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth)   menu.style.left = (x - rect.width) + "px";
+  if (rect.bottom > window.innerHeight) menu.style.top  = (y - rect.height) + "px";
+
+  setTimeout(() => {
+    const dismiss = (e) => {
+      if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener("click", dismiss, true); }
+    };
+    document.addEventListener("click", dismiss, true);
+  }, 0);
+}
+
+function startInlineRename(convId, currentTitle, labelEl) {
+  labelEl.style.display = "none";
+
+  const input = document.createElement("input");
+  input.className = "tab-rename-input";
+  input.type = "text";
+  input.value = currentTitle;
+  input.maxLength = 60;
+  labelEl.parentElement.insertBefore(input, labelEl);
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = (save) => {
+    if (finished) return;
+    finished = true;
+    input.remove();
+    labelEl.style.display = "";
+    if (save && input.value.trim() && input.value.trim() !== currentTitle) {
+      renameConvTab(convId, input.value.trim());
+    }
+  };
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter")  { e.preventDefault(); finish(true); }
+    if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(true));
+}
+
+async function renameConvTab(id, title) {
+  try {
+    await fetch(`${GATEWAY}/conversations/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    await loadConversations();
+  } catch (err) { console.error(err); }
+}
+
+function reattachResultListeners() {
+  resultArea.querySelectorAll(".quiz-reveal-btn").forEach((btn) => {
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", () => {
+      const el = document.getElementById(btn.dataset.answerId);
+      if (!el) return;
+      const hidden = el.style.display === "none";
+      el.style.display = hidden ? "block" : "none";
+      btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+    });
+  });
+  resultArea.querySelectorAll(".flashcard").forEach((fc) => {
+    fc.addEventListener("click", function () { this.classList.toggle("flipped"); });
+  });
+}
+
+newConvBtn.addEventListener("click", async () => {
+  if (activeConversationId !== null) {
+    tabResults.set(activeConversationId, resultArea.innerHTML);
+  }
+  try {
+    const r = await fetch(`${GATEWAY}/conversations/new`, { method: "POST" });
+    if (!r.ok) return;
+    const { id } = await r.json();
+    activeConversationId = id;
+    resultArea.innerHTML = PLACEHOLDER_HTML;
+    await loadConversations();
+  } catch (err) { console.error(err); }
+});
+
 // ── Restore conversation on open ─────────────────────────────────────────────
 async function loadActiveConversation() {
   try {
@@ -131,6 +466,7 @@ async function loadActiveConversation() {
     if (!r.ok) return;
     const { id, messages } = await r.json();
     activeConversationId = id;
+    await loadConversations();
     // Show last AI reply if there is one
     const lastAI = [...messages].reverse().find(m => m.role === "assistant");
     if (lastAI) {
@@ -368,8 +704,25 @@ function resetCaptureBtn() {
   captureBtn.textContent = selectedMode === "audio" ? "🎙️ Record" : "⚡ Capture";
 }
 
+function appendCard(htmlStr, afterInsert) {
+  document.getElementById(SPINNER_ID)?.remove();
+  resultArea.querySelector(".placeholder")?.remove();
+  const wrap = document.createElement("div");
+  wrap.innerHTML = htmlStr;
+  while (wrap.firstChild) resultArea.appendChild(wrap.firstChild);
+  if (afterInsert) afterInsert();
+  resultArea.scrollTop = resultArea.scrollHeight;
+}
+
 function showSpinner(msg) {
-  resultArea.innerHTML = `<div class="spinner">${escapeHtml(msg)}</div>`;
+  document.getElementById(SPINNER_ID)?.remove();
+  resultArea.querySelector(".placeholder")?.remove();
+  const div = document.createElement("div");
+  div.id = SPINNER_ID;
+  div.className = "spinner";
+  div.textContent = msg;
+  resultArea.appendChild(div);
+  resultArea.scrollTop = resultArea.scrollHeight;
 }
 
 function showResult(markdown, filename, mode) {
@@ -377,27 +730,30 @@ function showResult(markdown, filename, mode) {
     ? renderQuiz(markdown)
     : `<div class="md-body">${renderMarkdown(markdown)}</div>`;
 
-  resultArea.innerHTML = `
+  appendCard(`
     <div class="result-card">
       <span class="saved-badge">✓ ${escapeHtml(filename)}</span>
       ${bodyHtml}
-    </div>`;
-
-  if (mode === "quiz") {
-    resultArea.querySelectorAll(".quiz-reveal-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const el = document.getElementById(btn.dataset.answerId);
-        const hidden = el.style.display === "none";
-        el.style.display = hidden ? "block" : "none";
-        btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+    </div>`,
+    mode === "quiz" ? () => {
+      resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", () => {
+          const el = document.getElementById(btn.dataset.answerId);
+          if (!el) return;
+          const hidden = el.style.display === "none";
+          el.style.display = hidden ? "block" : "none";
+          btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+        });
       });
-    });
-  }
+    } : null
+  );
 }
 
 function showFlashcards(cards, filename) {
+  const prefix = `fc${++_uid}_`;
   const grid = cards.map((card, i) => `
-    <div class="flashcard" id="fc${i}">
+    <div class="flashcard" id="${prefix}${i}">
       <div class="flashcard-inner">
         <div class="flashcard-front">${escapeHtml(card.front)}</div>
         <div class="flashcard-back">${escapeHtml(card.back)}</div>
@@ -406,23 +762,26 @@ function showFlashcards(cards, filename) {
     <p class="card-hint">Tap to flip</p>
   `).join("");
 
-  resultArea.innerHTML = `
+  appendCard(`
     <div class="result-card" style="background:transparent;border:none;padding:0">
       <span class="saved-badge" style="margin-bottom:10px;display:block">
         ✓ ${escapeHtml(filename)} — ${cards.length} cards
       </span>
       <div class="flashcard-grid">${grid}</div>
-    </div>`;
-
-  cards.forEach((_, i) => {
-    document.getElementById(`fc${i}`)?.addEventListener("click", function () {
-      this.classList.toggle("flipped");
-    });
-  });
+    </div>`,
+    () => {
+      cards.forEach((_, i) => {
+        document.getElementById(`${prefix}${i}`)?.addEventListener("click", function () {
+          this.classList.toggle("flipped");
+        });
+      });
+    }
+  );
 }
 
 function showError(msg) {
-  resultArea.innerHTML = `<div class="error-card"><strong>Error:</strong> ${escapeHtml(msg)}</div>`;
+  document.getElementById(SPINNER_ID)?.remove();
+  appendCard(`<div class="error-card"><strong>Error:</strong> ${escapeHtml(msg)}</div>`);
 }
 
 function escapeHtml(str = "") {
@@ -433,9 +792,16 @@ function escapeHtml(str = "") {
 
 // ── Quiz renderer — shows questions with hidden answers ──────────────────────
 function renderQuiz(markdown) {
-  const blocks = markdown.split(/\n---\n/);
+  let blocks = markdown.split(/\n[ \t]*---[ \t]*\n/);
+
+  // If no --- separators but multiple **Answer:** found, split at question boundaries (**Q1., **Q2. etc.)
+  if (blocks.length <= 1 && (markdown.match(/\*\*Answer:\*\*/g) ?? []).length > 1) {
+    blocks = markdown.split(/\n\n(?=\*\*Q\d)/);
+  }
+
   let html = "";
   let qNum = 0;
+  const quizPrefix = `qz${++_uid}`;
 
   for (const block of blocks) {
     const trimmed = block.trim();
@@ -451,7 +817,7 @@ function renderQuiz(markdown) {
     qNum++;
     const questionPart = trimmed.slice(0, answerIdx).trim();
     const answerPart   = trimmed.slice(answerIdx + "**Answer:**".length).trim();
-    const id = `quiz-ans-${qNum}`;
+    const id = `${quizPrefix}-ans-${qNum}`;
 
     html += `
       <div class="quiz-block">
@@ -464,6 +830,65 @@ function renderQuiz(markdown) {
   return html || `<div class="md-body">${renderMarkdown(markdown)}</div>`;
 }
 
+// ── Math renderer — converts LaTeX commands to Unicode/HTML ──────────────────
+const MATH_SYMBOLS = {
+  // Greek lowercase
+  '\\alpha':'α','\\beta':'β','\\gamma':'γ','\\delta':'δ','\\epsilon':'ε',
+  '\\varepsilon':'ε','\\zeta':'ζ','\\eta':'η','\\theta':'θ','\\vartheta':'ϑ',
+  '\\iota':'ι','\\kappa':'κ','\\lambda':'λ','\\mu':'μ','\\nu':'ν','\\xi':'ξ',
+  '\\pi':'π','\\varpi':'ϖ','\\rho':'ρ','\\varrho':'ϱ','\\sigma':'σ',
+  '\\varsigma':'ς','\\tau':'τ','\\upsilon':'υ','\\phi':'φ','\\varphi':'φ',
+  '\\chi':'χ','\\psi':'ψ','\\omega':'ω',
+  // Greek uppercase
+  '\\Gamma':'Γ','\\Delta':'Δ','\\Theta':'Θ','\\Lambda':'Λ','\\Xi':'Ξ',
+  '\\Pi':'Π','\\Sigma':'Σ','\\Upsilon':'Υ','\\Phi':'Φ','\\Psi':'Ψ','\\Omega':'Ω',
+  // Set theory
+  '\\cup':'∪','\\cap':'∩','\\in':'∈','\\notin':'∉','\\ni':'∋',
+  '\\subset':'⊂','\\subseteq':'⊆','\\supset':'⊃','\\supseteq':'⊇',
+  '\\emptyset':'∅','\\varnothing':'∅','\\setminus':'∖','\\complement':'∁',
+  // Relations
+  '\\leq':'≤','\\geq':'≥','\\neq':'≠','\\approx':'≈','\\equiv':'≡',
+  '\\sim':'∼','\\simeq':'≃','\\cong':'≅','\\ll':'≪','\\gg':'≫','\\propto':'∝',
+  // Arrows
+  '\\rightarrow':'→','\\leftarrow':'←','\\Rightarrow':'⇒','\\Leftarrow':'⇐',
+  '\\leftrightarrow':'↔','\\Leftrightarrow':'⟺','\\to':'→','\\gets':'←',
+  '\\uparrow':'↑','\\downarrow':'↓','\\mapsto':'↦',
+  // Logic
+  '\\forall':'∀','\\exists':'∃','\\nexists':'∄','\\neg':'¬',
+  '\\land':'∧','\\lor':'∨','\\top':'⊤','\\bot':'⊥','\\vdash':'⊢','\\models':'⊨',
+  // Operators
+  '\\cdot':'·','\\times':'×','\\div':'÷','\\pm':'±','\\mp':'∓',
+  '\\oplus':'⊕','\\otimes':'⊗','\\circ':'∘','\\bullet':'•',
+  // Misc math
+  '\\infty':'∞','\\partial':'∂','\\nabla':'∇','\\sqrt':'√',
+  '\\ldots':'…','\\cdots':'⋯','\\vdots':'⋮','\\ddots':'⋱',
+  '\\langle':'⟨','\\rangle':'⟩','\\lfloor':'⌊','\\rfloor':'⌋',
+  '\\lceil':'⌈','\\rceil':'⌉','\\{':'{','\\}':'}','\\|':'‖',
+};
+
+function renderMath(expr) {
+  let s = expr;
+  // \frac{a}{b} → (a/b)
+  s = s.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)');
+  // \text{...} → just the text
+  s = s.replace(/\\text\{([^}]*)\}/g, '$1');
+  // \mathbf, \mathrm, \mathcal etc. → strip wrapper
+  s = s.replace(/\\math\w+\{([^}]*)\}/g, '$1');
+  // symbol substitutions
+  for (const [cmd, sym] of Object.entries(MATH_SYMBOLS)) {
+    s = s.split(cmd).join(sym);
+  }
+  // superscripts: ^{...} or ^x
+  s = s.replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>');
+  s = s.replace(/\^([A-Za-z0-9])/g, '<sup>$1</sup>');
+  // subscripts: _{...} or _x
+  s = s.replace(/_\{([^}]+)\}/g, '<sub>$1</sub>');
+  s = s.replace(/_([A-Za-z0-9])/g, '<sub>$1</sub>');
+  // strip remaining lone backslashes before letters (unknown commands)
+  s = s.replace(/\\([A-Za-z]+)/g, '$1');
+  return s;
+}
+
 // ── Markdown renderer ────────────────────────────────────────────────────────
 function renderMarkdown(raw) {
   const blocks = [];
@@ -474,6 +899,20 @@ function renderMarkdown(raw) {
     const escaped = code.trim()
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     blocks.push(`<pre class="md-pre"><code>${escaped}</code></pre>`);
+    return `\x00B${i}\x00`;
+  });
+
+  // 1b. Extract block math $$...$$ → placeholder (before HTML escaping)
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
+    const i = blocks.length;
+    blocks.push(`<div class="math-block">${renderMath(math.trim())}</div>`);
+    return `\x00B${i}\x00`;
+  });
+
+  // 1c. Extract inline math $...$ → placeholder (before HTML escaping)
+  text = text.replace(/\$([^$\n]+?)\$/g, (_, math) => {
+    const i = blocks.length;
+    blocks.push(`<span class="math-inline">${renderMath(math.trim())}</span>`);
     return `\x00B${i}\x00`;
   });
 

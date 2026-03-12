@@ -44,20 +44,7 @@ Your explanation must:
 
 Write conversationally, like a knowledgeable friend explaining over coffee. Use headers only for major topic shifts — this should read like a spoken explanation, not a textbook.`,
 
-  quiz: `Create a 5-question quiz based on this screenshot to test real understanding — not just memorization.
-
-Format each question exactly like this:
-
-**Q1.** [Question]
-**Answer:** [Complete answer]
-
----
-
-Include these question types:
-- At least one "explain why…" question
-- At least one application question (how/when would you use this?)
-- At least one comparison question (what's the difference between X and Y?)
-- Remaining questions can test definitions or recall`,
+  quiz: "",  // built dynamically in analyzeScreenshot after text extraction
 
   flashcard: `Generate 6–10 flashcards from this screenshot.
 Return ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:
@@ -85,7 +72,27 @@ Explain the narrative arc — how ideas build on each other across the session.
  * Analyze one screenshot
  */
 export async function analyzeScreenshot(base64Image, mimeType = "image/png", mode = "summary") {
-  const prompt = modePrompts[mode] ?? modePrompts.summary;
+  let prompt = modePrompts[mode] ?? modePrompts.summary;
+
+  // For quiz mode: extract visible text first to compute an accurate question count
+  if (mode === "quiz") {
+    const extractRes = await groq.chat.completions.create({
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+            { type: "text", text: "Extract all visible text from this image. Output only the raw text, no commentary." },
+          ],
+        },
+      ],
+      temperature: 0,
+    });
+    const visibleText = extractRes.choices[0].message.content ?? "";
+    const n = quizQuestionCount(visibleText);
+    prompt = `Create a ${n}-question quiz based on this screenshot to test real understanding — not just memorization.\n\nFormat each question exactly like this:\n\n**Q1.** [Question]\n**Answer:** [Complete answer]\n\nInclude these question types (proportionally to question count):\n- At least one "explain why…" question\n- At least one application question (how/when would you use this?)\n- If questions ≥ 4, include a comparison question (what's the difference between X and Y?)\n- Remaining questions can test definitions or recall`;
+  }
 
   const response = await groq.chat.completions.create({
     model: "meta-llama/llama-4-scout-17b-16e-instruct",
@@ -155,11 +162,23 @@ export async function analyzeWithQuestion(base64Image, mimeType = "image/png", q
 /**
  * Analyze selected text (no image) — for the "Ask about selection" feature
  */
+function quizQuestionCount(text) {
+  const len = text.trim().length;
+  if (len < 250)  return 2;
+  if (len < 600)  return 3;
+  if (len < 1100) return 4;
+  if (len < 1700) return 5;
+  if (len < 2800) return 6;
+  if (len < 4000) return 7;
+  return 8;
+}
+
 export async function analyzeText(selectedText, mode = "summary") {
+  const n = quizQuestionCount(selectedText);
   const instructions = {
     summary: "Summarize and organize this text for a student, using your structured summary format:",
     explain: "Explain this text in depth as a patient tutor — motivate the topic, walk through concepts, use analogies, close with the key insight:",
-    quiz: "Generate a 5-question quiz (with answers) based on this text, testing real understanding:",
+    quiz: `Generate a ${n}-question quiz (with answers) based on this text, testing real understanding:`,
   };
   const instruction = instructions[mode] ?? instructions.summary;
 
@@ -198,10 +217,11 @@ export async function transcribeAndSummarize(audioBuffer, mode = "summary") {
     return { transcript: "", markdown: "No speech detected in the recording." };
   }
 
+  const audioN = quizQuestionCount(transcript);
   const audioPrompts = {
     summary: `${modePrompts.summary}\n\nTranscript to analyze:\n${transcript}`,
     explain: `${modePrompts.explain}\n\nTranscript to analyze:\n${transcript}`,
-    quiz: `${modePrompts.quiz}\n\nTranscript to analyze:\n${transcript}`,
+    quiz: `Generate a ${audioN}-question quiz (with answers) based on this transcript, testing real understanding.\n\nFormat each question exactly like this:\n\n**Q1.** [Question]\n**Answer:** [Complete answer]\n\nTranscript to analyze:\n${transcript}`,
   };
 
   const response = await groq.chat.completions.create({
