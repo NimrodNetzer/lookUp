@@ -42,6 +42,20 @@ const tabResults        = new Map(); // conversationId → saved resultArea inne
 let _uid = 0; // unique ID counter for quiz/flashcard elements
 const SPINNER_ID = "inlineSpinner";
 
+// ── Tab drag state ────────────────────────────────────────────────────────────
+let dragConvId     = null;
+let mergeTimer     = null;
+let mergeTargetId  = null;
+
+function clearDropIndicators() {
+  convTabs.querySelectorAll(".tab-drop-before,.tab-drop-after,.tab-drop-merge")
+    .forEach(t => t.classList.remove("tab-drop-before","tab-drop-after","tab-drop-merge"));
+}
+function clearMergeTimer() {
+  if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = null; }
+  mergeTargetId = null;
+}
+
 // ── Tab bar scroll arrows ─────────────────────────────────────────────────────
 const tabsArrowLeft  = document.getElementById("tabsArrowLeft");
 const tabsArrowRight = document.getElementById("tabsArrowRight");
@@ -175,6 +189,70 @@ function renderConvTabs() {
       showTabContextMenu(e.clientX, e.clientY, conv.id, conv.title ?? "New conversation", label, delBtn);
     });
 
+    // ── Drag to reorder / merge ──
+    tab.draggable = true;
+    tab.addEventListener("dragstart", (e) => {
+      dragConvId = conv.id;
+      e.dataTransfer.effectAllowed = "move";
+      setTimeout(() => tab.classList.add("tab-drag-ghost"), 0);
+    });
+    tab.addEventListener("dragend", () => {
+      tab.classList.remove("tab-drag-ghost");
+      dragConvId = null;
+      clearDropIndicators();
+      clearMergeTimer();
+    });
+    tab.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (dragConvId === null || dragConvId === conv.id) return;
+      const { left, width } = tab.getBoundingClientRect();
+      const rel = (e.clientX - left) / width;
+      clearDropIndicators();
+      clearMergeTimer();
+      if (rel < 0.3) {
+        tab.classList.add("tab-drop-before");
+      } else if (rel > 0.7) {
+        tab.classList.add("tab-drop-after");
+      } else {
+        mergeTargetId = conv.id;
+        mergeTimer = setTimeout(() => {
+          clearDropIndicators();
+          convTabs.querySelector(`.conv-tab[data-id="${conv.id}"]`)?.classList.add("tab-drop-merge");
+        }, 350);
+      }
+    });
+    tab.addEventListener("dragleave", (e) => {
+      if (!tab.contains(e.relatedTarget)) {
+        tab.classList.remove("tab-drop-before","tab-drop-after","tab-drop-merge");
+        clearMergeTimer();
+      }
+    });
+    tab.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      if (dragConvId === null || dragConvId === conv.id) return;
+      const isMerge  = tab.classList.contains("tab-drop-merge");
+      const isBefore = tab.classList.contains("tab-drop-before");
+      clearDropIndicators();
+      clearMergeTimer();
+      if (isMerge) {
+        await mergeConvTabs(conv.id, dragConvId);
+      } else {
+        const srcIdx = conversations.findIndex(c => c.id === dragConvId);
+        const newArr = [...conversations];
+        const [removed] = newArr.splice(srcIdx, 1);
+        const tgtIdx = newArr.findIndex(c => c.id === conv.id);
+        newArr.splice(isBefore ? tgtIdx : tgtIdx + 1, 0, removed);
+        conversations = newArr;
+        renderConvTabs();
+        await fetch(`${GATEWAY}/conversations/reorder`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: conversations.map(c => c.id) }),
+        });
+      }
+    });
+    tab.dataset.id = String(conv.id);
+
     convTabs.insertBefore(tab, newConvBtn);
   }
   updateTabArrows();
@@ -243,6 +321,22 @@ async function deleteConvTab(id) {
     } else {
       renderConvTabs();
     }
+  } catch (err) { console.error(err); }
+}
+
+async function mergeConvTabs(targetId, sourceId) {
+  try {
+    const r = await fetch(`${GATEWAY}/conversations/${targetId}/merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceId }),
+    });
+    if (!r.ok) return;
+    tabResults.delete(sourceId);
+    tabResults.delete(targetId); // force re-fetch from DB
+    if (activeConversationId === sourceId) activeConversationId = targetId;
+    await loadConversations();
+    if (activeConversationId === targetId) await switchConversation(targetId);
   } catch (err) { console.error(err); }
 }
 

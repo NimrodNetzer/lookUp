@@ -7,6 +7,7 @@ import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, tran
 import { logActivity, getActivity, getStreak, getSetting, setSetting,
          getActiveConversation, createConversation, saveConversation, getConversation,
          listConversations, touchConversation, deleteConversation, renameConversation,
+         reorderConversations, mergeConversations,
          getFolderTree, createFolder, renameFolder, deleteFolder } from "./db.js";
 
 const app = express();
@@ -323,6 +324,27 @@ app.delete("/conversations/:id", (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- POST /conversations/reorder ---
+app.post("/conversations/reorder", (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids)) return res.status(400).json({ error: "ids array required" });
+  try {
+    reorderConversations(ids.map(Number));
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- POST /conversations/:id/merge ---
+app.post("/conversations/:id/merge", (req, res) => {
+  const targetId = Number(req.params.id);
+  const { sourceId } = req.body;
+  if (!sourceId) return res.status(400).json({ error: "sourceId required" });
+  try {
+    mergeConversations(targetId, Number(sourceId));
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- POST /chat — multi-turn conversation (DB-persisted) ---

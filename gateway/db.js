@@ -142,9 +142,12 @@ export function deleteFolder(id) {
 
 // ── Conversations ─────────────────────────────────────────────────────────────
 
+// Migration: add sort_order if not present
+try { db.exec("ALTER TABLE conversations ADD COLUMN sort_order INTEGER DEFAULT 0"); } catch {}
+
 export function listConversations() {
   return db.prepare(
-    "SELECT id, title, folder_id, created_at, updated_at FROM conversations ORDER BY updated_at DESC"
+    "SELECT id, title, folder_id, created_at, updated_at FROM conversations ORDER BY sort_order ASC, updated_at DESC"
   ).all();
 }
 
@@ -195,6 +198,20 @@ export function saveConversation(id, messages, title = null) {
 
 export function deleteConversation(id) {
   db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+}
+
+export function reorderConversations(orderedIds) {
+  const stmt = db.prepare("UPDATE conversations SET sort_order = ? WHERE id = ?");
+  db.transaction((ids) => { ids.forEach((id, i) => stmt.run(i, id)); })(orderedIds);
+}
+
+export function mergeConversations(targetId, sourceId) {
+  const target = getConversation(targetId);
+  const source = getConversation(sourceId);
+  if (!target || !source) throw new Error("Conversation not found");
+  const merged = [...target.messages, ...source.messages];
+  saveConversation(targetId, merged, target.title ?? source.title);
+  deleteConversation(sourceId);
 }
 
 export function renameConversation(id, title) {
