@@ -46,9 +46,9 @@ async function saveNote({ title, mode, markdown, cards, course }) {
   if (cards) {
     const cardsFile = `${ts}_${name}.cards.json`;
     await fs.writeFile(path.join(NOTES_DIR, cardsFile), JSON.stringify(cards, null, 2), "utf-8");
-    return { filename, cardsFile };
+    return { filename, cardsFile, title: title ?? mode };
   }
-  return { filename };
+  return { filename, title: title ?? mode };
 }
 
 async function mergeNotes(filenames, title) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
 import NotesList from "./NotesList";
 import CommandChat from "./CommandChat";
 import { FolderNode } from "./FolderTree";
@@ -322,7 +323,8 @@ function CurrentFolderCard({ folder, noteCount, onDropNote, onRefresh }: {
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRefresh: () => void }) {
+export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRefresh?: () => void }) {
+  const router = useRouter();
   const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
 
   const [activeType,      setActiveType]      = useState<TypeKey | null>(null);
@@ -344,9 +346,10 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
   }, [fetchFolders]);
 
   const refresh = useCallback(() => {
-    onRefresh();
+    router.refresh();
+    onRefresh?.();
     fetchFolders();
-  }, [onRefresh, fetchFolders]);
+  }, [router, onRefresh, fetchFolders]);
 
   // Safety: if the active folder no longer exists in the tree, go back to root
   useEffect(() => {

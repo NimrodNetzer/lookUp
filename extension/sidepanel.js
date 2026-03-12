@@ -303,7 +303,7 @@ async function switchConversation(id) {
           } catch {}
           if (cards) {
             resultArea.innerHTML = "";
-            showFlashcards(cards, "Saved flashcards");
+            showFlashcards(cards, null, "flashcard");
           } else {
             resultArea.innerHTML = `
               <div class="result-card">
@@ -488,7 +488,7 @@ async function loadActiveConversation() {
         if (Array.isArray(p) && p[0]?.front !== undefined) cards = p;
       } catch {}
       if (cards) {
-        showFlashcards(cards, "Saved flashcards");
+        showFlashcards(cards, null, "flashcard");
       } else {
         resultArea.innerHTML = `
           <div class="result-card">
@@ -547,9 +547,9 @@ captureBtn.addEventListener("click", async () => {
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
 
     if (selectedMode === "flashcard" && data.cards) {
-      showFlashcards(data.cards, data.filename);
+      showFlashcards(data.cards, data.title, selectedMode);
     } else {
-      showResult(data.markdown, data.filename, selectedMode);
+      showResult(data.markdown, data.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
   captureBtn.disabled = false;
@@ -591,9 +591,9 @@ askBtn.addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
     if (selectedMode === "flashcard" && data.cards) {
-      showFlashcards(data.cards, data.filename);
+      showFlashcards(data.cards, data.title, selectedMode);
     } else {
-      showResult(data.markdown, data.filename, selectedMode);
+      showResult(data.markdown, data.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
   askBtn.disabled = false;
@@ -636,9 +636,9 @@ sessionFinish.addEventListener("click", async () => {
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
 
     if (selectedMode === "flashcard" && data.cards) {
-      showFlashcards(data.cards, data.filename);
+      showFlashcards(data.cards, data.title, selectedMode);
     } else {
-      showResult(data.markdown, data.filename, selectedMode);
+      showResult(data.markdown, data.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
 
@@ -713,9 +713,9 @@ async function finishAudio() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Transcription error");
     if (selectedMode === "flashcard" && data.cards) {
-      showFlashcards(data.cards, data.filename);
+      showFlashcards(data.cards, data.title, selectedMode);
     } else {
-      showResult(data.markdown, data.filename, selectedMode);
+      showResult(data.markdown, data.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
   mediaRecorder = null;
@@ -757,14 +757,23 @@ function showSpinner(msg) {
   resultArea.scrollTop = resultArea.scrollHeight;
 }
 
-function showResult(markdown, filename, mode) {
+const MODE_LABELS = { summary:"Summary", explain:"Explanation", quiz:"Quiz", flashcard:"Flashcards", session:"Session" };
+function resultHeadline(mode, title) {
+  const base = (mode ?? "summary").replace(/^audio-/, "");
+  const label = MODE_LABELS[base] ?? (base.charAt(0).toUpperCase() + base.slice(1));
+  const display = mode?.startsWith("audio-") ? `${label} · Audio` : label;
+  const hasTitle = title && title !== mode && title !== base;
+  return `<div class="result-headline">${display}${hasTitle ? `: ${escapeHtml(title)}` : ""}</div>`;
+}
+
+function showResult(markdown, title, mode) {
   const bodyHtml = (mode === "quiz")
     ? renderQuiz(markdown)
     : `<div class="md-body">${renderMarkdown(markdown)}</div>`;
 
   appendCard(`
     <div class="result-card">
-      <span class="saved-badge">✓ ${escapeHtml(filename)}</span>
+      ${resultHeadline(mode, title)}
       ${bodyHtml}
     </div>`,
     mode === "quiz" ? () => {
@@ -782,7 +791,7 @@ function showResult(markdown, filename, mode) {
   );
 }
 
-function showFlashcards(cards, filename) {
+function showFlashcards(cards, title, mode = "flashcard") {
   const prefix = `fc${++_uid}_`;
   const grid = cards.map((card, i) => `
     <div class="flashcard" id="${prefix}${i}">
@@ -795,9 +804,7 @@ function showFlashcards(cards, filename) {
 
   appendCard(`
     <div class="result-card" style="background:transparent;border:none;padding:0">
-      <span class="saved-badge" style="margin-bottom:10px;display:block">
-        ✓ ${escapeHtml(filename)} — ${cards.length} cards
-      </span>
+      ${resultHeadline(mode, title)}
       <div class="flashcard-grid">${grid}</div>
     </div>`,
     () => {
