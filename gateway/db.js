@@ -4,7 +4,12 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, "../data");
+// When running as a pkg exe, store data next to the executable.
+// In dev, store it at the project root (gateway/../data).
+const BASE_DIR = process.pkg
+  ? path.dirname(process.execPath)
+  : path.join(__dirname, "..");
+const DATA_DIR = path.join(BASE_DIR, "data");
 const DB_PATH = path.join(DATA_DIR, "lookup.db");
 
 fs.mkdirSync(DATA_DIR, { recursive: true });

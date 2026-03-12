@@ -531,7 +531,7 @@ export default function NotesList({
                               />
                             ) : (
                               <Link
-                                href={selectMode ? "#" : `/note/${encodeURIComponent(note.filename)}`}
+                                href={selectMode ? "#" : `/note?file=${encodeURIComponent(note.filename)}`}
                                 onClick={selectMode ? (e) => e.preventDefault() : undefined}
                                 className="flex-1 min-w-0"
                               >

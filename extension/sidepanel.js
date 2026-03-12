@@ -74,10 +74,10 @@ new ResizeObserver(updateTabArrows).observe(convTabs);
 
 // ── Dashboard / Chat links ───────────────────────────────────────────────────
 dashboardBtn.addEventListener("click", () => {
-  chrome.tabs.create({ url: "http://localhost:3000" });
+  chrome.tabs.create({ url: "http://localhost:18789" });
 });
 chatExpandBtn.addEventListener("click", () => {
-  chrome.tabs.create({ url: "http://localhost:3000/chat" });
+  chrome.tabs.create({ url: "http://localhost:18789/chat" });
 });
 
 // ── Mode dropdown ────────────────────────────────────────────────────────────
@@ -546,6 +546,7 @@ captureBtn.addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
 
+    if (data.conversationId) activeConversationId = data.conversationId;
     if (selectedMode === "flashcard" && data.cards) {
       showFlashcards(data.cards, data.title, selectedMode);
     } else {
@@ -590,6 +591,7 @@ askBtn.addEventListener("click", async () => {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
+    if (data.conversationId) activeConversationId = data.conversationId;
     if (selectedMode === "flashcard" && data.cards) {
       showFlashcards(data.cards, data.title, selectedMode);
     } else {
@@ -635,6 +637,7 @@ sessionFinish.addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
 
+    if (data.conversationId) activeConversationId = data.conversationId;
     if (selectedMode === "flashcard" && data.cards) {
       showFlashcards(data.cards, data.title, selectedMode);
     } else {
@@ -712,6 +715,7 @@ async function finishAudio() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Transcription error");
+    if (data.conversationId) activeConversationId = data.conversationId;
     if (selectedMode === "flashcard" && data.cards) {
       showFlashcards(data.cards, data.title, selectedMode);
     } else {

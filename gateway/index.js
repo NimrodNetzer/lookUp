@@ -2,7 +2,10 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import fs from "fs/promises";
+import { mkdirSync } from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+import { exec } from "child_process";
 import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, transcribeAndSummarize, chat, processCommand } from "./groq.js";
 import { logActivity, getActivity, getStreak, getSetting, setSetting,
          getActiveConversation, createConversation, saveConversation, getConversation,
@@ -10,9 +13,18 @@ import { logActivity, getActivity, getStreak, getSetting, setSetting,
          reorderConversations, mergeConversations,
          getFolderTree, createFolder, renameFolder, deleteFolder } from "./db.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// When running as a pkg exe, paths are relative to the exe; in dev, to the project root.
+const BASE_DIR = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, "..");
+const NOTES_DIR = path.join(BASE_DIR, "notes");
+// When packaged: serve from a real "www" folder next to the exe.
+// pkg's virtual filesystem doesn't work reliably with express.static.
+const STATIC_DIR = process.pkg
+  ? path.join(path.dirname(process.execPath), "www")
+  : path.join(__dirname, "../dashboard/out");
+
 const app = express();
 const PORT = process.env.PORT || 18789;
-const NOTES_DIR = path.resolve("../notes");
 
 app.use(cors({
   origin: (origin, cb) => {
@@ -23,12 +35,18 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: "50mb" }));
-await fs.mkdir(NOTES_DIR, { recursive: true });
+mkdirSync(NOTES_DIR, { recursive: true });
 
-function saveCardsToConversation(conversationId, cards) {
-  if (!conversationId) return;
-  const conv = getConversation(Number(conversationId));
-  if (conv) saveConversation(conv.id, [...conv.messages, { role: "assistant", content: JSON.stringify(cards) }]);
+/** Save a capture result as an assistant message in the conversation.
+ *  If no conversationId is given, uses the active (most recently updated) conversation.
+ *  Returns the conversation id. */
+function saveMarkdownToConversation(conversationId, markdown) {
+  const conv = conversationId
+    ? getConversation(Number(conversationId))
+    : getActiveConversation();
+  if (!conv) return null;
+  saveConversation(conv.id, [...conv.messages, { role: "assistant", content: markdown }]);
+  return conv.id;
 }
 
 // --- Helpers ---
@@ -116,14 +134,15 @@ app.post("/action", async (req, res) => {
       }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title, mode, markdown, cards });
-      saveCardsToConversation(conversationId, cards);
+      const convId = saveMarkdownToConversation(conversationId, markdown);
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards });
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: convId });
     }
 
     const saved = await saveNote({ title, mode, markdown: raw });
+    const convId = saveMarkdownToConversation(conversationId, raw);
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw });
+    res.json({ success: true, ...saved, markdown: raw, conversationId: convId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -150,14 +169,15 @@ app.post("/session", async (req, res) => {
       }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title: title ?? `Multi (${frames.length} pages)`, mode, markdown, cards });
-      saveCardsToConversation(conversationId, cards);
+      const convId = saveMarkdownToConversation(conversationId, markdown);
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards });
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: convId });
     }
 
     const saved = await saveNote({ title: title ?? `Multi (${frames.length} pages)`, mode, markdown: raw });
+    const convId = saveMarkdownToConversation(conversationId, raw);
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw });
+    res.json({ success: true, ...saved, markdown: raw, conversationId: convId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -176,13 +196,14 @@ app.post("/transcribe", async (req, res) => {
       let cards;
       try { cards = JSON.parse(markdown); } catch { cards = [{ front: "Parse error", back: markdown }]; }
       const saved = await saveNote({ title: title ?? "Audio recording", mode: `audio-${mode}`, markdown, cards });
-      saveCardsToConversation(conversationId, cards);
+      const convId = saveMarkdownToConversation(conversationId, markdown);
       logActivity();
-      return res.json({ success: true, ...saved, transcript, markdown, cards });
+      return res.json({ success: true, ...saved, transcript, markdown, cards, conversationId: convId });
     }
     const saved = await saveNote({ title: title ?? "Audio recording", mode: `audio-${mode}`, markdown });
+    const convId = saveMarkdownToConversation(conversationId, markdown);
     logActivity();
-    res.json({ success: true, ...saved, transcript, markdown });
+    res.json({ success: true, ...saved, transcript, markdown, conversationId: convId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -220,13 +241,14 @@ app.post("/ask", async (req, res) => {
       } catch { cards = [{ front: "Parse error", back: raw }]; }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title: title ?? "Selected text", mode, markdown, cards });
-      saveCardsToConversation(conversationId, cards);
+      const convId = saveMarkdownToConversation(conversationId, markdown);
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards });
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: convId });
     }
     const saved = await saveNote({ title: title ?? "Selected text", mode, markdown: raw });
+    const convId = saveMarkdownToConversation(conversationId, raw);
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw });
+    res.json({ success: true, ...saved, markdown: raw, conversationId: convId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -603,6 +625,20 @@ app.delete("/folders/:id", (req, res) => {
 // --- GET /health ---
 app.get("/health", (_req, res) => res.json({ status: "ok", port: PORT }));
 
+// --- Static Dashboard ---
+// Serve the Next.js static export. Must come after all API routes.
+app.use(express.static(STATIC_DIR, { extensions: ["html"] }));
+// SPA fallback: /note/* routes have no pre-built HTML for runtime filenames,
+// so serve the placeholder shell and let the client-side router take over.
+app.get("/note/*", (_req, res) => {
+  res.sendFile(path.join(STATIC_DIR, "note/_placeholder.html"));
+});
+
 app.listen(PORT, "127.0.0.1", () => {
-  console.log(`LookUp Gateway running at http://127.0.0.1:${PORT}`);
+  const url = `http://localhost:${PORT}`;
+  console.log(`LookUp Gateway running at ${url}`);
+  // Auto-open the dashboard in the default browser.
+  if (process.platform === "win32") exec(`start ${url}`);
+  else if (process.platform === "darwin") exec(`open ${url}`);
+  else exec(`xdg-open ${url}`);
 });

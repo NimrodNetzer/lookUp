@@ -16,6 +16,12 @@ notes/
 # Runtime database — local only
 data/
 
+# Distribution artifacts — built outputs, not source
+dist/
+LookUp/
+LookUp.zip
+gateway/bundle.cjs
+
 # OS
 .DS_Store
 Thumbs.db
