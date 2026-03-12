@@ -156,10 +156,11 @@ function ContextMenu({
 
 // ── Delete button ─────────────────────────────────────────────────────────────
 function DeleteButton({ note, onRefresh }: { note: Note; onRefresh: () => void }) {
-  const [confirm, setConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  async function handleDelete() {
+  async function handleDelete(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
     setDeleting(true);
     try {
       await fetch(`${GATEWAY}/notes/${encodeURIComponent(note.filename)}`, { method: "DELETE" });
@@ -168,34 +169,15 @@ function DeleteButton({ note, onRefresh }: { note: Note; onRefresh: () => void }
     setDeleting(false);
   }
 
-  if (!confirm) {
-    return (
-      <button
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirm(true); }}
-        title="Delete note"
-        className="opacity-0 group-hover:opacity-100 flex items-center gap-1 text-xs text-muted hover:text-red-400 transition-all px-2 py-0.5 rounded border border-transparent hover:border-red-400/30"
-      >
-        <Trash2 className="w-3 h-3" />
-      </button>
-    );
-  }
-
   return (
-    <div
-      className="flex items-center gap-1"
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+    <button
+      onClick={handleDelete}
+      disabled={deleting}
+      title="Delete note"
+      className="opacity-0 group-hover:opacity-100 flex items-center gap-1 text-muted hover:text-red-400 disabled:opacity-40 transition-all px-2 py-0.5 rounded border border-transparent hover:border-red-400/30"
     >
-      <span className="text-xs text-red-400">Delete?</span>
-      <button
-        onClick={handleDelete}
-        disabled={deleting}
-        className="text-xs text-red-400 hover:text-red-300 font-bold disabled:opacity-40"
-      >✓</button>
-      <button
-        onClick={() => setConfirm(false)}
-        className="text-xs text-muted hover:text-text"
-      >✕</button>
-    </div>
+      <Trash2 className="w-4 h-4" />
+    </button>
   );
 }
 
@@ -549,7 +531,7 @@ export default function NotesList({
                               />
                             ) : (
                               <Link
-                                href={selectMode ? "#" : `/?note=${encodeURIComponent(note.filename)}`}
+                                href={selectMode ? "#" : `/note/${encodeURIComponent(note.filename)}`}
                                 onClick={selectMode ? (e) => e.preventDefault() : undefined}
                                 className="flex-1 min-w-0"
                               >

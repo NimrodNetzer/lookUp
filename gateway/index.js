@@ -241,9 +241,19 @@ app.get("/notes", async (_req, res) => {
       files.filter(f => f.endsWith(".md")).map(async (filename) => {
         const content = await fs.readFile(path.join(NOTES_DIR, filename), "utf-8");
         const stat = await fs.stat(path.join(NOTES_DIR, filename));
-        const titleMatch = content.match(/^title:\s*"(.+)"/m);
-        const modeMatch = content.match(/^mode:\s*"(.+)"/m);
-        return { filename, title: titleMatch?.[1], mode: modeMatch?.[1], size: stat.size, modified: stat.mtime };
+        const titleMatch    = content.match(/^title:\s*"(.+)"/m);
+        const modeMatch     = content.match(/^mode:\s*"(.+)"/m);
+        const courseMatch   = content.match(/^course:\s*"(.+)"/m);
+        const folderIdMatch = content.match(/^folder_id:\s*"?(\d+)"?/m);
+        return {
+          filename,
+          title:     titleMatch?.[1],
+          mode:      modeMatch?.[1],
+          course:    courseMatch?.[1],
+          folder_id: folderIdMatch ? parseInt(folderIdMatch[1]) : undefined,
+          size:      stat.size,
+          modified:  stat.mtime,
+        };
       })
     );
     res.json(notes.sort((a, b) => new Date(b.modified) - new Date(a.modified)));

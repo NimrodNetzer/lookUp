@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { useRouter } from "next/navigation";
 import NotesList from "./NotesList";
 import CommandChat from "./CommandChat";
 import { FolderNode } from "./FolderTree";
@@ -324,11 +323,11 @@ function CurrentFolderCard({ folder, noteCount, onDropNote, onRefresh }: {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRefresh?: () => void }) {
-  const router = useRouter();
   const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
 
   const [activeType,      setActiveType]      = useState<TypeKey | null>(null);
   const [folders,         setFolders]         = useState<FolderNode[]>([]);
+  const [localNotes,      setLocalNotes]      = useState<Note[]>(notes);
   const [addingFolder,    setAddingFolder]    = useState(false);
   const [showUnattached,  setShowUnattached]  = useState(false);
 
@@ -339,6 +338,13 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
     } catch {}
   }, []);
 
+  const fetchNotes = useCallback(async () => {
+    try {
+      const r = await fetch(`${GATEWAY}/notes`);
+      if (r.ok) setLocalNotes(await r.json());
+    } catch {}
+  }, []);
+
   useEffect(() => {
     fetchFolders();
     // Clear any stale sessionStorage key from a previous version
@@ -346,10 +352,10 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
   }, [fetchFolders]);
 
   const refresh = useCallback(() => {
-    router.refresh();
-    onRefresh?.();
+    fetchNotes();
     fetchFolders();
-  }, [router, onRefresh, fetchFolders]);
+    onRefresh?.();
+  }, [fetchNotes, fetchFolders, onRefresh]);
 
   // Safety: if the active folder no longer exists in the tree, go back to root
   useEffect(() => {
@@ -367,14 +373,14 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
 
   // Notes with no folder assigned
   const unattachedNotes = useMemo(
-    () => notes.filter((n) => !n.folder_id),
-    [notes]
+    () => localNotes.filter((n) => !n.folder_id),
+    [localNotes]
   );
 
   // Type counts for the current context (folder or unattached)
   const contextNotes = useMemo(
-    () => activeFolderId !== null ? notes.filter((n) => n.folder_id === activeFolderId) : unattachedNotes,
-    [notes, unattachedNotes, activeFolderId]
+    () => activeFolderId !== null ? localNotes.filter((n) => n.folder_id === activeFolderId) : unattachedNotes,
+    [localNotes, unattachedNotes, activeFolderId]
   );
 
   // Notes shown in the main area — switches to unattached when toggled inside a folder
@@ -395,11 +401,11 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
   // Note counts per folder
   const notesPerFolder = useMemo(() => {
     const counts: Record<number, number> = {};
-    for (const n of notes) {
+    for (const n of localNotes) {
       if (n.folder_id) counts[n.folder_id] = (counts[n.folder_id] ?? 0) + 1;
     }
     return counts;
-  }, [notes]);
+  }, [localNotes]);
 
   // Active folder node and its immediate children (subfolders)
   const activeFolder = useMemo(
