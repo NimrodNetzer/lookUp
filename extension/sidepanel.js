@@ -546,6 +546,7 @@ captureBtn.addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
 
+    if (data.conversationId) activeConversationId = data.conversationId;
     if (selectedMode === "flashcard" && data.cards) {
       showFlashcards(data.cards, data.title, selectedMode);
     } else {
@@ -590,6 +591,7 @@ askBtn.addEventListener("click", async () => {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
+    if (data.conversationId) activeConversationId = data.conversationId;
     if (selectedMode === "flashcard" && data.cards) {
       showFlashcards(data.cards, data.title, selectedMode);
     } else {
@@ -635,6 +637,7 @@ sessionFinish.addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Gateway error");
 
+    if (data.conversationId) activeConversationId = data.conversationId;
     if (selectedMode === "flashcard" && data.cards) {
       showFlashcards(data.cards, data.title, selectedMode);
     } else {
@@ -712,6 +715,7 @@ async function finishAudio() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Transcription error");
+    if (data.conversationId) activeConversationId = data.conversationId;
     if (selectedMode === "flashcard" && data.cards) {
       showFlashcards(data.cards, data.title, selectedMode);
     } else {

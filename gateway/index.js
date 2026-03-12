@@ -37,10 +37,16 @@ app.use(cors({
 app.use(express.json({ limit: "50mb" }));
 mkdirSync(NOTES_DIR, { recursive: true });
 
-function saveCardsToConversation(conversationId, cards) {
-  if (!conversationId) return;
-  const conv = getConversation(Number(conversationId));
-  if (conv) saveConversation(conv.id, [...conv.messages, { role: "assistant", content: JSON.stringify(cards) }]);
+/** Save a capture result as an assistant message in the conversation.
+ *  If no conversationId is given, uses the active (most recently updated) conversation.
+ *  Returns the conversation id. */
+function saveMarkdownToConversation(conversationId, markdown) {
+  const conv = conversationId
+    ? getConversation(Number(conversationId))
+    : getActiveConversation();
+  if (!conv) return null;
+  saveConversation(conv.id, [...conv.messages, { role: "assistant", content: markdown }]);
+  return conv.id;
 }
 
 // --- Helpers ---
@@ -128,14 +134,15 @@ app.post("/action", async (req, res) => {
       }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title, mode, markdown, cards });
-      saveCardsToConversation(conversationId, cards);
+      const convId = saveMarkdownToConversation(conversationId, markdown);
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards });
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: convId });
     }
 
     const saved = await saveNote({ title, mode, markdown: raw });
+    const convId = saveMarkdownToConversation(conversationId, raw);
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw });
+    res.json({ success: true, ...saved, markdown: raw, conversationId: convId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -162,14 +169,15 @@ app.post("/session", async (req, res) => {
       }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title: title ?? `Multi (${frames.length} pages)`, mode, markdown, cards });
-      saveCardsToConversation(conversationId, cards);
+      const convId = saveMarkdownToConversation(conversationId, markdown);
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards });
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: convId });
     }
 
     const saved = await saveNote({ title: title ?? `Multi (${frames.length} pages)`, mode, markdown: raw });
+    const convId = saveMarkdownToConversation(conversationId, raw);
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw });
+    res.json({ success: true, ...saved, markdown: raw, conversationId: convId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -188,13 +196,14 @@ app.post("/transcribe", async (req, res) => {
       let cards;
       try { cards = JSON.parse(markdown); } catch { cards = [{ front: "Parse error", back: markdown }]; }
       const saved = await saveNote({ title: title ?? "Audio recording", mode: `audio-${mode}`, markdown, cards });
-      saveCardsToConversation(conversationId, cards);
+      const convId = saveMarkdownToConversation(conversationId, markdown);
       logActivity();
-      return res.json({ success: true, ...saved, transcript, markdown, cards });
+      return res.json({ success: true, ...saved, transcript, markdown, cards, conversationId: convId });
     }
     const saved = await saveNote({ title: title ?? "Audio recording", mode: `audio-${mode}`, markdown });
+    const convId = saveMarkdownToConversation(conversationId, markdown);
     logActivity();
-    res.json({ success: true, ...saved, transcript, markdown });
+    res.json({ success: true, ...saved, transcript, markdown, conversationId: convId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -232,13 +241,14 @@ app.post("/ask", async (req, res) => {
       } catch { cards = [{ front: "Parse error", back: raw }]; }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title: title ?? "Selected text", mode, markdown, cards });
-      saveCardsToConversation(conversationId, cards);
+      const convId = saveMarkdownToConversation(conversationId, markdown);
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards });
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: convId });
     }
     const saved = await saveNote({ title: title ?? "Selected text", mode, markdown: raw });
+    const convId = saveMarkdownToConversation(conversationId, raw);
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw });
+    res.json({ success: true, ...saved, markdown: raw, conversationId: convId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });

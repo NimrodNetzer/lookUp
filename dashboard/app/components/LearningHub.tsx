@@ -347,9 +347,10 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
 
   useEffect(() => {
     fetchFolders();
+    fetchNotes();
     // Clear any stale sessionStorage key from a previous version
     sessionStorage.removeItem("lookup_activeFolderId");
-  }, [fetchFolders]);
+  }, [fetchFolders, fetchNotes]);
 
   const refresh = useCallback(() => {
     fetchNotes();

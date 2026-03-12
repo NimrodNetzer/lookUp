@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import rehypeHighlight from "rehype-highlight";
 import FlashcardViewer from "../../components/FlashcardViewer";
 
 const GATEWAY = "http://localhost:18789";
@@ -23,8 +22,9 @@ const modeBadge: Record<string, { label: string; color: string }> = {
   "audio-quiz":    { label: "Audio",      color: "bg-pink-500/15 text-pink-400 border-pink-500/30" },
 };
 
-export default function NotePageClient() {
-  const { filename: rawFilename } = useParams<{ filename: string }>();
+function NotePageInner() {
+  const searchParams = useSearchParams();
+  const rawFilename = searchParams.get("file") ?? "";
   const filename = decodeURIComponent(rawFilename);
 
   const [content, setContent] = useState<string | null>(null);
@@ -110,12 +110,20 @@ export default function NotePageClient() {
         <article className="prose">
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeKatex, rehypeHighlight]}
+            rehypePlugins={[rehypeKatex]}
           >
             {body}
           </ReactMarkdown>
         </article>
       )}
     </main>
+  );
+}
+
+export default function NotePageClient() {
+  return (
+    <Suspense fallback={<main className="max-w-2xl mx-auto px-5 py-8"><p className="text-muted">Loading…</p></main>}>
+      <NotePageInner />
+    </Suspense>
   );
 }
