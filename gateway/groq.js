@@ -30,8 +30,7 @@ One paragraph stating what this is about and why it matters.
 - **Term or concept**: Clear, brief explanation
 (Include 4–8 bullet points covering the most important ideas)
 
-## Connections
-1–2 sentences on how this topic connects to broader ideas or other concepts.`,
+`,
 
   explain: `You are a patient, engaging tutor. A student shared this screenshot and asked "Can you explain this to me?"
 

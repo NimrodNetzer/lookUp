@@ -69,6 +69,7 @@ function updateTabArrows() {
 tabsArrowLeft.addEventListener("click",  () => { convTabs.scrollBy({ left: -80, behavior: "smooth" }); });
 tabsArrowRight.addEventListener("click", () => { convTabs.scrollBy({ left:  80, behavior: "smooth" }); });
 convTabs.addEventListener("scroll", updateTabArrows);
+convTabs.addEventListener("wheel", (e) => { e.preventDefault(); convTabs.scrollBy({ left: e.deltaY !== 0 ? e.deltaY : e.deltaX, behavior: "smooth" }); }, { passive: false });
 new ResizeObserver(updateTabArrows).observe(convTabs);
 
 // ── Dashboard / Chat links ───────────────────────────────────────────────────
@@ -191,6 +192,7 @@ function renderConvTabs() {
     tab.appendChild(label);
 
     tab.addEventListener("click", () => switchConversation(conv.id));
+    tab.addEventListener("mousedown", (e) => { if (e.button === 1) { e.preventDefault(); deleteConvTab(conv.id); } });
     tab.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       showTabContextMenu(e.clientX, e.clientY, conv.id, conv.title ?? "New conversation", label);
@@ -854,8 +856,9 @@ const MATH_SYMBOLS = {
   '\\leftrightarrow':'↔','\\Leftrightarrow':'⟺','\\to':'→','\\gets':'←',
   '\\uparrow':'↑','\\downarrow':'↓','\\mapsto':'↦',
   // Logic
-  '\\forall':'∀','\\exists':'∃','\\nexists':'∄','\\neg':'¬',
-  '\\land':'∧','\\lor':'∨','\\top':'⊤','\\bot':'⊥','\\vdash':'⊢','\\models':'⊨',
+  '\\forall':'∀','\\exists':'∃','\\nexists':'∄','\\neg':'¬','\\lnot':'¬',
+  '\\land':'∧','\\wedge':'∧','\\lor':'∨','\\vee':'∨',
+  '\\top':'⊤','\\bot':'⊥','\\vdash':'⊢','\\models':'⊨',
   // Operators
   '\\cdot':'·','\\times':'×','\\div':'÷','\\pm':'±','\\mp':'∓',
   '\\oplus':'⊕','\\otimes':'⊗','\\circ':'∘','\\bullet':'•',
@@ -916,10 +919,25 @@ function renderMarkdown(raw) {
     return `\x00B${i}\x00`;
   });
 
+  // 1d. Handle bare \begin{cases}...\end{cases} (AI sometimes skips $ delimiters)
+  text = text.replace(/\\begin\{cases\}([\s\S]*?)\\end\{cases\}/g, (_, body) => {
+    const i = blocks.length;
+    const lines = body.split(/\\\\/).map(l => renderMath(l.trim())).filter(Boolean);
+    blocks.push(`<div class="math-block">${lines.join('<br>')}</div>`);
+    return `\x00B${i}\x00`;
+  });
+
   // 2. Escape remaining HTML
   text = text
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // 2b. Apply bare LaTeX symbol substitution (AI output outside $...$)
+  for (const [cmd, sym] of Object.entries(MATH_SYMBOLS)) {
+    text = text.split(cmd).join(sym);
+  }
+  // Strip remaining bare \command sequences not in the symbol table
+  text = text.replace(/\\([A-Za-z]+)/g, '$1');
 
   // 3. Extract inline code → placeholder (content already escaped)
   text = text.replace(/`([^`\n]+)`/g, (_, c) => {
