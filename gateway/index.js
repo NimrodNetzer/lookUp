@@ -2,7 +2,10 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import fs from "fs/promises";
+import { mkdirSync } from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+import { exec } from "child_process";
 import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, transcribeAndSummarize, chat, processCommand } from "./groq.js";
 import { logActivity, getActivity, getStreak, getSetting, setSetting,
          getActiveConversation, createConversation, saveConversation, getConversation,
@@ -10,9 +13,18 @@ import { logActivity, getActivity, getStreak, getSetting, setSetting,
          reorderConversations, mergeConversations,
          getFolderTree, createFolder, renameFolder, deleteFolder } from "./db.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// When running as a pkg exe, paths are relative to the exe; in dev, to the project root.
+const BASE_DIR = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, "..");
+const NOTES_DIR = path.join(BASE_DIR, "notes");
+// When packaged: serve from a real "www" folder next to the exe.
+// pkg's virtual filesystem doesn't work reliably with express.static.
+const STATIC_DIR = process.pkg
+  ? path.join(path.dirname(process.execPath), "www")
+  : path.join(__dirname, "../dashboard/out");
+
 const app = express();
 const PORT = process.env.PORT || 18789;
-const NOTES_DIR = path.resolve("../notes");
 
 app.use(cors({
   origin: (origin, cb) => {
@@ -23,7 +35,7 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: "50mb" }));
-await fs.mkdir(NOTES_DIR, { recursive: true });
+mkdirSync(NOTES_DIR, { recursive: true });
 
 function saveCardsToConversation(conversationId, cards) {
   if (!conversationId) return;
@@ -603,6 +615,20 @@ app.delete("/folders/:id", (req, res) => {
 // --- GET /health ---
 app.get("/health", (_req, res) => res.json({ status: "ok", port: PORT }));
 
+// --- Static Dashboard ---
+// Serve the Next.js static export. Must come after all API routes.
+app.use(express.static(STATIC_DIR, { extensions: ["html"] }));
+// SPA fallback: /note/* routes have no pre-built HTML for runtime filenames,
+// so serve the placeholder shell and let the client-side router take over.
+app.get("/note/*", (_req, res) => {
+  res.sendFile(path.join(STATIC_DIR, "note/_placeholder.html"));
+});
+
 app.listen(PORT, "127.0.0.1", () => {
-  console.log(`LookUp Gateway running at http://127.0.0.1:${PORT}`);
+  const url = `http://localhost:${PORT}`;
+  console.log(`LookUp Gateway running at ${url}`);
+  // Auto-open the dashboard in the default browser.
+  if (process.platform === "win32") exec(`start ${url}`);
+  else if (process.platform === "darwin") exec(`open ${url}`);
+  else exec(`xdg-open ${url}`);
 });

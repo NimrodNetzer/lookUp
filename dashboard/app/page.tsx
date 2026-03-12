@@ -1,48 +1,44 @@
-import fs from "fs/promises";
-import path from "path";
+"use client";
 
+import { useEffect, useState } from "react";
 import LearningHub from "./components/LearningHub";
 
-export const revalidate = 0;
+const GATEWAY = "http://127.0.0.1:18789";
 
-const NOTES_DIR = path.resolve(process.cwd(), "../notes");
-const GATEWAY   = "http://127.0.0.1:18789";
-
-async function getNotes() {
-  try {
-    const files = await fs.readdir(NOTES_DIR);
-    return await Promise.all(
-      files.filter((f) => f.endsWith(".md")).map(async (filename) => {
-        const content = await fs.readFile(path.join(NOTES_DIR, filename), "utf-8");
-        const stat    = await fs.stat(path.join(NOTES_DIR, filename));
-        const folderIdMatch = content.match(/^folder_id:\s*"?(\d+)"?/m);
-        return {
-          filename,
-          title:     content.match(/^title:\s*"(.+)"/m)?.[1]  ?? filename,
-          mode:      content.match(/^mode:\s*"(.+)"/m)?.[1]   ?? "summary",
-          course:    content.match(/^course:\s*"(.+)"/m)?.[1] ?? undefined,
-          folder_id: folderIdMatch ? parseInt(folderIdMatch[1]) : undefined,
-          size:      stat.size,
-          modified:  stat.mtime.toISOString(),
-        };
-      })
-    ).then((n) => n.sort((a, b) => b.modified.localeCompare(a.modified)));
-  } catch { return []; }
+interface Note {
+  filename: string;
+  title?: string;
+  mode?: string;
+  course?: string;
+  folder_id?: number;
+  size: number;
+  modified: string;
 }
 
-async function getStats() {
-  try {
-    const r = await fetch(`${GATEWAY}/stats`, { cache: "no-store" });
-    return r.ok ? r.json() : { totalNotes: 0, streak: 0, thisWeek: 0 };
-  } catch { return { totalNotes: 0, streak: 0, thisWeek: 0 }; }
+interface Stats {
+  totalNotes: number;
+  streak: number;
+  thisWeek: number;
 }
 
-export default async function HomePage() {
-  const [notes, stats] = await Promise.all([getNotes(), getStats()]);
+export default function HomePage() {
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [stats, setStats] = useState<Stats>({ totalNotes: 0, streak: 0, thisWeek: 0 });
+
+  useEffect(() => {
+    fetch(`${GATEWAY}/notes`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setNotes)
+      .catch(() => {});
+
+    fetch(`${GATEWAY}/stats`)
+      .then(r => r.ok ? r.json() : { totalNotes: 0, streak: 0, thisWeek: 0 })
+      .then(setStats)
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
-      {/* Header */}
       <header className="mb-8 flex items-end gap-6">
         <div>
           <h1 className="text-3xl font-extrabold bg-gradient-to-r from-accent to-teal bg-clip-text text-transparent">
@@ -50,11 +46,10 @@ export default async function HomePage() {
           </h1>
           <p className="text-muted text-sm mt-1">Your personal learning hub</p>
         </div>
-        {/* Stats inline */}
         <div className="ml-auto flex gap-3">
-          <StatPill icon="📚" label="Notes"   value={stats.totalNotes} />
-          <StatPill icon="🔥" label="Streak"  value={`${stats.streak}d`} />
-          <StatPill icon="⚡" label="Week"    value={stats.thisWeek} />
+          <StatPill icon="📚" label="Notes"  value={stats.totalNotes} />
+          <StatPill icon="🔥" label="Streak" value={`${stats.streak}d`} />
+          <StatPill icon="⚡" label="Week"   value={stats.thisWeek} />
         </div>
       </header>
 

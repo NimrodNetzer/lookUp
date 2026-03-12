@@ -74,10 +74,10 @@ new ResizeObserver(updateTabArrows).observe(convTabs);
 
 // ── Dashboard / Chat links ───────────────────────────────────────────────────
 dashboardBtn.addEventListener("click", () => {
-  chrome.tabs.create({ url: "http://localhost:3000" });
+  chrome.tabs.create({ url: "http://localhost:18789" });
 });
 chatExpandBtn.addEventListener("click", () => {
-  chrome.tabs.create({ url: "http://localhost:3000/chat" });
+  chrome.tabs.create({ url: "http://localhost:18789/chat" });
 });
 
 // ── Mode dropdown ────────────────────────────────────────────────────────────
