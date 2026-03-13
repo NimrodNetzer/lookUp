@@ -1,87 +1,299 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 
 const GATEWAY = "http://127.0.0.1:18789";
 
 type Role = "user" | "assistant";
-interface Message { role: Role; content: string; }
+interface Message     { role: Role; content: string; }
+interface Conversation { id: number; title: string | null; }
+interface CtxMenu      { x: number; y: number; id: number; title: string; }
 
-function renderMd(raw: string) {
-  let html = raw
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-  html = html
-    .replace(/^### (.+)$/gm, '<h3 class="chat-h3">$1</h3>')
-    .replace(/^## (.+)$/gm,  '<h2 class="chat-h2">$1</h2>')
-    .replace(/^# (.+)$/gm,   '<h2 class="chat-h2">$1</h2>')
+function parseFlashcards(content: string): { front: string; back: string }[] | null {
+  try {
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.front !== undefined) return parsed;
+  } catch {}
+  return null;
+}
+
+function isQuiz(content: string) { return content.includes("**Answer:**"); }
+
+function renderMd(raw: string): string {
+  let h = raw
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/^#### (.+)$/gm, '<h4 class="chat-h4">$1</h4>')
+    .replace(/^### (.+)$/gm,  '<h3 class="chat-h3">$1</h3>')
+    .replace(/^## (.+)$/gm,   '<h2 class="chat-h2">$1</h2>')
+    .replace(/^# (.+)$/gm,    '<h2 class="chat-h2">$1</h2>')
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.+?)\*/g,     "<em>$1</em>")
     .replace(/`([^`\n]+)`/g,   '<code class="chat-code">$1</code>')
-    .replace(/^---+$/gm, '<hr class="chat-hr">')
-    .replace(/^[*-] (.+)$/gm,  '<li>$1</li>')
-    .replace(/(<li>.*<\/li>(\n|$))+/g, (m) => `<ul class="chat-ul">${m}</ul>`)
-    .replace(/\n\n+/g, '</p><p class="chat-p">')
-    .replace(/\n/g, "<br>");
+    .replace(/^---+$/gm,       '<hr class="chat-hr">')
+    .replace(/^[*-] (.+)$/gm,  '<li>$1</li>');
 
-  return `<p class="chat-p">${html}</p>`;
+  // wrap consecutive <li> runs in <ul>
+  h = h.replace(/(<li>[\s\S]*?<\/li>)(\n<li>[\s\S]*?<\/li>)*/g,
+    (m) => `<ul class="chat-ul">${m}</ul>`);
+
+  h = h.replace(/\n\n+/g, '</p><p class="chat-p">').replace(/\n/g, "<br>");
+  return `<p class="chat-p">${h}</p>`;
 }
 
-export default function ChatPage() {
-  const [messages,        setMessages]        = useState<Message[]>([]);
-  const [input,           setInput]           = useState("");
-  const [loading,         setLoading]         = useState(false);
-  const [conversationId,  setConversationId]  = useState<number | null>(null);
-  const bottomRef   = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+// ── Flashcard component ───────────────────────────────────────────────────────
 
-  // Load persistent conversation from gateway on mount
-  useEffect(() => {
-    fetch(`${GATEWAY}/conversations/active`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.id) setConversationId(data.id);
-        if (Array.isArray(data.messages)) setMessages(data.messages);
-      })
-      .catch(() => {});
+function FlashcardGrid({ cards }: { cards: { front: string; back: string }[] }) {
+  const [flipped, setFlipped] = useState<Record<number, boolean>>({});
+  return (
+    <div className="chat-fc-grid">
+      {cards.map((card, i) => (
+        <div
+          key={i}
+          className={`chat-fc${flipped[i] ? " flipped" : ""}`}
+          onClick={() => setFlipped(f => ({ ...f, [i]: !f[i] }))}
+        >
+          <div className="chat-fc-inner">
+            <div className="chat-fc-front" dangerouslySetInnerHTML={{ __html: renderMd(card.front) }} />
+            <div className="chat-fc-back"  dangerouslySetInnerHTML={{ __html: renderMd(card.back) }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Quiz component ────────────────────────────────────────────────────────────
+
+function QuizContent({ content }: { content: string }) {
+  const [revealed, setRevealed] = useState<Record<number, boolean>>({});
+
+  let blocks = content.split(/\n[ \t]*---[ \t]*\n/);
+  if (blocks.length <= 1 && (content.match(/\*\*Answer:\*\*/g) ?? []).length > 1) {
+    blocks = content.split(/\n\n(?=\*\*Q\d)/);
+  }
+
+  let qIdx = 0;
+  return (
+    <div>
+      {blocks.map((block, bi) => {
+        const trimmed = block.trim();
+        if (!trimmed) return null;
+        const answerAt = trimmed.indexOf("**Answer:**");
+        if (answerAt === -1) {
+          return (
+            <div key={bi} dangerouslySetInnerHTML={{ __html: renderMd(trimmed) }} />
+          );
+        }
+        const q = qIdx++;
+        const questionPart = trimmed.slice(0, answerAt).trim();
+        const answerPart   = trimmed.slice(answerAt + "**Answer:**".length).trim();
+        return (
+          <div key={bi} className="chat-quiz-block">
+            <div dangerouslySetInnerHTML={{ __html: renderMd(questionPart) }} />
+            <button
+              className="chat-quiz-reveal"
+              onClick={() => setRevealed(r => ({ ...r, [q]: !r[q] }))}
+            >
+              {revealed[q] ? "▼ Hide Answer" : "▶ Show Answer"}
+            </button>
+            {revealed[q] && (
+              <div
+                className="chat-quiz-answer"
+                dangerouslySetInnerHTML={{ __html: renderMd(answerPart) }}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── AI message dispatcher ─────────────────────────────────────────────────────
+
+function AiContent({ content }: { content: string }) {
+  const cards = parseFlashcards(content);
+  if (cards) return <FlashcardGrid cards={cards} />;
+  if (isQuiz(content)) return <QuizContent content={content} />;
+  return (
+    <div
+      className="msg-ai-body"
+      dangerouslySetInnerHTML={{ __html: renderMd(content) }}
+    />
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+export default function ChatPage() {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeId,      setActiveId]      = useState<number | null>(null);
+  const [messages,      setMessages]      = useState<Message[]>([]);
+  const [input,         setInput]         = useState("");
+  const [loading,       setLoading]       = useState(false);
+  const [renamingId,    setRenamingId]    = useState<number | null>(null);
+  const [renameVal,     setRenameVal]     = useState("");
+  const [ctxMenu,       setCtxMenu]       = useState<CtxMenu | null>(null);
+
+  const bottomRef  = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const renameRef  = useRef<HTMLInputElement>(null);
+  const tabsRef    = useRef<HTMLDivElement>(null);
+
+  // ── Conversation list ────────────────────────────────────────────────────
+
+  const loadConversations = useCallback(async () => {
+    try {
+      const r = await fetch(`${GATEWAY}/conversations/list`);
+      if (r.ok) setConversations(await r.json());
+    } catch {}
   }, []);
+
+  // ── Switch conversation ──────────────────────────────────────────────────
+
+  const switchConversation = useCallback(async (id: number) => {
+    setActiveId(id);
+    try {
+      const r = await fetch(`${GATEWAY}/chat/history?conversationId=${id}`);
+      if (r.ok) setMessages(await r.json());
+      fetch(`${GATEWAY}/conversations/switch/${id}`, { method: "POST" }).catch(() => {});
+    } catch {}
+  }, []);
+
+  // ── Init on mount ────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${GATEWAY}/conversations/active`);
+        if (!r.ok) return;
+        const data = await r.json();
+        await loadConversations();
+        if (data.id) {
+          setActiveId(data.id);
+          if (Array.isArray(data.messages)) setMessages(data.messages);
+        }
+      } catch {}
+    })();
+  }, [loadConversations]);
+
+  // ── Poll every 3 s to stay in sync with sidebar ──────────────────────────
+
+  useEffect(() => {
+    const iv = setInterval(loadConversations, 3000);
+    return () => clearInterval(iv);
+  }, [loadConversations]);
+
+  // ── Auto-scroll ──────────────────────────────────────────────────────────
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  // ── Focus rename input when opened ──────────────────────────────────────
+
+  useEffect(() => {
+    if (renamingId !== null) renameRef.current?.focus();
+  }, [renamingId]);
+
+  // ── Dismiss context menu on outside click ────────────────────────────────
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [ctxMenu]);
+
+  // ── Send message ─────────────────────────────────────────────────────────
 
   async function send() {
     const text = input.trim();
     if (!text || loading) return;
     setInput("");
     setLoading(true);
-
     try {
       const res = await fetch(`${GATEWAY}/chat`, {
-        method: "POST",
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, conversationId }),
+        body:    JSON.stringify({ message: text, conversationId: activeId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Gateway error");
-      if (data.conversationId) setConversationId(data.conversationId);
+      if (data.conversationId) setActiveId(data.conversationId);
       if (Array.isArray(data.history)) setMessages(data.history);
-    } catch (err: unknown) {
+      loadConversations(); // refresh titles after first message in new tab
+    } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
-      setMessages((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: `**Error:** ${msg}` }]);
+      setMessages(prev => [
+        ...prev,
+        { role: "user",      content: text },
+        { role: "assistant", content: `**Error:** ${msg}` },
+      ]);
     }
     setLoading(false);
   }
 
-  async function clearChat() {
-    const r = await fetch(`${GATEWAY}/chat/clear`, { method: "POST" }).catch(() => null);
-    const data = r ? await r.json().catch(() => null) : null;
-    if (data?.conversationId) setConversationId(data.conversationId);
-    setMessages([]);
+  // ── New conversation ─────────────────────────────────────────────────────
+
+  async function newConversation() {
+    try {
+      const r = await fetch(`${GATEWAY}/conversations/new`, { method: "POST" });
+      if (!r.ok) return;
+      const { id } = await r.json();
+      setActiveId(id);
+      setMessages([]);
+      await loadConversations();
+    } catch {}
   }
 
-  function handleKey(e: React.KeyboardEvent) {
+  // ── Delete conversation ──────────────────────────────────────────────────
+
+  async function deleteConversation(id: number) {
+    try {
+      const r = await fetch(`${GATEWAY}/conversations/${id}`, { method: "DELETE" });
+      if (!r.ok) return;
+      const remaining = conversations.filter(c => c.id !== id);
+      if (id === activeId) {
+        if (remaining.length > 0) {
+          await switchConversation(remaining[0].id);
+        } else {
+          const nr = await fetch(`${GATEWAY}/conversations/new`, { method: "POST" });
+          if (nr.ok) {
+            const { id: newId } = await nr.json();
+            setActiveId(newId);
+            setMessages([]);
+          }
+        }
+      }
+      await loadConversations();
+    } catch {}
+  }
+
+  // ── Rename conversation ──────────────────────────────────────────────────
+
+  async function confirmRename() {
+    if (!renamingId) { setRenamingId(null); return; }
+    const trimmed = renameVal.trim();
+    if (trimmed) {
+      try {
+        await fetch(`${GATEWAY}/conversations/${renamingId}`, {
+          method:  "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ title: trimmed }),
+        });
+        await loadConversations();
+      } catch {}
+    }
+    setRenamingId(null);
+  }
+
+  // ── Keyboard / textarea ──────────────────────────────────────────────────
+
+  function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   }
 
@@ -92,24 +304,82 @@ export default function ChatPage() {
     el.style.height = Math.min(el.scrollHeight, 160) + "px";
   }
 
+  // ── Tab scroll with mouse wheel ──────────────────────────────────────────
+
+  function onTabsWheel(e: React.WheelEvent<HTMLDivElement>) {
+    e.preventDefault();
+    tabsRef.current?.scrollBy({ left: e.deltaY !== 0 ? e.deltaY : e.deltaX });
+  }
+
+  // ── Context menu ─────────────────────────────────────────────────────────
+
+  function openCtxMenu(e: React.MouseEvent, id: number, title: string) {
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY, id, title });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   return (
     <div className="chat-page">
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className="chat-header">
         <span className="chat-logo">LookUp</span>
         <span className="chat-model-badge">Llama 4 Scout</span>
-        {messages.length > 0 && (
-          <button className="chat-new-btn" onClick={clearChat}>+ New Chat</button>
-        )}
         <Link href="/" className="chat-back">← Dashboard</Link>
       </header>
 
+      {/* ── Tab bar ────────────────────────────────────────────────────────── */}
+      <div className="chat-tabs-wrap">
+        <div className="chat-tabs" ref={tabsRef} onWheel={onTabsWheel}>
+
+          {conversations.map(conv =>
+            renamingId === conv.id ? (
+              <div key={conv.id} className="chat-tab active renaming">
+                <input
+                  ref={renameRef}
+                  className="chat-tab-rename"
+                  value={renameVal}
+                  maxLength={60}
+                  onChange={e => setRenameVal(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter")  { e.preventDefault(); confirmRename(); }
+                    if (e.key === "Escape") setRenamingId(null);
+                  }}
+                  onBlur={confirmRename}
+                />
+              </div>
+            ) : (
+              <button
+                key={conv.id}
+                className={`chat-tab${conv.id === activeId ? " active" : ""}`}
+                onClick={() => switchConversation(conv.id)}
+                onAuxClick={e => { if (e.button === 1) { e.preventDefault(); deleteConversation(conv.id); } }}
+                onContextMenu={e => openCtxMenu(e, conv.id, conv.title ?? "New conversation")}
+                title={conv.title ?? "New conversation"}
+              >
+                <span className="chat-tab-label">{conv.title ?? "New conversation"}</span>
+              </button>
+            )
+          )}
+
+        </div>
+
+        <button className="chat-new-tab" onClick={newConversation} title="New conversation">
+          +
+        </button>
+      </div>
+
+      {/* ── Messages ───────────────────────────────────────────────────────── */}
       <div className="chat-messages">
+
         {messages.length === 0 && !loading && (
           <div className="chat-empty">
-            <div style={{ fontSize: 40 }}>✨</div>
+            <div className="chat-empty-icon">✦</div>
             <div className="chat-empty-title">Ask anything</div>
             <div className="chat-empty-sub">
-              Ask LookUp to explain a concept, quiz you on a topic, or help you understand your lecture material.
+              Ask LookUp to explain a concept, quiz you on a topic, or summarise your lecture material.
               This chat stays in sync with the extension sidebar.
             </div>
           </div>
@@ -123,10 +393,7 @@ export default function ChatPage() {
           ) : (
             <div key={i} className="msg-ai">
               <div className="msg-ai-icon">✦</div>
-              <div
-                className="msg-ai-body"
-                dangerouslySetInnerHTML={{ __html: renderMd(m.content) }}
-              />
+              <AiContent content={m.content} />
             </div>
           )
         )}
@@ -141,6 +408,7 @@ export default function ChatPage() {
         <div ref={bottomRef} />
       </div>
 
+      {/* ── Input bar ──────────────────────────────────────────────────────── */}
       <div className="chat-input-bar">
         <div className="chat-input-wrap">
           <textarea
@@ -149,7 +417,7 @@ export default function ChatPage() {
             placeholder="Ask a question…"
             rows={1}
             value={input}
-            onChange={(e) => { setInput(e.target.value); autoResize(); }}
+            onChange={e => { setInput(e.target.value); autoResize(); }}
             onKeyDown={handleKey}
           />
           <button
@@ -161,6 +429,33 @@ export default function ChatPage() {
         </div>
         <p className="chat-hint">Enter to send · Shift+Enter for new line</p>
       </div>
+
+      {/* ── Context menu ───────────────────────────────────────────────────── */}
+      {ctxMenu && (
+        <div
+          className="chat-ctx-menu"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            className="chat-ctx-item"
+            onClick={() => {
+              setRenamingId(ctxMenu.id);
+              setRenameVal(ctxMenu.title);
+              setCtxMenu(null);
+            }}
+          >
+            ✏️ Rename
+          </button>
+          <button
+            className="chat-ctx-item chat-ctx-delete"
+            onClick={() => { deleteConversation(ctxMenu.id); setCtxMenu(null); }}
+          >
+            🗑️ Delete
+          </button>
+        </div>
+      )}
+
     </div>
   );
 }
