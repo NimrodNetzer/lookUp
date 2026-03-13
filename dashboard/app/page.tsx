@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import LearningHub from "./components/LearningHub";
 import CosmicBg from "./components/CosmicBg";
+import SetupScreen from "./components/SetupScreen";
+import ExtensionScreen from "./components/ExtensionScreen";
 
 const GATEWAY = "http://127.0.0.1:18789";
 
@@ -25,8 +27,19 @@ interface Stats {
 export default function HomePage() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [stats, setStats] = useState<Stats>({ totalNotes: 0, streak: 0, thisWeek: 0 });
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [extSetupDone, setExtSetupDone] = useState(false);
 
   useEffect(() => {
+    setExtSetupDone(localStorage.getItem("lookup_ext_setup_done") === "1");
+    fetch(`${GATEWAY}/setup/status`)
+      .then(r => r.ok ? r.json() : { configured: true })
+      .then(d => setConfigured(d.configured))
+      .catch(() => setConfigured(true));
+  }, []);
+
+  useEffect(() => {
+    if (!configured || !extSetupDone) return;
     fetch(`${GATEWAY}/notes`)
       .then(r => r.ok ? r.json() : [])
       .then(setNotes)
@@ -36,7 +49,26 @@ export default function HomePage() {
       .then(r => r.ok ? r.json() : { totalNotes: 0, streak: 0, thisWeek: 0 })
       .then(setStats)
       .catch(() => {});
-  }, []);
+  }, [configured, extSetupDone]);
+
+  if (configured === null) return <CosmicBg />;
+
+  if (!configured) return (
+    <>
+      <CosmicBg />
+      <SetupScreen onDone={() => setConfigured(true)} />
+    </>
+  );
+
+  if (!extSetupDone) return (
+    <>
+      <CosmicBg />
+      <ExtensionScreen onDone={() => {
+        localStorage.setItem("lookup_ext_setup_done", "1");
+        setExtSetupDone(true);
+      }} />
+    </>
+  );
 
   return (
     <>

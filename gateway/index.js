@@ -6,7 +6,7 @@ import { mkdirSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
-import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, transcribeAndSummarize, chat, processCommand } from "./groq.js";
+import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, transcribeAndSummarize, chat, processCommand, resetGroqClient } from "./groq.js";
 import { logActivity, getActivity, getStreak, getSetting, setSetting,
          getActiveConversation, createConversation, saveConversation, getConversation,
          listConversations, touchConversation, deleteConversation, renameConversation,
@@ -667,6 +667,41 @@ app.delete("/folders/:id", (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- GET /setup/status ---
+app.get("/setup/status", (_req, res) => {
+  res.json({ configured: Boolean(process.env.GROQ_API_KEY?.trim()) });
+});
+
+// --- POST /setup/apikey ---
+const ENV_FILE = process.pkg
+  ? path.join(path.dirname(process.execPath), ".env")
+  : path.join(__dirname, ".env");
+
+app.post("/setup/apikey", async (req, res) => {
+  const { key } = req.body;
+  if (!key?.trim()) return res.status(400).json({ error: "API key is required" });
+  try {
+    await fs.writeFile(ENV_FILE, `GROQ_API_KEY=${key.trim()}\n`, "utf-8");
+    process.env.GROQ_API_KEY = key.trim();
+    resetGroqClient();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- GET /setup/extension-path ---
+// Returns the extension folder path and opens it in Explorer (Windows).
+app.get("/setup/extension-path", (_req, res) => {
+  const extPath = process.pkg
+    ? path.join(path.dirname(process.execPath), "extension")
+    : path.join(__dirname, "..", "dist", "extension");
+  if (process.platform === "win32") exec(`explorer.exe "${extPath}"`);
+  else if (process.platform === "darwin") exec(`open "${extPath}"`);
+  else exec(`xdg-open "${extPath}"`);
+  res.json({ path: extPath });
 });
 
 // --- GET /health ---
