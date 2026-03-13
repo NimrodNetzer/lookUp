@@ -25,7 +25,8 @@ const TYPE_GROUPS = [
   { key: "quiz",      label: "Quiz",       icon: "❓" },
   { key: "flashcard", label: "Flashcards", icon: "🃏" },
   { key: "session",   label: "Session",    icon: "📚" },
-  { key: "audio",     label: "Audio",      icon: "🎙️" },
+  { key: "audio",     label: "Audio",        icon: "🎙️" },
+  { key: "chat",      label: "General Notes", icon: "💬" },
 ] as const;
 
 type TypeKey = typeof TYPE_GROUPS[number]["key"];

@@ -11,15 +11,17 @@ const groq = new Proxy({}, {
     if (!process.env.GROQ_API_KEY) {
       throw new Error(
         "GROQ_API_KEY is not configured.\n" +
-        "Create a file called .env next to LookUp.exe with:\n" +
-        "GROQ_API_KEY=your_key_here\n" +
-        "Get a free key at https://console.groq.com"
+        "Open the LookUp dashboard and paste your API key in the setup screen.\n" +
+        "Get a free key at https://console.groq.com/keys"
       );
     }
     if (!_groq) _groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
     return _groq[prop];
   }
 });
+
+/** Call this after updating process.env.GROQ_API_KEY so the client reinitialises. */
+export function resetGroqClient() { _groq = null; }
 
 const SYSTEM_PROMPT = `You are LookUp — a personal Study Sensei helping students understand academic content.
 

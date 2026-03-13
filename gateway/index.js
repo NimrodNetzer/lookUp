@@ -6,7 +6,7 @@ import { mkdirSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
-import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, transcribeAndSummarize, chat, processCommand } from "./groq.js";
+import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, transcribeAndSummarize, chat, processCommand, resetGroqClient } from "./groq.js";
 import { logActivity, getActivity, getStreak, getSetting, setSetting,
          getActiveConversation, createConversation, saveConversation, getConversation,
          listConversations, touchConversation, deleteConversation, renameConversation,
@@ -37,21 +37,46 @@ app.use(cors({
 app.use(express.json({ limit: "50mb" }));
 mkdirSync(NOTES_DIR, { recursive: true });
 
-/** Save a capture result as an assistant message in the conversation.
- *  If no conversationId is given, uses the active (most recently updated) conversation.
- *  Returns the conversation id. */
-function saveMarkdownToConversation(conversationId, markdown) {
-  const conv = conversationId
-    ? getConversation(Number(conversationId))
-    : getActiveConversation();
-  if (!conv) return null;
-  saveConversation(conv.id, [...conv.messages, { role: "assistant", content: markdown }]);
-  return conv.id;
+/** Write (or overwrite) the single note file for a conversation. */
+async function writeConversationNote(conv) {
+  const title = (conv.title ?? "New conversation").replace(/"/g, '\\"');
+  const filename = `conv-${conv.id}.md`;
+  const frontmatter = `---\ntitle: "${title}"\ndate: "${new Date().toISOString()}"\nmode: "chat"\nconversation_id: "${conv.id}"\n---\n\n`;
+  let body = "";
+  for (const msg of conv.messages) {
+    if (msg.role === "user") {
+      body += `**You:** ${msg.content}\n\n`;
+    } else {
+      let cards = null;
+      try {
+        const p = JSON.parse(msg.content);
+        if (Array.isArray(p) && p[0]?.front !== undefined) cards = p;
+      } catch {}
+      if (cards) {
+        body += "**Flashcards:**\n\n" + cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n") + "\n\n";
+      } else {
+        body += msg.content + "\n\n";
+      }
+    }
+  }
+  await fs.writeFile(path.join(NOTES_DIR, filename), frontmatter + body.trim(), "utf-8");
 }
 
 // --- Helpers ---
 function makeTimestamp() { return new Date().toISOString().replace(/[:.]/g, "-"); }
 function makeSlug(str) { return str.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, ""); }
+
+/** Append a user+assistant message pair to a conversation (used by capture endpoints) */
+function appendToConversation(conversationId, userText, assistantContent) {
+  if (!conversationId) return;
+  const conv = getConversation(Number(conversationId));
+  if (!conv) return;
+  saveConversation(conv.id, [
+    ...conv.messages,
+    { role: "user",      content: userText },
+    { role: "assistant", content: assistantContent },
+  ]);
+}
 
 async function saveNote({ title, mode, markdown, cards, course }) {
   const ts = makeTimestamp();
@@ -133,16 +158,16 @@ app.post("/action", async (req, res) => {
         cards = [{ front: "Parse error", back: raw }];
       }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
-      const saved = await saveNote({ title, mode, markdown, cards });
-      const convId = saveMarkdownToConversation(conversationId, markdown);
+      const saved = await saveNote({ title: title ?? mode, mode, markdown, cards });
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards, conversationId: convId });
+      appendToConversation(conversationId, `📸 Screenshot (${mode})`, markdown);
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: conversationId ?? null });
     }
 
-    const saved = await saveNote({ title, mode, markdown: raw });
-    const convId = saveMarkdownToConversation(conversationId, raw);
+    const saved = await saveNote({ title: title ?? mode, mode, markdown: raw });
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw, conversationId: convId });
+    appendToConversation(conversationId, `📸 Screenshot (${mode})`, raw);
+    res.json({ success: true, ...saved, markdown: raw, conversationId: conversationId ?? null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -158,6 +183,7 @@ app.post("/session", async (req, res) => {
 
   try {
     const raw = await analyzeMulti(frames, mode);
+    const sessionTitle = title ?? `Multi (${frames.length} pages)`;
 
     if (mode === "flashcard") {
       let cards;
@@ -168,16 +194,16 @@ app.post("/session", async (req, res) => {
         cards = [{ front: "Parse error", back: raw }];
       }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
-      const saved = await saveNote({ title: title ?? `Multi (${frames.length} pages)`, mode, markdown, cards });
-      const convId = saveMarkdownToConversation(conversationId, markdown);
+      const saved = await saveNote({ title: sessionTitle, mode, markdown, cards });
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards, conversationId: convId });
+      appendToConversation(conversationId, `📸 ${frames.length} pages (${mode})`, markdown);
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: conversationId ?? null });
     }
 
-    const saved = await saveNote({ title: title ?? `Multi (${frames.length} pages)`, mode, markdown: raw });
-    const convId = saveMarkdownToConversation(conversationId, raw);
+    const saved = await saveNote({ title: sessionTitle, mode, markdown: raw });
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw, conversationId: convId });
+    appendToConversation(conversationId, `📸 ${frames.length} pages (${mode})`, raw);
+    res.json({ success: true, ...saved, markdown: raw, conversationId: conversationId ?? null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -192,18 +218,22 @@ app.post("/transcribe", async (req, res) => {
   try {
     const buffer = Buffer.from(audio, "base64");
     const { transcript, markdown } = await transcribeAndSummarize(buffer, mode);
+    const audioTitle = title ?? "Audio recording";
+    const audioMode = `audio-${mode}`;
+
     if (mode === "flashcard") {
       let cards;
       try { cards = JSON.parse(markdown); } catch { cards = [{ front: "Parse error", back: markdown }]; }
-      const saved = await saveNote({ title: title ?? "Audio recording", mode: `audio-${mode}`, markdown, cards });
-      const convId = saveMarkdownToConversation(conversationId, markdown);
+      const saved = await saveNote({ title: audioTitle, mode: audioMode, markdown, cards });
       logActivity();
-      return res.json({ success: true, ...saved, transcript, markdown, cards, conversationId: convId });
+      appendToConversation(conversationId, `🎙️ Audio recording (${mode})`, markdown);
+      return res.json({ success: true, ...saved, transcript, markdown, cards, conversationId: conversationId ?? null });
     }
-    const saved = await saveNote({ title: title ?? "Audio recording", mode: `audio-${mode}`, markdown });
-    const convId = saveMarkdownToConversation(conversationId, markdown);
+
+    const saved = await saveNote({ title: audioTitle, mode: audioMode, markdown });
     logActivity();
-    res.json({ success: true, ...saved, transcript, markdown, conversationId: convId });
+    appendToConversation(conversationId, `🎙️ Audio recording (${mode})`, markdown);
+    res.json({ success: true, ...saved, transcript, markdown, conversationId: conversationId ?? null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -233,6 +263,8 @@ app.post("/ask", async (req, res) => {
 
   try {
     const raw = await analyzeText(selectedText, mode);
+    const askTitle = title ?? "Selected text";
+
     if (mode === "flashcard") {
       let cards;
       try {
@@ -240,15 +272,16 @@ app.post("/ask", async (req, res) => {
         cards = JSON.parse(jsonStr);
       } catch { cards = [{ front: "Parse error", back: raw }]; }
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
-      const saved = await saveNote({ title: title ?? "Selected text", mode, markdown, cards });
-      const convId = saveMarkdownToConversation(conversationId, markdown);
+      const saved = await saveNote({ title: askTitle, mode, markdown, cards });
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards, conversationId: convId });
+      appendToConversation(conversationId, `📝 Selected text (${mode})`, markdown);
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: conversationId ?? null });
     }
-    const saved = await saveNote({ title: title ?? "Selected text", mode, markdown: raw });
-    const convId = saveMarkdownToConversation(conversationId, raw);
+
+    const saved = await saveNote({ title: askTitle, mode, markdown: raw });
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw, conversationId: convId });
+    appendToConversation(conversationId, `📝 Selected text (${mode})`, raw);
+    res.json({ success: true, ...saved, markdown: raw, conversationId: conversationId ?? null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -343,6 +376,17 @@ app.get("/conversations/list", (_req, res) => {
   }
 });
 
+// --- GET /conversations/:id ---
+app.get("/conversations/:id", (req, res) => {
+  try {
+    const conv = getConversation(Number(req.params.id));
+    if (!conv) return res.status(404).json({ error: "Not found" });
+    res.json(conv);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- POST /conversations/new ---
 app.post("/conversations/new", (_req, res) => {
   try {
@@ -364,12 +408,13 @@ app.post("/conversations/switch/:id", (req, res) => {
 });
 
 // --- PATCH /conversations/:id — rename ---
-app.patch("/conversations/:id", (req, res) => {
+app.patch("/conversations/:id", async (req, res) => {
   const id = Number(req.params.id);
   const { title } = req.body;
   if (!title?.trim()) return res.status(400).json({ error: "title is required" });
   try {
     renameConversation(id, title.trim());
+    await updateNoteFrontmatter(`conv-${id}.md`, { title: title.trim() }).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -378,8 +423,9 @@ app.patch("/conversations/:id", (req, res) => {
 
 // --- DELETE /conversations/:id ---
 app.delete("/conversations/:id", (req, res) => {
+  const id = Number(req.params.id);
   try {
-    deleteConversation(Number(req.params.id));
+    deleteConversation(id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -423,6 +469,7 @@ app.post("/chat", async (req, res) => {
     // Auto-title from first user message
     const title = conv.messages.length === 0 ? message.slice(0, 60) : conv.title;
     saveConversation(conv.id, updatedMessages, title);
+    await writeConversationNote({ ...conv, messages: updatedMessages, title });
     res.json({ success: true, reply, history: updatedMessages, conversationId: conv.id });
   } catch (err) {
     console.error(err);
@@ -620,6 +667,41 @@ app.delete("/folders/:id", (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- GET /setup/status ---
+app.get("/setup/status", (_req, res) => {
+  res.json({ configured: Boolean(process.env.GROQ_API_KEY?.trim()) });
+});
+
+// --- POST /setup/apikey ---
+const ENV_FILE = process.pkg
+  ? path.join(path.dirname(process.execPath), ".env")
+  : path.join(__dirname, ".env");
+
+app.post("/setup/apikey", async (req, res) => {
+  const { key } = req.body;
+  if (!key?.trim()) return res.status(400).json({ error: "API key is required" });
+  try {
+    await fs.writeFile(ENV_FILE, `GROQ_API_KEY=${key.trim()}\n`, "utf-8");
+    process.env.GROQ_API_KEY = key.trim();
+    resetGroqClient();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- GET /setup/extension-path ---
+// Returns the extension folder path and opens it in Explorer (Windows).
+app.get("/setup/extension-path", (_req, res) => {
+  const extPath = process.pkg
+    ? path.join(path.dirname(process.execPath), "extension")
+    : path.join(__dirname, "..", "dist", "extension");
+  if (process.platform === "win32") exec(`explorer.exe "${extPath}"`);
+  else if (process.platform === "darwin") exec(`open "${extPath}"`);
+  else exec(`xdg-open "${extPath}"`);
+  res.json({ path: extPath });
 });
 
 // --- GET /health ---

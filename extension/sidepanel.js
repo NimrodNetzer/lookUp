@@ -294,22 +294,8 @@ async function switchConversation(id) {
       const hr = await fetch(`${GATEWAY}/chat/history?conversationId=${id}`);
       if (hr.ok) {
         const messages = await hr.json();
-        const lastAI = [...messages].reverse().find(m => m.role === "assistant");
-        if (lastAI) {
-          let cards = null;
-          try {
-            const p = JSON.parse(lastAI.content);
-            if (Array.isArray(p) && p[0]?.front !== undefined) cards = p;
-          } catch {}
-          if (cards) {
-            resultArea.innerHTML = "";
-            showFlashcards(cards, null, "flashcard");
-          } else {
-            resultArea.innerHTML = `
-              <div class="result-card">
-                <div class="md-body">${renderMarkdown(lastAI.content)}</div>
-              </div>`;
-          }
+        if (messages.length > 0) {
+          renderAllMessages(messages);
         } else {
           resultArea.innerHTML = PLACEHOLDER_HTML;
         }
@@ -457,6 +443,36 @@ function reattachResultListeners() {
   });
 }
 
+function renderAllMessages(messages) {
+  resultArea.innerHTML = "";
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      const el = document.createElement("div");
+      el.className = "msg-user";
+      el.textContent = msg.content;
+      resultArea.appendChild(el);
+    } else if (msg.role === "assistant") {
+      let cards = null;
+      try {
+        const p = JSON.parse(msg.content);
+        console.log("[LookUp] assistant msg parsed:", p);
+        if (Array.isArray(p) && p[0]?.front !== undefined) cards = p;
+      } catch (e) {
+        console.log("[LookUp] assistant msg not JSON, content:", msg.content.slice(0, 80));
+      }
+      if (cards) {
+        showFlashcards(cards, null, "flashcard");
+      } else {
+        const isQuiz = msg.content.includes("**Answer:**");
+        const wrap = document.createElement("div");
+        wrap.innerHTML = `<div class="result-card">${isQuiz ? renderQuiz(msg.content) : `<div class="md-body">${renderMarkdown(msg.content)}</div>`}</div>`;
+        while (wrap.firstChild) resultArea.appendChild(wrap.firstChild);
+      }
+    }
+  }
+  reattachResultListeners();
+}
+
 newConvBtn.addEventListener("click", async () => {
   if (activeConversationId !== null) {
     tabResults.set(activeConversationId, resultArea.innerHTML);
@@ -480,26 +496,29 @@ async function loadActiveConversation() {
     activeConversationId = id;
     await loadConversations();
     // Show last AI reply if there is one
-    const lastAI = [...messages].reverse().find(m => m.role === "assistant");
-    if (lastAI) {
-      let cards = null;
-      try {
-        const p = JSON.parse(lastAI.content);
-        if (Array.isArray(p) && p[0]?.front !== undefined) cards = p;
-      } catch {}
-      if (cards) {
-        showFlashcards(cards, null, "flashcard");
-      } else {
-        resultArea.innerHTML = `
-          <div class="result-card">
-            <span class="saved-badge" style="background:#1e1e36;color:#888">↩ Previous conversation</span>
-            <div class="md-body">${renderMarkdown(lastAI.content)}</div>
-          </div>`;
-      }
+    if (messages.length > 0) {
+      renderAllMessages(messages);
     }
   } catch { /* gateway not running yet */ }
 }
 loadActiveConversation();
+
+// ── Poll every 3 s to stay in sync with the chat page ───────────────────────
+setInterval(async () => {
+  try {
+    // If the active conversation was changed externally (e.g. from the dashboard
+    // chat page), update our local activeConversationId so the correct tab is
+    // highlighted when we re-render the tabs.
+    const r = await fetch(`${GATEWAY}/conversations/active`);
+    if (r.ok) {
+      const { id } = await r.json();
+      if (id && id !== activeConversationId) {
+        activeConversationId = id;
+      }
+    }
+    await loadConversations(); // re-renders tabs with updated activeConversationId
+  } catch { /* gateway not running */ }
+}, 3000);
 
 // ── Tab capture helper ──────────────────────────────────────────────────────
 async function captureTab() {
@@ -911,6 +930,11 @@ const MATH_SYMBOLS = {
 
 function renderMath(expr) {
   let s = expr;
+  // \begin{cases}...\end{cases} → one line per row, processed recursively
+  s = s.replace(/\\begin\{cases\}([\s\S]*?)\\end\{cases\}/g, (_, body) => {
+    const lines = body.split(/\\\\/).map(l => renderMath(l.trim())).filter(Boolean);
+    return lines.join('<br>');
+  });
   // \frac{a}{b} → (a/b)
   s = s.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)');
   // \text{...} → just the text
