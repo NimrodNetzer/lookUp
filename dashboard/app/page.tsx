@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import LearningHub from "./components/LearningHub";
+import CosmicBg from "./components/CosmicBg";
 
 const GATEWAY = "http://127.0.0.1:18789";
 
@@ -38,7 +39,9 @@ export default function HomePage() {
   }, []);
 
   return (
-    <div className="max-w-5xl mx-auto px-5 py-8">
+    <>
+    <CosmicBg />
+    <div className="relative z-10 max-w-5xl mx-auto px-5 py-8">
       <header className="mb-8 flex items-end gap-6">
         <div>
           <h1 className="text-3xl font-extrabold bg-gradient-to-r from-accent to-teal bg-clip-text text-transparent">
@@ -55,6 +58,7 @@ export default function HomePage() {
 
       <LearningHub notes={notes} />
     </div>
+    </>
   );
 }
 
