@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Search, FileText, Mic, Layers, BookOpen, HelpCircle, CreditCard, FolderSymlink, GitMerge, Trash2, Pencil } from "lucide-react";
+import { Search, FileText, Mic, Layers, BookOpen, HelpCircle, CreditCard, FolderSymlink, GitMerge, Trash2, Pencil, MessageSquare } from "lucide-react";
 import clsx from "clsx";
 import { FolderNode } from "./FolderTree";
 
@@ -27,10 +27,11 @@ const GROUP_CONFIG = {
   quiz:      { label: "Quiz",       icon: "❓", color: "bg-amber-500/20 text-amber-400 border-amber-500/30",    Icon: HelpCircle },
   flashcard: { label: "Flashcards", icon: "🃏", color: "bg-orange-500/20 text-orange-400 border-orange-500/30", Icon: CreditCard },
   session:   { label: "Session",    icon: "📚", color: "bg-purple-500/20 text-purple-300 border-purple-500/30", Icon: Layers     },
-  audio:     { label: "Audio",      icon: "🎙️", color: "bg-pink-500/20 text-pink-400 border-pink-500/30",       Icon: Mic        },
+  audio:     { label: "Audio",      icon: "🎙️", color: "bg-pink-500/20 text-pink-400 border-pink-500/30",       Icon: Mic           },
+  chat:      { label: "General Notes", icon: "💬", color: "bg-blue-500/20 text-blue-400 border-blue-500/30",    Icon: MessageSquare },
 } as const;
 
-const GROUP_ORDER = ["summary", "explain", "quiz", "flashcard", "session", "audio"] as const;
+const GROUP_ORDER = ["summary", "explain", "quiz", "flashcard", "session", "audio", "chat"] as const;
 type GroupKey = typeof GROUP_ORDER[number];
 
 function getGroupKey(mode: string | undefined): GroupKey {
