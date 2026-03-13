@@ -503,6 +503,23 @@ async function loadActiveConversation() {
 }
 loadActiveConversation();
 
+// ── Poll every 3 s to stay in sync with the chat page ───────────────────────
+setInterval(async () => {
+  try {
+    // If the active conversation was changed externally (e.g. from the dashboard
+    // chat page), update our local activeConversationId so the correct tab is
+    // highlighted when we re-render the tabs.
+    const r = await fetch(`${GATEWAY}/conversations/active`);
+    if (r.ok) {
+      const { id } = await r.json();
+      if (id && id !== activeConversationId) {
+        activeConversationId = id;
+      }
+    }
+    await loadConversations(); // re-renders tabs with updated activeConversationId
+  } catch { /* gateway not running */ }
+}, 3000);
+
 // ── Tab capture helper ──────────────────────────────────────────────────────
 async function captureTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

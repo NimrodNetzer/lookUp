@@ -66,6 +66,18 @@ async function writeConversationNote(conv) {
 function makeTimestamp() { return new Date().toISOString().replace(/[:.]/g, "-"); }
 function makeSlug(str) { return str.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, ""); }
 
+/** Append a user+assistant message pair to a conversation (used by capture endpoints) */
+function appendToConversation(conversationId, userText, assistantContent) {
+  if (!conversationId) return;
+  const conv = getConversation(Number(conversationId));
+  if (!conv) return;
+  saveConversation(conv.id, [
+    ...conv.messages,
+    { role: "user",      content: userText },
+    { role: "assistant", content: assistantContent },
+  ]);
+}
+
 async function saveNote({ title, mode, markdown, cards, course }) {
   const ts = makeTimestamp();
   const name = title ? makeSlug(title) : mode;
@@ -131,7 +143,7 @@ async function updateNoteFrontmatter(filename, updates) {
 
 // --- POST /action — single screenshot ---
 app.post("/action", async (req, res) => {
-  const { screenshot, mimeType = "image/png", mode = "summary", title } = req.body;
+  const { screenshot, mimeType = "image/png", mode = "summary", title, conversationId } = req.body;
   if (!screenshot) return res.status(400).json({ error: "screenshot is required" });
 
   try {
@@ -148,12 +160,14 @@ app.post("/action", async (req, res) => {
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title: title ?? mode, mode, markdown, cards });
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards });
+      appendToConversation(conversationId, `📸 Screenshot (${mode})`, markdown);
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: conversationId ?? null });
     }
 
     const saved = await saveNote({ title: title ?? mode, mode, markdown: raw });
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw });
+    appendToConversation(conversationId, `📸 Screenshot (${mode})`, raw);
+    res.json({ success: true, ...saved, markdown: raw, conversationId: conversationId ?? null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -162,7 +176,7 @@ app.post("/action", async (req, res) => {
 
 // --- POST /session — multi-page capture ---
 app.post("/session", async (req, res) => {
-  const { frames, title, mode = "session" } = req.body;
+  const { frames, title, mode = "session", conversationId } = req.body;
   if (!Array.isArray(frames) || frames.length === 0) {
     return res.status(400).json({ error: "frames array is required" });
   }
@@ -182,12 +196,14 @@ app.post("/session", async (req, res) => {
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title: sessionTitle, mode, markdown, cards });
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards });
+      appendToConversation(conversationId, `📸 ${frames.length} pages (${mode})`, markdown);
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: conversationId ?? null });
     }
 
     const saved = await saveNote({ title: sessionTitle, mode, markdown: raw });
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw });
+    appendToConversation(conversationId, `📸 ${frames.length} pages (${mode})`, raw);
+    res.json({ success: true, ...saved, markdown: raw, conversationId: conversationId ?? null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -196,7 +212,7 @@ app.post("/session", async (req, res) => {
 
 // --- POST /transcribe — audio capture ---
 app.post("/transcribe", async (req, res) => {
-  const { audio, mode = "summary", title } = req.body;
+  const { audio, mode = "summary", title, conversationId } = req.body;
   if (!audio) return res.status(400).json({ error: "audio (base64) is required" });
 
   try {
@@ -210,12 +226,14 @@ app.post("/transcribe", async (req, res) => {
       try { cards = JSON.parse(markdown); } catch { cards = [{ front: "Parse error", back: markdown }]; }
       const saved = await saveNote({ title: audioTitle, mode: audioMode, markdown, cards });
       logActivity();
-      return res.json({ success: true, ...saved, transcript, markdown, cards });
+      appendToConversation(conversationId, `🎙️ Audio recording (${mode})`, markdown);
+      return res.json({ success: true, ...saved, transcript, markdown, cards, conversationId: conversationId ?? null });
     }
 
     const saved = await saveNote({ title: audioTitle, mode: audioMode, markdown });
     logActivity();
-    res.json({ success: true, ...saved, transcript, markdown });
+    appendToConversation(conversationId, `🎙️ Audio recording (${mode})`, markdown);
+    res.json({ success: true, ...saved, transcript, markdown, conversationId: conversationId ?? null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -240,7 +258,7 @@ app.post("/ask-screen", async (req, res) => {
 
 // --- POST /ask — text selection query (no screenshot) ---
 app.post("/ask", async (req, res) => {
-  const { selectedText, mode = "summary", title } = req.body;
+  const { selectedText, mode = "summary", title, conversationId } = req.body;
   if (!selectedText) return res.status(400).json({ error: "selectedText is required" });
 
   try {
@@ -256,12 +274,14 @@ app.post("/ask", async (req, res) => {
       const markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
       const saved = await saveNote({ title: askTitle, mode, markdown, cards });
       logActivity();
-      return res.json({ success: true, ...saved, markdown, cards });
+      appendToConversation(conversationId, `📝 Selected text (${mode})`, markdown);
+      return res.json({ success: true, ...saved, markdown, cards, conversationId: conversationId ?? null });
     }
 
     const saved = await saveNote({ title: askTitle, mode, markdown: raw });
     logActivity();
-    res.json({ success: true, ...saved, markdown: raw });
+    appendToConversation(conversationId, `📝 Selected text (${mode})`, raw);
+    res.json({ success: true, ...saved, markdown: raw, conversationId: conversationId ?? null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });

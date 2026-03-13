@@ -138,10 +138,12 @@ export default function ChatPage() {
   const [renameVal,     setRenameVal]     = useState("");
   const [ctxMenu,       setCtxMenu]       = useState<CtxMenu | null>(null);
 
-  const bottomRef  = useRef<HTMLDivElement>(null);
+  const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const renameRef  = useRef<HTMLInputElement>(null);
-  const tabsRef    = useRef<HTMLDivElement>(null);
+  const renameRef   = useRef<HTMLInputElement>(null);
+  const tabsRef     = useRef<HTMLDivElement>(null);
+  const activeIdRef = useRef<number | null>(null);
+  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
 
   // ── Conversation list ────────────────────────────────────────────────────
 
@@ -186,6 +188,25 @@ export default function ChatPage() {
     const iv = setInterval(loadConversations, 3000);
     return () => clearInterval(iv);
   }, [loadConversations]);
+
+  // ── Poll active conversation messages (picks up sidebar captures) ─────────
+
+  useEffect(() => {
+    const iv = setInterval(async () => {
+      const id = activeIdRef.current;
+      if (!id) return;
+      try {
+        const r = await fetch(`${GATEWAY}/chat/history?conversationId=${id}`);
+        if (r.ok) {
+          const msgs: Message[] = await r.json();
+          setMessages(prev =>
+            JSON.stringify(prev) !== JSON.stringify(msgs) ? msgs : prev
+          );
+        }
+      } catch {}
+    }, 3000);
+    return () => clearInterval(iv);
+  }, []);
 
   // ── Auto-scroll ──────────────────────────────────────────────────────────
 
