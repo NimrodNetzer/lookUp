@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import FlashcardViewer from "../../components/FlashcardViewer";
+import CosmicBg from "../../components/CosmicBg";
 
 const GATEWAY = "http://localhost:18789";
 
@@ -247,8 +248,13 @@ function NotePageInner() {
 
 export default function NotePageClient() {
   return (
-    <Suspense fallback={<main className="max-w-2xl mx-auto px-5 py-8"><p className="text-muted">Loading…</p></main>}>
-      <NotePageInner />
-    </Suspense>
+    <>
+      <CosmicBg />
+      <div className="relative z-10">
+        <Suspense fallback={<main className="max-w-2xl mx-auto px-5 py-8"><p className="text-muted">Loading…</p></main>}>
+          <NotePageInner />
+        </Suspense>
+      </div>
+    </>
   );
 }

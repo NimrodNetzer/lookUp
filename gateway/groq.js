@@ -282,6 +282,19 @@ export async function chat(messages) {
   return response.choices[0].message.content;
 }
 
+/** Streaming variant — returns an async iterable of SSE chunks */
+export async function chatStream(messages) {
+  return groq.chat.completions.create({
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...messages,
+    ],
+    temperature: 0.6,
+    stream: true,
+  });
+}
+
 /**
  * Process a natural-language organisation command.
  * Returns a JSON string (array of action objects).

@@ -182,49 +182,131 @@ function DeleteButton({ note, onRefresh }: { note: Note; onRefresh: () => void }
   );
 }
 
-// ── Merge bar ─────────────────────────────────────────────────────────────────
-function MergeBar({
-  selected, onClear, onMerge,
+// ── Selection action bar ───────────────────────────────────────────────────────
+function SelectionBar({
+  selected, folders, onClear, onMerge, onDelete, onTransfer,
 }: {
   selected: Set<string>;
+  folders: FolderNode[];
   onClear: () => void;
   onMerge: (title: string) => Promise<void>;
+  onDelete: () => Promise<void>;
+  onTransfer: (folderId: number | null) => Promise<void>;
 }) {
+  const [action,  setAction]  = useState<"merge" | "move" | null>(null);
   const [title,   setTitle]   = useState("");
   const [loading, setLoading] = useState(false);
+  const flatFolders = useMemo(() => flattenFolders(folders), [folders]);
 
-  async function handleMerge() {
+  async function doMerge() {
     setLoading(true);
     await onMerge(title.trim());
     setLoading(false);
     setTitle("");
+    setAction(null);
+  }
+
+  async function doDelete() {
+    setLoading(true);
+    await onDelete();
+    setLoading(false);
+  }
+
+  async function doTransfer(folderId: number | null) {
+    setLoading(true);
+    await onTransfer(folderId);
+    setLoading(false);
+    setAction(null);
   }
 
   return (
-    <div className="sticky top-0 z-10 mb-4 flex items-center gap-2 bg-surface border border-accent/40 rounded-xl px-4 py-3 shadow-lg">
-      <GitMerge className="w-4 h-4 text-accent shrink-0" />
-      <span className="text-xs font-semibold text-accent">{selected.size} selected</span>
-      <input
-        type="text"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter") handleMerge(); }}
-        placeholder="Merged note title (optional)…"
-        className="flex-1 bg-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text placeholder:text-muted outline-none focus:border-accent transition-colors min-w-0"
-      />
-      <button
-        onClick={handleMerge}
-        disabled={loading || selected.size < 2}
-        className="px-3 py-1.5 text-xs font-semibold bg-accent text-white rounded-lg hover:bg-accent/80 disabled:opacity-40 transition-colors shrink-0"
-      >
-        {loading ? "Merging…" : "Merge"}
-      </button>
-      <button
-        onClick={onClear}
-        className="text-xs text-muted hover:text-text transition-colors shrink-0"
-      >
-        Cancel
-      </button>
+    <div className="sticky top-0 z-10 mb-4 bg-surface border border-accent/40 rounded-xl shadow-lg overflow-hidden">
+      {/* Main row */}
+      <div className="flex items-center gap-2 px-4 py-3">
+        <span className="text-xs font-semibold text-accent shrink-0">{selected.size} selected</span>
+
+        <button
+          onClick={() => setAction(action === "merge" ? null : "merge")}
+          disabled={selected.size < 2 || loading}
+          className={clsx(
+            "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors shrink-0 disabled:opacity-30",
+            action === "merge" ? "bg-accent/20 border-accent/50 text-accent" : "border-border text-muted hover:border-accent/40 hover:text-text"
+          )}
+        >
+          <GitMerge className="w-3 h-3" /> Merge
+        </button>
+
+        <button
+          onClick={() => setAction(action === "move" ? null : "move")}
+          disabled={loading}
+          className={clsx(
+            "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors shrink-0 disabled:opacity-30",
+            action === "move" ? "bg-teal/20 border-teal/50 text-teal" : "border-border text-muted hover:border-teal/40 hover:text-text"
+          )}
+        >
+          <FolderSymlink className="w-3 h-3" /> Move
+        </button>
+
+        <button
+          onClick={doDelete}
+          disabled={loading}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border text-muted hover:border-red-400/40 hover:text-red-400 disabled:opacity-30 transition-colors shrink-0"
+        >
+          <Trash2 className="w-3 h-3" /> Delete
+        </button>
+
+        <button onClick={onClear} className="ml-auto text-xs text-muted hover:text-text transition-colors shrink-0">
+          Cancel
+        </button>
+      </div>
+
+      {/* Merge sub-row */}
+      {action === "merge" && (
+        <div className="flex items-center gap-2 px-4 py-2.5 border-t border-border/60 bg-bg/40">
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") doMerge(); }}
+            placeholder="Merged note title (optional)…"
+            className="flex-1 bg-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text placeholder:text-muted outline-none focus:border-accent transition-colors min-w-0"
+          />
+          <button
+            onClick={doMerge}
+            disabled={loading}
+            className="px-3 py-1.5 text-xs font-semibold bg-accent text-white rounded-lg hover:bg-accent/80 disabled:opacity-40 transition-colors shrink-0"
+          >
+            {loading ? "Merging…" : "Merge"}
+          </button>
+        </div>
+      )}
+
+      {/* Move sub-row */}
+      {action === "move" && (
+        <div className="px-4 py-2 border-t border-border/60 bg-bg/40 max-h-48 overflow-y-auto">
+          <button
+            onClick={() => doTransfer(null)}
+            disabled={loading}
+            className="w-full text-left px-3 py-2 text-xs text-muted hover:bg-accent/10 hover:text-text rounded-lg transition-colors italic"
+          >
+            None (unsorted)
+          </button>
+          {flatFolders.map(({ folder, depth }) => (
+            <button
+              key={folder.id}
+              onClick={() => doTransfer(folder.id)}
+              disabled={loading}
+              style={{ paddingLeft: `${12 + depth * 14}px` }}
+              className="w-full text-left py-2 pr-3 text-xs text-text hover:bg-accent/10 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-40"
+            >
+              📁 {folder.name}
+            </button>
+          ))}
+          {flatFolders.length === 0 && (
+            <p className="text-xs text-muted px-3 py-2">No folders yet</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -282,7 +364,7 @@ export default function NotesList({
   const [rangeTo,        setRangeTo]        = useState("");
   const [selectMode,     setSelectMode]     = useState(false);
   const [selected,       setSelected]       = useState<Set<string>>(new Set());
-  const [mergeError,     setMergeError]     = useState<string | null>(null);
+  const [actionError,    setActionError]    = useState<string | null>(null);
 
   // Context menu
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; note: Note } | null>(null);
@@ -378,7 +460,7 @@ export default function NotesList({
   function toggleSelectMode() {
     setSelectMode((s) => !s);
     setSelected(new Set());
-    setMergeError(null);
+    setActionError(null);
   }
 
   function toggleNote(filename: string) {
@@ -390,7 +472,7 @@ export default function NotesList({
   }
 
   async function handleMerge(title: string) {
-    setMergeError(null);
+    setActionError(null);
     try {
       const res = await fetch(`${GATEWAY}/notes/merge`, {
         method: "POST",
@@ -403,7 +485,43 @@ export default function NotesList({
       setSelected(new Set());
       onRefresh();
     } catch (err: unknown) {
-      setMergeError(err instanceof Error ? err.message : "Merge failed");
+      setActionError(err instanceof Error ? err.message : "Merge failed");
+    }
+  }
+
+  async function handleDeleteSelected() {
+    setActionError(null);
+    try {
+      await Promise.all(
+        Array.from(selected).map((f) =>
+          fetch(`${GATEWAY}/notes/${encodeURIComponent(f)}`, { method: "DELETE" })
+        )
+      );
+      setSelectMode(false);
+      setSelected(new Set());
+      onRefresh();
+    } catch {
+      setActionError("Delete failed");
+    }
+  }
+
+  async function handleTransferSelected(folderId: number | null) {
+    setActionError(null);
+    try {
+      await Promise.all(
+        Array.from(selected).map((f) =>
+          fetch(`${GATEWAY}/notes/${encodeURIComponent(f)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ folder_id: folderId }),
+          })
+        )
+      );
+      setSelectMode(false);
+      setSelected(new Set());
+      onRefresh();
+    } catch {
+      setActionError("Move failed");
     }
   }
 
@@ -428,11 +546,10 @@ export default function NotesList({
           📅 Range
         </button>
         <button onClick={toggleSelectMode}
-          className={clsx("px-3 py-1 text-xs font-semibold rounded-full border transition-colors flex items-center gap-1",
+          className={clsx("px-3 py-1 text-xs font-semibold rounded-full border transition-colors",
             selectMode ? "bg-accent/20 border-accent/50 text-accent" : "border-border text-muted hover:border-accent/40 hover:text-text"
           )}>
-          <GitMerge className="w-3 h-3" />
-          {selectMode ? "Cancel" : "Select & Merge"}
+          {selectMode ? "Cancel" : "Select"}
         </button>
         <div className="ml-auto flex rounded-lg overflow-hidden border border-border">
           {(["date", "alpha"] as SortMode[]).map((s) => (
@@ -466,12 +583,19 @@ export default function NotesList({
           className="w-full pl-9 pr-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-text placeholder:text-muted outline-none focus:border-accent transition-colors" />
       </div>
 
-      {/* Merge bar */}
-      {selectMode && selected.size >= 2 && (
-        <MergeBar selected={selected} onClear={toggleSelectMode} onMerge={handleMerge} />
+      {/* Selection action bar */}
+      {selectMode && selected.size >= 1 && (
+        <SelectionBar
+          selected={selected}
+          folders={folders}
+          onClear={toggleSelectMode}
+          onMerge={handleMerge}
+          onDelete={handleDeleteSelected}
+          onTransfer={handleTransferSelected}
+        />
       )}
-      {mergeError && (
-        <p className="text-xs text-red-400 mb-3 px-1">{mergeError}</p>
+      {actionError && (
+        <p className="text-xs text-red-400 mb-3 px-1">{actionError}</p>
       )}
 
       {/* Empty state */}

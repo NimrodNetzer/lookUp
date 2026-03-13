@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Sparkles } from "lucide-react";
 import clsx from "clsx";
 
@@ -16,6 +16,15 @@ export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
   const [log,     setLog]     = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetch(`${GATEWAY}/command/log`)
+      .then(r => r.ok ? r.json() : [])
+      .then((entries: { type: string; text: string }[]) => {
+        setLog(entries.map(e => ({ type: e.type as LogEntry["type"], text: e.text })));
+      })
+      .catch(() => {});
+  }, []);
 
   async function send() {
     const cmd = input.trim();

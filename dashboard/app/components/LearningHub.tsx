@@ -258,25 +258,28 @@ function SidebarDropTarget({ label, count, active, onClick, onDrop }: {
   );
 }
 
-// ── Sidebar folder row — small drop target ────────────────────────────────────
-function SidebarFolderDropTarget({ folder, depth, onDrop }: {
-  folder: FolderNode; depth: number; onDrop: (filename: string) => void;
+// ── Sidebar folder row — drop target + click to navigate ─────────────────────
+function SidebarFolderDropTarget({ folder, depth, onDrop, onSelect }: {
+  folder: FolderNode; depth: number;
+  onDrop: (filename: string) => void;
+  onSelect: (id: number) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
   return (
-    <div
+    <button
+      onClick={() => onSelect(folder.id)}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.getData("text/plain"); if (f) onDrop(f); }}
       style={{ paddingLeft: `${16 + depth * 12}px` }}
       className={clsx(
-        "flex items-center gap-1.5 py-1.5 pr-3 text-xs transition-colors rounded-sm cursor-default",
-        dragOver ? "bg-teal/15 text-teal" : "text-muted hover:text-text"
+        "w-full text-left flex items-center gap-1.5 py-1.5 pr-3 text-xs transition-colors rounded-sm",
+        dragOver ? "bg-teal/15 text-teal" : "text-muted hover:text-text hover:bg-surface/60"
       )}
     >
       <span className="text-sm">{dragOver ? "📂" : "📁"}</span>
       <span className="truncate">{folder.name}</span>
-    </div>
+    </button>
   );
 }
 
@@ -289,6 +292,8 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
   const [localNotes,      setLocalNotes]      = useState<Note[]>(notes);
   const [addingFolder,    setAddingFolder]    = useState(false);
   const [showUnattached,  setShowUnattached]  = useState(false);
+  const [toast,           setToast]           = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchFolders = useCallback(async () => {
     try {
@@ -403,6 +408,12 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
     return activeType !== null ? showingNotes.filter((n) => getTypeKey(n.mode) === activeType) : showingNotes;
   }, [showingNotes, activeType]);
 
+  function showToast(msg: string) {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2500);
+  }
+
   async function handleDropNote(filename: string, folderId: number) {
     try {
       await fetch(`${GATEWAY}/notes/${encodeURIComponent(filename)}`, {
@@ -410,6 +421,10 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folder_id: folderId === -1 ? null : folderId }),
       });
+      const targetName = folderId === -1
+        ? "Unsorted"
+        : (findFolder(folders, folderId)?.name ?? "folder");
+      showToast(`Moved to "${targetName}"`);
       refresh();
     } catch {}
   }
@@ -432,7 +447,13 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
       : (activeType ? `Unsorted — ${typeLabel}` : "Unsorted Notes");
 
   return (
-    <div className="flex gap-6 items-start">
+    <div className="flex gap-6 items-start relative">
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-surface border border-border rounded-xl px-5 py-2.5 text-sm text-text shadow-lg pointer-events-none animate-fadeIn">
+          {toast}
+        </div>
+      )}
       {/* ── Left sidebar — unattached type filter + AI Organiser ─────────── */}
       <aside className="w-52 flex-shrink-0 sticky top-8 flex flex-col gap-3">
 
@@ -505,6 +526,7 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
                   folder={folder}
                   depth={depth}
                   onDrop={(filename) => handleDropNote(filename, folder.id)}
+                  onSelect={setActiveFolderId}
                 />
               ))}
             </div>
@@ -555,36 +577,40 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
               ))}
             </nav>
           </div>
-          <Link
-            href="/chat"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-muted hover:text-accent border border-border hover:border-accent/40 bg-surface rounded-lg transition-colors"
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
-            Chat
-          </Link>
-        </div>
-
-        {/* Action bar — New folder button / inline input */}
-        <div className="flex items-center gap-3">
-          {addingFolder ? (
-            <div className="flex items-center gap-2 bg-surface border border-accent/40 rounded-lg px-3 py-2">
-              <span className="text-base">📁</span>
-              <InlineInput
-                placeholder="Folder name…"
-                onConfirm={handleCreateFolder}
-                onCancel={() => setAddingFolder(false)}
-              />
-            </div>
-          ) : (
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setAddingFolder(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border hover:border-accent/50 rounded-lg text-muted hover:text-accent transition-colors text-xs font-semibold"
+              onClick={() => setAddingFolder((v) => !v)}
+              className={clsx(
+                "flex items-center gap-1.5 px-3 py-1.5 bg-surface border rounded-lg transition-colors text-xs font-semibold",
+                addingFolder
+                  ? "border-accent/50 text-accent"
+                  : "border-border text-muted hover:border-accent/50 hover:text-accent"
+              )}
             >
               <Plus className="w-3.5 h-3.5" />
               New folder
             </button>
-          )}
+            <Link
+              href="/chat"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-muted hover:text-accent border border-border hover:border-accent/40 bg-surface rounded-lg transition-colors"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              Chat
+            </Link>
+          </div>
         </div>
+
+        {/* Inline new-folder input — shown below header when active */}
+        {addingFolder && (
+          <div className="flex items-center gap-2 bg-surface border border-accent/40 rounded-lg px-3 py-2 self-start">
+            <span className="text-base">📁</span>
+            <InlineInput
+              placeholder="Folder name…"
+              onConfirm={handleCreateFolder}
+              onCancel={() => setAddingFolder(false)}
+            />
+          </div>
+        )}
 
         {/* Folder cards grid */}
         {displayFolders.length > 0 && (
