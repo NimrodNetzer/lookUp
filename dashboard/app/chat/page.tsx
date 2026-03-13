@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
+import CosmicBg from "../components/CosmicBg";
 
 const GATEWAY = "http://127.0.0.1:18789";
 
@@ -342,19 +343,16 @@ export default function ChatPage() {
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
+    <>
+    <CosmicBg variant="dark" />
     <div className="chat-page">
 
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      {/* ── Header + tabs (single row) ──────────────────────────────────────── */}
       <header className="chat-header">
         <span className="chat-logo">LookUp</span>
-        <span className="chat-model-badge">Llama 4 Scout</span>
-        <Link href="/" className="chat-back">← Dashboard</Link>
-      </header>
+        <div className="chat-header-divider" />
 
-      {/* ── Tab bar ────────────────────────────────────────────────────────── */}
-      <div className="chat-tabs-wrap">
         <div className="chat-tabs" ref={tabsRef} onWheel={onTabsWheel}>
-
           {conversations.map(conv =>
             renamingId === conv.id ? (
               <div key={conv.id} className="chat-tab active renaming">
@@ -384,13 +382,11 @@ export default function ChatPage() {
               </button>
             )
           )}
-
         </div>
 
-        <button className="chat-new-tab" onClick={newConversation} title="New conversation">
-          +
-        </button>
-      </div>
+        <button className="chat-new-tab" onClick={newConversation} title="New conversation">+</button>
+        <Link href="/" className="chat-back">← Dashboard</Link>
+      </header>
 
       {/* ── Messages ───────────────────────────────────────────────────────── */}
       <div className="chat-messages">
@@ -448,7 +444,6 @@ export default function ChatPage() {
             aria-label="Send"
           >↑</button>
         </div>
-        <p className="chat-hint">Enter to send · Shift+Enter for new line</p>
       </div>
 
       {/* ── Context menu ───────────────────────────────────────────────────── */}
@@ -478,5 +473,6 @@ export default function ChatPage() {
       )}
 
     </div>
+    </>
   );
 }
