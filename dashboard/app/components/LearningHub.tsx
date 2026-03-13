@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import Link from "next/link";
 import NotesList from "./NotesList";
 import CommandChat from "./CommandChat";
 import { FolderNode } from "./FolderTree";
-import { Plus, Pencil, Trash2, Check, X, ChevronRight } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, X, ChevronRight, MessageSquare } from "lucide-react";
 import clsx from "clsx";
 
 const GATEWAY = "http://127.0.0.1:18789";
@@ -56,6 +57,14 @@ function getFolderPath(nodes: FolderNode[], id: number): FolderNode[] {
   return [];
 }
 
+function countNotesRecursive(node: FolderNode, counts: Record<number, number>): number {
+  return (counts[node.id] ?? 0) + node.children.reduce((s, c) => s + countNotesRecursive(c, counts), 0);
+}
+
+function flattenFolders(nodes: FolderNode[], depth = 0): { folder: FolderNode; depth: number }[] {
+  return nodes.flatMap((n) => [{ folder: n, depth }, ...flattenFolders(n.children, depth + 1)]);
+}
+
 // ── Inline text input ─────────────────────────────────────────────────────────
 function InlineInput({ initial = "", placeholder, onConfirm, onCancel }: {
   initial?: string;
@@ -91,13 +100,14 @@ function InlineInput({ initial = "", placeholder, onConfirm, onCancel }: {
 }
 
 // ── Folder card ───────────────────────────────────────────────────────────────
-function FolderCard({ folder, noteCount, subfolderCount, onSelect, onDropNote, onRefresh }: {
+function FolderCard({ folder, noteCount, subfolderCount, onSelect, onDropNote, onRefresh, isSubfolder }: {
   folder: FolderNode;
   noteCount: number;
   subfolderCount: number;
   onSelect: (id: number) => void;
   onDropNote: (filename: string, folderId: number) => void;
   onRefresh: () => void;
+  isSubfolder?: boolean;
 }) {
   const [dragOver,   setDragOver]   = useState(false);
   const [renaming,   setRenaming]   = useState(false);
@@ -130,14 +140,21 @@ function FolderCard({ folder, noteCount, subfolderCount, onSelect, onDropNote, o
         if (filename) onDropNote(filename, folder.id);
       }}
       className={clsx(
-        "relative group bg-surface border-2 rounded-xl p-5 cursor-pointer transition-all select-none",
+        "relative group border-2 rounded-xl cursor-pointer transition-all select-none",
+        isSubfolder
+          ? "bg-surface/50 p-3"
+          : "bg-surface p-5",
         dragOver
           ? "border-teal/60 bg-teal/10 scale-[1.02]"
-          : "border-border hover:border-accent/50 hover:shadow-md"
+          : isSubfolder
+            ? "border-border/50 hover:border-accent/30 hover:bg-surface/80"
+            : "border-border hover:border-accent/50 hover:shadow-md"
       )}
     >
       {/* Folder icon */}
-      <div className="text-4xl mb-3">{dragOver ? "📂" : "📁"}</div>
+      <div className={clsx("mb-2", isSubfolder ? "text-2xl" : "text-4xl mb-3")}>
+        {dragOver ? "📂" : isSubfolder ? "🗂️" : "📁"}
+      </div>
 
       {/* Name or rename input */}
       {renaming ? (
@@ -148,14 +165,16 @@ function FolderCard({ folder, noteCount, subfolderCount, onSelect, onDropNote, o
           onCancel={() => setRenaming(false)}
         />
       ) : (
-        <p className="font-semibold text-sm text-text truncate pr-6">{folder.name}</p>
+        <p className={clsx("truncate pr-6", isSubfolder ? "text-xs font-medium text-muted" : "font-semibold text-sm text-text")}>
+          {folder.name}
+        </p>
       )}
 
       {/* Meta */}
       {!renaming && (
-        <p className="text-xs text-muted mt-1.5">
+        <p className="text-[10px] text-muted/70 mt-1">
           {noteCount} note{noteCount !== 1 ? "s" : ""}
-          {subfolderCount > 0 && ` · ${subfolderCount} folder${subfolderCount !== 1 ? "s" : ""}`}
+          {subfolderCount > 0 && ` · ${subfolderCount} sub`}
         </p>
       )}
 
@@ -214,110 +233,49 @@ function FolderCard({ folder, noteCount, subfolderCount, onSelect, onDropNote, o
   );
 }
 
-// ── Current folder card (highlighted "you are here" card) ────────────────────
-function CurrentFolderCard({ folder, noteCount, onDropNote, onRefresh }: {
-  folder: FolderNode;
-  noteCount: number;
-  onDropNote: (filename: string, folderId: number) => void;
-  onRefresh: () => void;
+// ── Sidebar drop target — "Unsorted" button that also accepts drops ───────────
+function SidebarDropTarget({ label, count, active, onClick, onDrop }: {
+  label: string; count: number; active: boolean;
+  onClick: () => void; onDrop: (filename: string) => void;
 }) {
-  const [dragOver,   setDragOver]   = useState(false);
-  const [renaming,   setRenaming]   = useState(false);
-  const [confirming, setConfirming] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.getData("text/plain"); if (f) onDrop(f); }}
+      className={clsx(
+        "text-left px-4 py-2 text-xs transition-colors flex items-center justify-between",
+        dragOver ? "bg-teal/15 text-teal border-l-2 border-teal/60"
+          : active ? "bg-accent/15 text-accent font-semibold"
+          : "text-muted hover:text-text hover:bg-surface/60"
+      )}
+    >
+      <span>{label}</span>
+      <span className="text-[10px]">{count}</span>
+    </button>
+  );
+}
 
-  async function handleRename(name: string) {
-    await fetch(`${GATEWAY}/folders/${folder.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    setRenaming(false);
-    onRefresh();
-  }
-
-  async function handleDelete() {
-    await fetch(`${GATEWAY}/folders/${folder.id}`, { method: "DELETE" });
-    onRefresh();
-  }
-
+// ── Sidebar folder row — small drop target ────────────────────────────────────
+function SidebarFolderDropTarget({ folder, depth, onDrop }: {
+  folder: FolderNode; depth: number; onDrop: (filename: string) => void;
+}) {
+  const [dragOver, setDragOver] = useState(false);
   return (
     <div
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDragOver(false);
-        const filename = e.dataTransfer.getData("text/plain");
-        if (filename) onDropNote(filename, folder.id);
-      }}
+      onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.getData("text/plain"); if (f) onDrop(f); }}
+      style={{ paddingLeft: `${16 + depth * 12}px` }}
       className={clsx(
-        "relative group bg-surface border-2 rounded-xl p-5 select-none transition-all",
-        dragOver
-          ? "border-teal/60 bg-teal/10 scale-[1.02]"
-          : "border-accent/60 bg-accent/5"
+        "flex items-center gap-1.5 py-1.5 pr-3 text-xs transition-colors rounded-sm cursor-default",
+        dragOver ? "bg-teal/15 text-teal" : "text-muted hover:text-text"
       )}
     >
-      {/* Open folder icon */}
-      <div className="text-4xl mb-3">{dragOver ? "📂" : "📂"}</div>
-
-      {/* Name or rename input */}
-      {renaming ? (
-        <InlineInput
-          initial={folder.name}
-          placeholder="Folder name…"
-          onConfirm={handleRename}
-          onCancel={() => setRenaming(false)}
-        />
-      ) : (
-        <p className="font-bold text-sm text-accent truncate pr-6">{folder.name}</p>
-      )}
-
-      {/* Meta */}
-      {!renaming && (
-        <p className="text-xs text-muted mt-1.5">{noteCount} note{noteCount !== 1 ? "s" : ""}</p>
-      )}
-
-      {/* "Current" badge */}
-      {!renaming && !confirming && (
-        <span className="absolute top-2.5 left-3 text-[9px] font-bold uppercase tracking-widest text-accent/60">
-          Current
-        </span>
-      )}
-
-      {/* Action buttons on hover */}
-      {!renaming && !confirming && (
-        <div
-          className="absolute top-2 right-2 hidden group-hover:flex items-center gap-0.5"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button title="Rename" onClick={() => setRenaming(true)}
-            className="p-1 rounded hover:bg-accent/15 text-muted hover:text-accent transition-colors">
-            <Pencil className="w-3.5 h-3.5" />
-          </button>
-          <button title="Delete" onClick={() => setConfirming(true)}
-            className="p-1 rounded hover:bg-red-500/15 text-muted hover:text-red-400 transition-colors">
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Delete confirmation overlay */}
-      {confirming && (
-        <div className="absolute inset-0 bg-surface/95 rounded-xl flex flex-col items-center justify-center gap-3 p-4"
-          onClick={(e) => e.stopPropagation()}>
-          <p className="text-xs text-text font-semibold text-center">Delete "{folder.name}"?</p>
-          <div className="flex gap-2">
-            <button onClick={handleDelete}
-              className="px-3 py-1 text-xs bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/30 font-semibold transition-colors">
-              Delete
-            </button>
-            <button onClick={() => setConfirming(false)}
-              className="px-3 py-1 text-xs text-muted hover:text-text border border-border rounded-lg transition-colors">
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      <span className="text-sm">{dragOver ? "📂" : "📁"}</span>
+      <span className="truncate">{folder.name}</span>
     </div>
   );
 }
@@ -400,7 +358,7 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
     return counts;
   }, [showingNotes]);
 
-  // Note counts per folder
+  // Direct note counts per folder (no children)
   const notesPerFolder = useMemo(() => {
     const counts: Record<number, number> = {};
     for (const n of localNotes) {
@@ -408,6 +366,19 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
     }
     return counts;
   }, [localNotes]);
+
+  // Recursive note counts (folder + all descendants)
+  const totalNotesPerFolder = useMemo(() => {
+    const result: Record<number, number> = {};
+    function fill(nodes: FolderNode[]) {
+      for (const node of nodes) {
+        fill(node.children);
+        result[node.id] = countNotesRecursive(node, notesPerFolder);
+      }
+    }
+    fill(folders);
+    return result;
+  }, [folders, notesPerFolder]);
 
   // Active folder node and its immediate children (subfolders)
   const activeFolder = useMemo(
@@ -437,7 +408,7 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
       await fetch(`${GATEWAY}/notes/${encodeURIComponent(filename)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folder_id: folderId }),
+        body: JSON.stringify({ folder_id: folderId === -1 ? null : folderId }),
       });
       refresh();
     } catch {}
@@ -455,21 +426,21 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
 
   const typeLabel = TYPE_GROUPS.find((g) => g.key === activeType)?.label;
   const notesLabel = activeFolderId !== null && showUnattached
-    ? (activeType ? `Unattached — ${typeLabel}` : "Unattached Notes")
+    ? (activeType ? `Unsorted — ${typeLabel}` : "Unsorted Notes")
     : activeFolderId !== null
       ? (activeType ? `${activeFolder?.name ?? "Folder"} — ${typeLabel}` : (activeFolder?.name ?? "Folder"))
-      : (activeType ? `Unattached — ${typeLabel}` : "Unattached Notes");
+      : (activeType ? `Unsorted — ${typeLabel}` : "Unsorted Notes");
 
   return (
     <div className="flex gap-6 items-start">
       {/* ── Left sidebar — unattached type filter + AI Organiser ─────────── */}
-      <aside className="w-48 flex-shrink-0 sticky top-8 flex flex-col gap-3">
+      <aside className="w-52 flex-shrink-0 sticky top-8 flex flex-col gap-3">
 
         {/* Type filter */}
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
           <div className="px-4 py-3 border-b border-border">
             <span className="text-xs font-semibold text-muted uppercase tracking-widest">
-              {activeFolderId !== null ? "Filter" : "Unattached"}
+              {activeFolderId !== null ? "Filter" : "Unsorted"}
             </span>
           </div>
           <div className="flex flex-col py-1">
@@ -482,7 +453,7 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
                   : "text-muted hover:text-text hover:bg-surface/60"
               )}
             >
-              <span>{activeFolderId !== null ? "All notes" : "All unattached"}</span>
+              <span>{activeFolderId !== null ? "All notes" : "All unsorted"}</span>
               <span className="text-[10px]">{contextNotes.length}</span>
             </button>
             {TYPE_GROUPS.map(({ key, label, icon }) => {
@@ -509,22 +480,36 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
             {activeFolderId !== null && (
               <>
                 <div className="mx-3 my-1 border-t border-border/50" />
-                <button
+                <SidebarDropTarget
+                  label="Unsorted"
+                  count={unattachedNotes.length}
+                  active={showUnattached}
                   onClick={() => { setShowUnattached((v) => !v); setActiveType(null); }}
-                  className={clsx(
-                    "text-left px-4 py-2 text-xs transition-colors flex items-center justify-between",
-                    showUnattached
-                      ? "bg-accent/15 text-accent font-semibold"
-                      : "text-muted hover:text-text hover:bg-surface/60"
-                  )}
-                >
-                  <span>Unattached</span>
-                  <span className="text-[10px]">{unattachedNotes.length}</span>
-                </button>
+                  onDrop={(filename) => handleDropNote(filename, -1)}
+                />
               </>
             )}
           </div>
         </div>
+
+        {/* Folder drop targets */}
+        {folders.length > 0 && (
+          <div className="bg-surface border border-border rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-border">
+              <span className="text-xs font-semibold text-muted uppercase tracking-widest">Drop to folder</span>
+            </div>
+            <div className="flex flex-col py-1 max-h-48 overflow-y-auto">
+              {flattenFolders(folders).map(({ folder, depth }) => (
+                <SidebarFolderDropTarget
+                  key={folder.id}
+                  folder={folder}
+                  depth={depth}
+                  onDrop={(filename) => handleDropNote(filename, folder.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* AI Organiser */}
         <CommandChat onRefresh={refresh} />
@@ -534,71 +519,56 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
       <main className="flex-1 min-w-0 flex flex-col gap-5">
 
         {/* Breadcrumb + back button */}
-        <div className="flex items-center gap-3">
-          {activeFolderId !== null && (
-            <button
-              onClick={() => setActiveFolderId(parentFolderId)}
-              className="flex items-center gap-1.5 text-xs text-muted hover:text-text transition-colors px-2.5 py-1.5 rounded-lg border border-border hover:border-accent/40 bg-surface"
-            >
-              ← Back
-            </button>
-          )}
-          <nav className="flex items-center gap-1.5 text-xs flex-wrap">
-            <button
-              onClick={() => { setActiveFolderId(null); setActiveType(null); }}
-              className={clsx(
-                "font-semibold transition-colors",
-                activeFolderId === null ? "text-text" : "text-muted hover:text-text"
-              )}
-            >
-              Folders
-            </button>
-            {folderPath.map((f, i) => (
-              <span key={f.id} className="flex items-center gap-1.5">
-                <ChevronRight className="w-3 h-3 text-muted/50" />
-                <button
-                  onClick={() => setActiveFolderId(f.id)}
-                  className={clsx(
-                    "font-semibold transition-colors",
-                    i === folderPath.length - 1 ? "text-text" : "text-muted hover:text-text"
-                  )}
-                >
-                  {f.name}
-                </button>
-              </span>
-            ))}
-          </nav>
+        <div className="flex items-center gap-3 justify-between">
+          <div className="flex items-center gap-3">
+            {activeFolderId !== null && (
+              <button
+                onClick={() => setActiveFolderId(parentFolderId)}
+                className="flex items-center gap-1.5 text-xs text-muted hover:text-text transition-colors px-2.5 py-1.5 rounded-lg border border-border hover:border-accent/40 bg-surface"
+              >
+                ← Back
+              </button>
+            )}
+            <nav className="flex items-center gap-1.5 text-xs flex-wrap">
+              <button
+                onClick={() => { setActiveFolderId(null); setActiveType(null); }}
+                className={clsx(
+                  "font-semibold transition-colors",
+                  activeFolderId === null ? "text-text" : "text-muted hover:text-text"
+                )}
+              >
+                Folders
+              </button>
+              {folderPath.map((f, i) => (
+                <span key={f.id} className="flex items-center gap-1.5">
+                  <ChevronRight className="w-3 h-3 text-muted/50" />
+                  <button
+                    onClick={() => setActiveFolderId(f.id)}
+                    className={clsx(
+                      "font-semibold transition-colors",
+                      i === folderPath.length - 1 ? "text-text" : "text-muted hover:text-text"
+                    )}
+                  >
+                    {f.name}
+                  </button>
+                </span>
+              ))}
+            </nav>
+          </div>
+          <Link
+            href="/chat"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-muted hover:text-accent border border-border hover:border-accent/40 bg-surface rounded-lg transition-colors"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            Chat
+          </Link>
         </div>
 
-        {/* Folder cards grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 items-start">
-          {/* Current folder card — shown when inside a folder */}
-          {activeFolderId !== null && activeFolder && (
-            <CurrentFolderCard
-              folder={activeFolder}
-              noteCount={notesPerFolder[activeFolder.id] ?? 0}
-              onDropNote={handleDropNote}
-              onRefresh={refresh}
-            />
-          )}
-
-          {/* Subfolders (when inside) or root folders (at top level) */}
-          {displayFolders.map((folder) => (
-            <FolderCard
-              key={folder.id}
-              folder={folder}
-              noteCount={notesPerFolder[folder.id] ?? 0}
-              subfolderCount={folder.children.length}
-              onSelect={setActiveFolderId}
-              onDropNote={handleDropNote}
-              onRefresh={refresh}
-            />
-          ))}
-
-          {/* New folder — compact button */}
+        {/* Action bar — New folder button / inline input */}
+        <div className="flex items-center gap-3">
           {addingFolder ? (
-            <div className="bg-surface border-2 border-accent/40 rounded-xl p-4 self-start">
-              <div className="text-2xl mb-2">📁</div>
+            <div className="flex items-center gap-2 bg-surface border border-accent/40 rounded-lg px-3 py-2">
+              <span className="text-base">📁</span>
               <InlineInput
                 placeholder="Folder name…"
                 onConfirm={handleCreateFolder}
@@ -608,28 +578,61 @@ export default function LearningHub({ notes, onRefresh }: { notes: Note[]; onRef
           ) : (
             <button
               onClick={() => setAddingFolder(true)}
-              className="self-start flex items-center gap-2 px-4 py-3 bg-surface border border-dashed border-border rounded-xl text-muted hover:text-accent hover:border-accent/50 transition-colors text-xs font-semibold"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border hover:border-accent/50 rounded-lg text-muted hover:text-accent transition-colors text-xs font-semibold"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-3.5 h-3.5" />
               New folder
             </button>
           )}
         </div>
 
+        {/* Folder cards grid */}
+        {displayFolders.length > 0 && (
+          <div>
+            {activeFolderId !== null && (
+              <p className="text-xs font-semibold text-muted uppercase tracking-widest mb-3">
+                Subfolders
+              </p>
+            )}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 items-start">
+              {displayFolders.map((folder) => (
+                <FolderCard
+                  key={folder.id}
+                  folder={folder}
+                  noteCount={totalNotesPerFolder[folder.id] ?? 0}
+                  subfolderCount={folder.children.length}
+                  onSelect={setActiveFolderId}
+                  onDropNote={handleDropNote}
+                  onRefresh={refresh}
+                  isSubfolder={activeFolderId !== null}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Notes section */}
         <div>
-          <div className="flex items-center gap-2 mb-4">
-            <h2 className="text-sm font-semibold text-muted uppercase tracking-widest">
+          <div className="flex items-center gap-3 mb-4 pb-2 border-b border-border">
+            <h2 className="text-sm font-bold text-text">
               {notesLabel}
             </h2>
-            {activeType !== null && activeFolderId !== null && (
+            {activeType !== null && (
               <span className="text-xs bg-accent/10 text-accent/80 px-2 py-0.5 rounded-full border border-accent/20">
                 {TYPE_GROUPS.find((g) => g.key === activeType)?.label}
               </span>
             )}
-            <span className="text-xs text-muted">— {visibleNotes.length}</span>
+            <span className="text-xs text-muted ml-auto">{visibleNotes.length} note{visibleNotes.length !== 1 ? "s" : ""}</span>
           </div>
-          <NotesList notes={visibleNotes} folders={folders} onRefresh={refresh} />
+          {visibleNotes.length === 0 && activeFolderId !== null && !showUnattached ? (
+            <div className="text-center py-12 text-muted text-sm border border-dashed border-border/50 rounded-xl">
+              <p className="text-2xl mb-2">📭</p>
+              <p className="font-medium">This folder is empty</p>
+              <p className="text-xs mt-1 text-muted/70">Drag notes here, or capture something from the extension</p>
+            </div>
+          ) : (
+            <NotesList notes={visibleNotes} folders={folders} onRefresh={refresh} />
+          )}
         </div>
 
 

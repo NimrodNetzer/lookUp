@@ -125,15 +125,15 @@ export default function CosmicBg({ variant = "default" }: Props) {
 
         {/* ── Wave ribbon ───────────────────────────────────────────────── */}
         <path d={WAVE} fill="none" stroke="url(#cbWave)"
-          strokeWidth="160" strokeOpacity={o(0.09)} strokeLinecap="round"
+          strokeWidth="160" strokeOpacity={dark ? o(0.09) : 0.045} strokeLinecap="round"
           filter="url(#cbRibbonGlow)" />
         <path d={WAVE} fill="none" stroke="url(#cbWave)"
-          strokeWidth="80"  strokeOpacity={o(0.13)} strokeLinecap="round" />
+          strokeWidth="80"  strokeOpacity={dark ? o(0.13) : 0.065} strokeLinecap="round" />
         <path d={WAVE} fill="none" stroke="url(#cbWave)"
-          strokeWidth="30"  strokeOpacity={o(0.22)} strokeLinecap="round" />
+          strokeWidth="30"  strokeOpacity={dark ? o(0.22) : 0.11} strokeLinecap="round" />
         <path d={WAVE} fill="none" stroke="url(#cbWave)"
           strokeWidth="2.5" strokeLinecap="round"
-          strokeOpacity={dark ? 0.55 : 1}
+          strokeOpacity={dark ? 0.55 : 0.5}
           filter="url(#cbGlow)" />
 
         {/* ── Glowing dots along the wave ───────────────────────────────── */}
