@@ -69,6 +69,20 @@ function QuizViewer({ pairs }) {
   );
 }
 
+function SectionContent({ text }) {
+  const cards = tryParseCards(text);
+  if (cards) return <FlashcardViewer cards={cards} />;
+  const quiz = parseQuiz(text);
+  if (quiz) return <QuizViewer pairs={quiz} />;
+  return (
+    <article className="prose">
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+        {text}
+      </ReactMarkdown>
+    </article>
+  );
+}
+
 export default function NoteViewer({ filename, onBack }) {
   const [note,     setNote]     = useState(null);
   const [notFound, setNotFound] = useState(false);
@@ -100,10 +114,10 @@ export default function NoteViewer({ filename, onBack }) {
 
   const mode  = note.mode ?? "summary";
   const badge = modeBadge[mode] ?? modeBadge.summary;
-  const quiz  = mode === "quiz" ? parseQuiz(note.content) : null;
 
-  // Flashcards may be stored as the cards array directly on the note object
-  const cards = note.cards ?? (mode === "flashcard" ? tryParseCards(note.content) : null);
+  // Split into sections if content was merged from multiple captures
+  const sections = note.content.split(/\n\n---\n\n/);
+  const isMultiSection = sections.length > 1;
 
   return (
     <main className="max-w-2xl mx-auto px-5 py-8">
@@ -125,16 +139,17 @@ export default function NoteViewer({ filename, onBack }) {
         </p>
       </header>
 
-      {mode === "flashcard" && cards ? (
-        <FlashcardViewer cards={cards} />
-      ) : quiz ? (
-        <QuizViewer pairs={quiz} />
+      {isMultiSection ? (
+        <div className="flex flex-col gap-8">
+          {sections.map((section, i) => (
+            <div key={i}>
+              <SectionContent text={section.trim()} />
+              {i < sections.length - 1 && <hr className="border-border mt-8" />}
+            </div>
+          ))}
+        </div>
       ) : (
-        <article className="prose">
-          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-            {note.content}
-          </ReactMarkdown>
-        </article>
+        <SectionContent text={note.content} />
       )}
     </main>
   );

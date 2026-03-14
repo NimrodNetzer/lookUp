@@ -20,7 +20,7 @@ body {
 .prose h1, .prose h2, .prose h3 { @apply font-bold mt-5 mb-2; }
 .prose h2 { @apply text-xl text-teal; }
 .prose h3 { @apply text-lg text-accent; }
-.prose p  { @apply mb-3 leading-relaxed; }
+.prose p  { @apply mb-3 leading-relaxed text-[0.9375rem]; }
 .prose ul, .prose ol { @apply pl-5 mb-3; }
 .prose li { @apply mb-1; }
 .prose code { @apply bg-border px-1.5 py-0.5 rounded text-sm; }

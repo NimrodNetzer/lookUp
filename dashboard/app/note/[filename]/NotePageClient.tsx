@@ -139,6 +139,7 @@ function NotePageInner() {
   const [content, setContent] = useState<string | null>(null);
   const [cards, setCards] = useState<{ front: string; back: string }[] | null>(null);
   const [messages, setMessages] = useState<Message[] | null>(null);
+  const [quiz, setQuiz] = useState<{ q: string; a: string }[] | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
@@ -175,6 +176,12 @@ function NotePageInner() {
               .then(data => { if (data?.messages) setMessages(data.messages); })
               .catch(() => {});
           }
+        }
+
+        if (mode === "quiz") {
+          const body = text.replace(/^---[\s\S]*?---\n\n?/, "");
+          const quiz = parseQuiz(body);
+          if (quiz) setQuiz(quiz);
         }
       })
       .catch(() => setNotFound(true));
@@ -232,6 +239,8 @@ function NotePageInner() {
         </div>
       ) : mode === "flashcard" && cards ? (
         <FlashcardViewer cards={cards} />
+      ) : mode === "quiz" && quiz ? (
+        <QuizViewer pairs={quiz} />
       ) : (
         <article className="prose">
           <ReactMarkdown

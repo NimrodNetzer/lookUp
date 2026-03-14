@@ -116,12 +116,50 @@ dropdownItems.forEach((item) => {
   });
 });
 
-// ── Note saving helper (replaces gateway saveNote) ───────────────────────────
+// ── Conversation → note mapping (persisted so captures group per tab) ────────
+let conversationNoteMap = {}; // { [conversationId]: filename }
+
+async function loadConvNoteMap() {
+  const result = await chrome.storage.local.get("convNoteMap");
+  conversationNoteMap = result.convNoteMap ?? {};
+}
+
+async function saveConvNoteMap() {
+  await chrome.storage.local.set({ convNoteMap: conversationNoteMap });
+}
+
+function broadcastNotesUpdate() {
+  try { new BroadcastChannel("lookup-data").postMessage({ type: "notes-updated" }); } catch {}
+}
+
+// ── Note saving helper ────────────────────────────────────────────────────────
+// All captures in the same conversation tab are appended to the same note file.
 async function saveNote({ title, mode, markdown, cards = null }) {
+  // Store flashcard JSON directly so the dashboard can render flip cards properly
+  const storedContent = cards && Array.isArray(cards) ? JSON.stringify(cards) : markdown;
+  const existingFilename = conversationNoteMap[activeConversationId];
+
+  if (existingFilename) {
+    const existing = await Notes.get(existingFilename);
+    if (existing) {
+      const newContent = existing.content + `\n\n---\n\n### ${title}\n\n` + storedContent;
+      const mergedCards = cards && Array.isArray(cards)
+        ? [...(existing.cards ?? []), ...cards]
+        : existing.cards ?? null;
+      await Notes.save(existingFilename, { ...existing }, newContent, mergedCards);
+      broadcastNotesUpdate();
+      return { filename: existingFilename, title: existing.title };
+    }
+  }
+
+  // Create a fresh note and record it for this conversation
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const slug = (title || mode).toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
   const filename = `${ts}_${slug}.md`;
-  await Notes.save(filename, { title: title ?? mode, mode, createdAt: Date.now() }, markdown, cards);
+  await Notes.save(filename, { title: title ?? mode, mode, createdAt: Date.now(), conversation_id: activeConversationId }, storedContent, cards);
+  conversationNoteMap[activeConversationId] = filename;
+  await saveConvNoteMap();
+  broadcastNotesUpdate();
   return { filename, title: title ?? mode };
 }
 
@@ -362,6 +400,8 @@ async function deleteConvTab(id) {
   try {
     await Conversations.delete(id);
     tabResults.delete(id);
+    delete conversationNoteMap[id];
+    await saveConvNoteMap();
     conversations = conversations.filter(c => c.id !== id);
     if (activeConversationId === id) {
       if (conversations.length > 0) {
@@ -464,6 +504,10 @@ function startInlineRename(convId, currentTitle, labelEl) {
 async function renameConvTab(id, title) {
   try {
     await Conversations.rename(id, title);
+    const noteFilename = conversationNoteMap[id];
+    if (noteFilename) {
+      try { await Notes.updateMeta(noteFilename, { title }); } catch {}
+    }
     await loadConversations();
   } catch (err) { console.error(err); }
 }
@@ -526,6 +570,7 @@ newConvBtn.addEventListener("click", async () => {
 
 // ── Restore conversation on open ─────────────────────────────────────────────
 async function loadActiveConversation() {
+  await loadConvNoteMap();
   try {
     // Ensure at least one conversation exists
     let conv = await Conversations.getActive();

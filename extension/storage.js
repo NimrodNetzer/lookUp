@@ -336,6 +336,22 @@ export const Notes = {
     });
   },
 
+  // Update all notes that belong to a given conversation
+  async updateByConversationId(conversationId, patch) {
+    const db = await openDB();
+    const t = tx(db, ["notes"], "readwrite");
+    const s = t.store("notes");
+    const all = await req2p(s.getAll());
+    const now = Date.now();
+    for (const note of all) {
+      if (note.conversation_id === conversationId) {
+        Object.assign(note, patch, { updatedAt: now, modified: now });
+        await req2p(s.put(note));
+      }
+    }
+    await t.done;
+  },
+
   // Merge multiple notes into one
   async merge(filenames, newFilename, newTitle) {
     const parts = await Promise.all(filenames.map((f) => Notes.get(f)));
@@ -381,12 +397,21 @@ export const Folders = {
   async list() {
     const db = await openDB();
     const { store } = tx(db, ["folders"]);
-    return getAll(store("folders"));
+    const flat = await getAll(store("folders"));
+    // Build tree from flat list using parent_id
+    const map = {};
+    for (const f of flat) map[f.id] = { ...f, children: [] };
+    const roots = [];
+    for (const f of flat) {
+      if (f.parent_id && map[f.parent_id]) map[f.parent_id].children.push(map[f.id]);
+      else roots.push(map[f.id]);
+    }
+    return roots;
   },
 
-  async create(name) {
+  async create(name, parentId = null) {
     const db = await openDB();
-    const folder = { id: newId(), name, createdAt: Date.now() };
+    const folder = { id: newId(), name, createdAt: Date.now(), parent_id: parentId ?? null };
     const t = tx(db, ["folders"], "readwrite");
     await req2p(t.store("folders").add(folder));
     await t.done;

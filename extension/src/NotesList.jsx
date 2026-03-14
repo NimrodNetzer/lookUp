@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { Search, FileText, Mic, Layers, BookOpen, HelpCircle, CreditCard, FolderSymlink, GitMerge, Trash2, Pencil, MessageSquare } from "lucide-react";
+import { FileText, Mic, Layers, BookOpen, HelpCircle, CreditCard, FolderSymlink, GitMerge, Trash2, Pencil, MessageSquare } from "lucide-react";
 import clsx from "clsx";
 import { Notes } from "../storage.js";
 
@@ -192,7 +192,6 @@ function SelectionBar({ selected, folders, onClear, onMerge, onDelete, onTransfe
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
-  const [query,          setQuery]          = useState("");
   const [dateFilter,     setDateFilter]     = useState("all");
   const [sortMode,       setSortMode]       = useState("date");
   const [expandedGroups, setExpandedGroups] = useState(new Set());
@@ -232,11 +231,6 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
         if (dateFilter === "week"  && d < new Date(today.getTime() - 6  * 86400000)) return false;
         if (dateFilter === "month" && d < new Date(today.getTime() - 29 * 86400000)) return false;
       }
-      if (query.trim()) {
-        const q = query.toLowerCase();
-        return (n.title ?? n.filename).toLowerCase().includes(q) ||
-               (n.mode ?? "").toLowerCase().includes(q);
-      }
       return true;
     });
 
@@ -251,7 +245,7 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
       else arr.sort((a, b) => (a.title ?? a.filename).localeCompare(b.title ?? b.filename));
     });
     return GROUP_ORDER.filter((k) => map.has(k)).map((k) => ({ key: k, notes: map.get(k) }));
-  }, [notes, dateFilter, sortMode, query, rangeFrom, rangeTo, showRange]);
+  }, [notes, dateFilter, sortMode, rangeFrom, rangeTo, showRange]);
 
   const totalVisible = groups.reduce((s, g) => s + g.notes.length, 0);
 
@@ -338,12 +332,6 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
         </div>
       )}
 
-      <div className="relative mb-5">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted w-4 h-4" />
-        <input type="text" placeholder="Search notes…" value={query} onChange={(e) => setQuery(e.target.value)}
-          className="w-full pl-9 pr-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-text placeholder:text-muted outline-none focus:border-accent transition-colors" />
-      </div>
-
       {selectMode && selected.size >= 1 && (
         <SelectionBar selected={selected} folders={folders} onClear={toggleSelectMode}
           onMerge={handleMerge} onDelete={handleDeleteSelected} onTransfer={handleTransferSelected} />
@@ -352,7 +340,7 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
 
       {groups.length === 0 ? (
         <div className="text-center py-16 text-muted text-sm border border-dashed border-border rounded-xl">
-          {query ? `No notes matching "${query}"` : "No notes for this period — capture something!"}
+          {"No notes for this period — capture something!"}
         </div>
       ) : (
         <>

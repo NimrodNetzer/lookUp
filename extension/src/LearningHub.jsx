@@ -203,6 +203,13 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
 
   const refresh = useCallback(() => { fetchNotes(); fetchFolders(); }, [fetchNotes, fetchFolders]);
 
+  // Live sync: refresh when sidepanel saves a note
+  useEffect(() => {
+    const ch = new BroadcastChannel("lookup-data");
+    ch.onmessage = (e) => { if (e.data?.type === "notes-updated") refresh(); };
+    return () => ch.close();
+  }, [refresh]);
+
   useEffect(() => {
     if (activeFolderId !== null && folders.length > 0) {
       if (!findFolder(folders, activeFolderId)) setActiveFolderId(null);
@@ -256,7 +263,7 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
   }
 
   async function handleCreateFolder(name) {
-    await Folders.create(name);
+    await Folders.create(name, activeFolderId);
     setAddingFolder(false); fetchFolders();
   }
 
@@ -398,15 +405,28 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
         )}
 
         <div>
-          <div className="flex items-center gap-3 mb-4 pb-2 border-b border-border">
-            <h2 className="text-sm font-bold text-text">{notesLabel}</h2>
-            {activeType !== null && (
-              <span className="text-xs bg-accent/10 text-accent/80 px-2 py-0.5 rounded-full border border-accent/20">
-                {TYPE_GROUPS.find((g) => g.key === activeType)?.label}
-              </span>
-            )}
-            <span className="text-xs text-muted ml-auto">{visibleNotes.length} note{visibleNotes.length !== 1 ? "s" : ""}</span>
-          </div>
+          {activeFolderId !== null && !showUnattached ? (
+            <div className="flex items-center gap-3 mb-5 pb-3 border-b-2 border-accent/30">
+              <span className="text-2xl leading-none">📁</span>
+              <h2 className="text-lg font-extrabold text-accent tracking-tight flex-1">
+                {activeFolder?.name ?? "Folder"}
+                {activeType !== null && (
+                  <span className="ml-2 text-sm font-semibold text-accent/60">— {TYPE_GROUPS.find((g) => g.key === activeType)?.label}</span>
+                )}
+              </h2>
+              <span className="text-xs text-muted">{visibleNotes.length} note{visibleNotes.length !== 1 ? "s" : ""}</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 mb-4 pb-2 border-b border-border">
+              <h2 className="text-sm font-bold text-text">{notesLabel}</h2>
+              {activeType !== null && (
+                <span className="text-xs bg-accent/10 text-accent/80 px-2 py-0.5 rounded-full border border-accent/20">
+                  {TYPE_GROUPS.find((g) => g.key === activeType)?.label}
+                </span>
+              )}
+              <span className="text-xs text-muted ml-auto">{visibleNotes.length} note{visibleNotes.length !== 1 ? "s" : ""}</span>
+            </div>
+          )}
           {visibleNotes.length === 0 && activeFolderId !== null && !showUnattached ? (
             <div className="text-center py-12 text-muted text-sm border border-dashed border-border/50 rounded-xl">
               <p className="text-2xl mb-2">📭</p>

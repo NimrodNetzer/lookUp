@@ -253,7 +253,7 @@
 .prose h1 { @apply text-2xl; }
 .prose h2 { @apply text-xl; }
 .prose h3 { @apply text-lg; }
-.prose p  { @apply mb-4; }
+.prose p  { @apply mb-4 text-[0.9375rem] leading-relaxed; }
 .prose ul, .prose ol { @apply pl-5 mb-4; }
 .prose li { @apply mb-1; }
 .prose code {

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import CosmicBg from "./CosmicBg.jsx";
-import { Conversations, Messages } from "../storage.js";
+import { Conversations, Messages, Notes } from "../storage.js";
 import { chatStream } from "../groq-client.js";
 
 // ── Lightweight markdown renderer (same as original chat page) ────────────────
@@ -242,7 +242,11 @@ export default function ChatPage() {
     if (!renamingId) { setRenamingId(null); return; }
     const trimmed = renameVal.trim();
     if (trimmed) {
-      try { await Conversations.rename(renamingId, trimmed); await loadConversations(); } catch {}
+      try {
+        await Conversations.rename(renamingId, trimmed);
+        await Notes.updateByConversationId(renamingId, { title: trimmed });
+        await loadConversations();
+      } catch {}
     }
     setRenamingId(null);
   }
