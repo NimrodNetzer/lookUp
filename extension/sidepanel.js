@@ -710,10 +710,13 @@ function reattachResultListeners() {
       btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
     });
   });
-  resultArea.querySelectorAll(".flashcard").forEach((fc) => {
-    fc.addEventListener("click", function () { this.classList.toggle("flipped"); });
-  });
 }
+
+// Single delegated listener — survives innerHTML replacement
+resultArea.addEventListener("click", (e) => {
+  const fc = e.target.closest(".flashcard");
+  if (fc && resultArea.contains(fc)) fc.classList.toggle("flipped");
+});
 
 function renderAllMessages(messages) {
   resultArea.innerHTML = "";
@@ -1098,10 +1101,8 @@ function showFlashcards(cards, title, mode = "flashcard", filename) {
   const prefix = `fc${++_uid}_`;
   const grid = cards.map((card, i) => `
     <div class="flashcard" id="${prefix}${i}">
-      <div class="flashcard-inner">
-        <div class="flashcard-front">${renderMarkdown(card.front)}</div>
-        <div class="flashcard-back">${renderMarkdown(card.back)}</div>
-      </div>
+      <div class="flashcard-front">${renderMarkdown(card.front)}</div>
+      <div class="flashcard-back">${renderMarkdown(card.back)}</div>
     </div>
   `).join("");
   const dashLink = filename ? `<div class="open-dash-row"><button class="open-dash-btn" data-filename="${escapeHtml(filename)}">↗ View in Dashboard</button></div>` : "";
@@ -1113,11 +1114,6 @@ function showFlashcards(cards, title, mode = "flashcard", filename) {
       ${dashLink}
     </div>`,
     () => {
-      cards.forEach((_, i) => {
-        document.getElementById(`${prefix}${i}`)?.addEventListener("click", function () {
-          this.classList.toggle("flipped");
-        });
-      });
       if (filename) bindDashBtn(filename);
     }
   );
