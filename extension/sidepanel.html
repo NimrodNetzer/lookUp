@@ -633,6 +633,81 @@
     .flashcard-front { background: #26264a; border: 1px solid #7c6af5; font-weight: 600; }
     .flashcard-back  { background: #1e342e; border: 1px solid #5eead4; color: #a7f3d0; transform: rotateY(180deg); }
     .card-hint { font-size: 10px; color: #444; text-align: center; margin-top: 4px; }
+
+    /* ── SETUP OVERLAY ──────────────────────── */
+    .setup-overlay {
+      position: fixed; inset: 0;
+      background: #1c1c28;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 28px 22px;
+      z-index: 9999;
+      gap: 0;
+    }
+    .setup-overlay.hidden { display: none; }
+    .setup-logo {
+      font-size: 32px; margin-bottom: 10px;
+    }
+    .setup-title {
+      font-size: 17px; font-weight: 800;
+      background: linear-gradient(135deg, #7c6af5, #5eead4);
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+      margin-bottom: 6px;
+    }
+    .setup-subtitle {
+      font-size: 11.5px; color: #666; text-align: center;
+      line-height: 1.6; margin-bottom: 22px;
+    }
+    .setup-step {
+      width: 100%;
+      background: #23233a; border: 1px solid #38385a;
+      border-radius: 12px; padding: 16px;
+      margin-bottom: 12px;
+    }
+    .setup-step-num {
+      font-size: 10px; font-weight: 700; color: #7c6af5;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .setup-step p {
+      font-size: 12px; color: #aaa; line-height: 1.5; margin-bottom: 8px;
+    }
+    .setup-link {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px;
+      background: #2e2e4a; border: 1px solid #38385a;
+      border-radius: 7px; color: #a89af5;
+      font-size: 11.5px; font-weight: 600;
+      cursor: pointer; text-decoration: none;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .setup-link:hover { border-color: #7c6af5; color: #c4b5fd; }
+    .setup-input {
+      width: 100%; margin-top: 10px;
+      background: #14142a; border: 1px solid #38385a;
+      border-radius: 8px; color: #eeeef8;
+      font-size: 12px; padding: 9px 12px;
+      outline: none; font-family: monospace;
+      transition: border-color 0.2s;
+    }
+    .setup-input:focus { border-color: #7c6af5; }
+    .setup-input::placeholder { color: #444; font-family: sans-serif; }
+    .setup-save-btn {
+      width: 100%; padding: 10px;
+      font-size: 13px; font-weight: 700;
+      border: none; border-radius: 9px;
+      background: linear-gradient(135deg, #7c6af5, #5eead4);
+      color: #fff; cursor: pointer;
+      transition: opacity 0.2s;
+      margin-top: 4px;
+    }
+    .setup-save-btn:hover    { opacity: 0.88; }
+    .setup-save-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .setup-error {
+      font-size: 11px; color: #f87171;
+      margin-top: 8px; text-align: center;
+      min-height: 16px;
+    }
   </style>
 </head>
 <body>
@@ -760,6 +835,40 @@
     </div>
   </div>
 
-  <script src="sidepanel.js"></script>
+  <!-- SETUP OVERLAY — shown on first launch until API key is saved -->
+  <div class="setup-overlay" id="setupOverlay">
+    <div class="setup-logo">🔭</div>
+    <div class="setup-title">Welcome to LookUp</div>
+    <p class="setup-subtitle">
+      LookUp uses Groq's free AI API to analyze your screen.<br>
+      Set it up once — takes about 60 seconds.
+    </p>
+
+    <div class="setup-step">
+      <div class="setup-step-num">Step 1 — Get a free API key</div>
+      <p>Create a free Groq account and copy your API key:</p>
+      <a class="setup-link" id="groqLink" href="#">
+        🔑 Open console.groq.com/keys
+      </a>
+    </div>
+
+    <div class="setup-step">
+      <div class="setup-step-num">Step 2 — Paste it below</div>
+      <p>Paste your key here. It's stored only on your device.</p>
+      <input
+        class="setup-input"
+        id="setupKeyInput"
+        type="password"
+        placeholder="gsk_…"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <div class="setup-error" id="setupError"></div>
+    </div>
+
+    <button class="setup-save-btn" id="setupSaveBtn">Verify &amp; Save →</button>
+  </div>
+
+  <script type="module" src="sidepanel.js"></script>
 </body>
 </html>
