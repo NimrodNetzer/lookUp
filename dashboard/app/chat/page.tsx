@@ -103,6 +103,7 @@ export default function ChatPage() {
   const [renameVal,     setRenameVal]     = useState("");
   const [ctxMenu,       setCtxMenu]       = useState<CtxMenu | null>(null);
   const [copiedIdx,     setCopiedIdx]     = useState<number | null>(null);
+  const [sidebarOpen,   setSidebarOpen]   = useState(true);
 
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -278,7 +279,7 @@ export default function ChatPage() {
     <CosmicBg variant="dark" />
     <div className="chat-page">
 
-      <aside className="chat-sidebar">
+      <aside className={`chat-sidebar${sidebarOpen ? "" : " collapsed"}`}>
         <div className="chat-sidebar-top">
           <span className="chat-sidebar-logo">LookUp</span>
           <button className="chat-new-btn" onClick={newConversation} title="New conversation">+</button>
@@ -322,6 +323,13 @@ export default function ChatPage() {
       </aside>
 
       <div className="chat-main">
+        <button
+          className="chat-toggle-btn"
+          onClick={() => setSidebarOpen(o => !o)}
+          title={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+        >
+          {sidebarOpen ? "◀" : "▶"}
+        </button>
         <div className="chat-messages">
           {messages.length === 0 && !loading && (
             <div className="chat-empty">

@@ -59,10 +59,15 @@ body {
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 .chat-sidebar {
   width: 232px; flex-shrink: 0; height: 100vh;
-  background: rgba(8,8,15,0.92);
-  border-right: 1px solid rgba(124,106,245,0.13);
+  background: rgba(8,8,15,0.55);
+  border-right: 1px solid rgba(124,106,245,0.1);
   display: flex; flex-direction: column;
   backdrop-filter: blur(14px);
+  transition: width 0.22s ease, opacity 0.22s ease;
+  overflow: hidden;
+}
+.chat-sidebar.collapsed {
+  width: 0; opacity: 0; border-right: none;
 }
 .chat-sidebar-top {
   display: flex; align-items: center; gap: 10px;
@@ -77,8 +82,8 @@ body {
 .chat-new-btn {
   width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
   background: rgba(124,106,245,0.1); border: 1px solid rgba(124,106,245,0.25);
-  color: #9d8cff; font-size: 18px; font-weight: 300; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
+  color: #9d8cff; font-size: 16px; font-weight: 400; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; line-height: 1; padding-bottom: 1px;
   transition: background 0.15s, border-color 0.15s;
 }
 .chat-new-btn:hover { background: rgba(124,106,245,0.22); border-color: rgba(124,106,245,0.5); }
@@ -112,8 +117,19 @@ body {
 }
 .chat-sidebar-back a:hover { border-color: rgba(124,106,245,0.4); color: #9d8cff; }
 
+/* ── Sidebar toggle ──────────────────────────────────────────────────────── */
+.chat-toggle-btn {
+  position: absolute; top: 14px; left: 14px; z-index: 10;
+  width: 28px; height: 28px; border-radius: 8px;
+  background: rgba(124,106,245,0.08); border: 1px solid rgba(124,106,245,0.2);
+  color: #666; font-size: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.chat-toggle-btn:hover { background: rgba(124,106,245,0.18); border-color: rgba(124,106,245,0.45); color: #9d8cff; }
+
 /* ── Main panel (right of sidebar) ──────────────────────────────────────── */
-.chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
+.chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; position: relative; }
 
 /* ── Global search modal ─────────────────────────────────────────────────── */
 .gsearch-overlay {
@@ -202,7 +218,7 @@ body {
 }
 .msg-ai-wrap { flex: 1; min-width: 0; position: relative; }
 .msg-ai-wrap:hover .msg-ai-copy { opacity: 1; }
-.msg-ai-body { font-size: 18px; line-height: 1.7; }
+.msg-ai-body { font-size: 17.1px; line-height: 1.7; }
 .msg-ai-copy {
   opacity: 0; transition: opacity 0.15s;
   position: absolute; top: 0; right: 0;
@@ -213,9 +229,9 @@ body {
 .msg-ai-copy:hover { color: #c0b8ff; border-color: rgba(124,106,245,0.6); }
 
 /* ── Markdown in chat ────────────────────────────────────────────────────── */
-.chat-h2 { font-size: 21px; font-weight: 700; color: #a89af5; margin: 14px 0 5px; }
-.chat-h3 { font-size: 19px; font-weight: 600; color: #7c6af5; margin: 10px 0 4px; }
-.chat-h4 { font-size: 18px; font-weight: 600; color: #888; margin: 8px 0 3px; }
+.chat-h2 { font-size: 20px; font-weight: 700; color: #a89af5; margin: 14px 0 5px; }
+.chat-h3 { font-size: 18px; font-weight: 600; color: #7c6af5; margin: 10px 0 4px; }
+.chat-h4 { font-size: 17.1px; font-weight: 600; color: #888; margin: 8px 0 3px; }
 .chat-p  { margin: 4px 0; }
 .chat-ul { margin: 5px 0 5px 20px; list-style: disc; }
 .chat-ul li { margin: 3px 0; }
