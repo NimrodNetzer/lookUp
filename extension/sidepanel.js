@@ -1,5 +1,5 @@
 import { Settings, Conversations, Messages, Notes } from "./storage.js";
-import { analyzeScreenshot, analyzeMulti, analyzeText, transcribeAndSummarize, chat, verifyApiKey } from "./groq-client.js";
+import { analyzeScreenshot, analyzeMulti, analyzeText, transcribeAndSummarize, chat, verifyApiKey, analyzeWithQuestion } from "./groq-client.js";
 
 // --- DOM refs ---
 const convTabs         = document.getElementById("convTabs");
@@ -21,6 +21,12 @@ const modeDropdown     = document.getElementById("modeDropdown");
 const modeLabel        = document.getElementById("modeLabel");
 const dropdownItems    = document.querySelectorAll(".dropdown-item");
 const dashboardBtn     = document.getElementById("dashboardBtn");
+const searchBtn        = document.getElementById("searchBtn");
+const searchOverlay    = document.getElementById("searchOverlay");
+const searchInput      = document.getElementById("searchInput");
+const searchClose      = document.getElementById("searchClose");
+const searchResults    = document.getElementById("searchResults");
+const searchEmpty      = document.getElementById("searchEmpty");
 const selectionBar     = document.getElementById("selectionBar");
 const selectionPreview = document.getElementById("selectionPreview");
 const askBtn           = document.getElementById("askBtn");
@@ -42,6 +48,9 @@ let activeConversationId = null;
 const tabResults        = new Map(); // conversationId → saved resultArea innerHTML
 let _uid = 0; // unique ID counter for quiz/flashcard elements
 const SPINNER_ID = "inlineSpinner";
+
+// Attached file state
+let attachedFile = null; // { base64, mimeType, name, isImage }
 
 // ── Tab drag state ────────────────────────────────────────────────────────────
 let dragConvId     = null;
@@ -80,6 +89,74 @@ dashboardBtn.addEventListener("click", () => {
 chatExpandBtn.addEventListener("click", () => {
   chrome.tabs.create({ url: chrome.runtime.getURL("built/chat.html") });
 });
+
+// ── Note search ──────────────────────────────────────────────────────────────
+const MODE_ICONS = { summary:"📄", explain:"📖", quiz:"❓", flashcard:"🃏", session:"📚", chat:"💬" };
+
+searchBtn.addEventListener("click", () => openSearch());
+searchClose.addEventListener("click", () => closeSearch());
+searchOverlay.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSearch(); });
+
+function openSearch() {
+  searchOverlay.classList.remove("hidden");
+  searchInput.value = "";
+  searchInput.focus();
+  renderSearchResults([]);
+}
+function closeSearch() { searchOverlay.classList.add("hidden"); }
+
+let _searchTimer = null;
+searchInput.addEventListener("input", () => {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(runSearch, 180);
+});
+
+async function runSearch() {
+  const q = searchInput.value.trim().toLowerCase();
+  if (!q) { renderSearchResults([]); return; }
+  const all = await Notes.list();
+  const hits = all.filter((n) =>
+    (n.title ?? n.filename).toLowerCase().includes(q) ||
+    (n.mode ?? "").toLowerCase().includes(q)
+  ).slice(0, 20);
+  renderSearchResults(hits, q);
+}
+
+function renderSearchResults(notes, q = "") {
+  searchResults.innerHTML = "";
+  if (notes.length === 0) {
+    const p = document.createElement("p");
+    p.className = "search-empty";
+    p.textContent = q ? "No notes found." : "Type to search notes…";
+    searchResults.appendChild(p);
+    return;
+  }
+  for (const note of notes) {
+    const icon = MODE_ICONS[note.mode] ?? MODE_ICONS[(note.mode ?? "").replace(/^audio-/, "")] ?? "📄";
+    const date = note.modified ?? note.updatedAt ?? note.createdAt;
+    const item = document.createElement("div");
+    item.className = "search-result-item";
+    item.innerHTML = `
+      <span class="search-result-icon">${icon}</span>
+      <div class="search-result-text">
+        <div class="search-result-title">${escapeHtml(note.title ?? note.filename)}</div>
+        <div class="search-result-meta">${date ? new Date(date).toLocaleDateString() : ""}</div>
+      </div>
+      <button class="search-result-open" data-filename="${escapeHtml(note.filename)}">↗ Open</button>
+    `;
+    item.querySelector(".search-result-open").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openNoteInDashboard(note.filename);
+    });
+    searchResults.appendChild(item);
+  }
+}
+
+async function openNoteInDashboard(filename) {
+  await chrome.storage.local.set({ pendingOpenNote: filename });
+  chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
+  closeSearch();
+}
 
 // ── Mode dropdown ────────────────────────────────────────────────────────────
 modeTrigger.addEventListener("click", (e) => {
@@ -137,7 +214,18 @@ function broadcastNotesUpdate() {
 async function saveNote({ title, mode, markdown, cards = null }) {
   // Store flashcard JSON directly so the dashboard can render flip cards properly
   const storedContent = cards && Array.isArray(cards) ? JSON.stringify(cards) : markdown;
-  const existingFilename = conversationNoteMap[activeConversationId];
+  let existingFilename = conversationNoteMap[activeConversationId];
+
+  // Self-heal: if map entry is missing (e.g. storage was cleared), recover from IndexedDB
+  if (!existingFilename && activeConversationId) {
+    const allNotes = await Notes.list();
+    const match = allNotes.find((n) => n.conversation_id === activeConversationId);
+    if (match) {
+      existingFilename = match.filename;
+      conversationNoteMap[activeConversationId] = existingFilename;
+      await saveConvNoteMap();
+    }
+  }
 
   if (existingFilename) {
     const existing = await Notes.get(existingFilename);
@@ -166,27 +254,49 @@ async function saveNote({ title, mode, markdown, cards = null }) {
 // ── Shared chat send logic ────────────────────────────────────────────────────
 async function sendChatMessage() {
   const message = titleInput.value.trim();
-  if (!message) { captureBtn.click(); return; }
+  if (!message && !attachedFile) { captureBtn.click(); return; }
 
   titleInput.disabled = true;
   chatSendBtn.disabled = true;
+  const attachBtn = document.getElementById("attachBtn");
+  if (attachBtn) attachBtn.disabled = true;
 
-  appendCard(`<div class="msg-user">${escapeHtml(message)}</div>`);
+  // Build user bubble (show attachment thumbnail if present)
+  const localAttached = attachedFile;
+  let userBubbleHtml = "";
+  if (localAttached?.isImage) {
+    userBubbleHtml += `<img src="data:${localAttached.mimeType};base64,${localAttached.base64}" class="msg-attachment-thumb" alt="${escapeHtml(localAttached.name)}" />`;
+  } else if (localAttached) {
+    userBubbleHtml += `<div class="msg-attachment-file">📎 ${escapeHtml(localAttached.name)}</div>`;
+  }
+  if (message) userBubbleHtml += `<div>${escapeHtml(message)}</div>`;
+  appendCard(`<div class="msg-user">${userBubbleHtml}</div>`);
+
   titleInput.value = "";
+  clearAttachment();
   showSpinner("Thinking…");
 
   try {
-    // Load history from local storage
     const history = await Messages.listByConversation(activeConversationId);
-    const messages = [...history.map(m => ({ role: m.role, content: m.content })), { role: "user", content: message }];
+    let reply;
 
-    const reply = await chat(messages);
+    if (localAttached?.isImage) {
+      // User attached an image — use vision model with that image
+      reply = await analyzeWithQuestion(localAttached.base64, localAttached.mimeType, message || "Describe and analyze this image.");
+    } else {
+      // Always capture current tab as visual context; fall back to text-only if tab can't be captured
+      try {
+        const { base64, mimeType } = await captureTab();
+        reply = await analyzeWithQuestion(base64, mimeType, message);
+      } catch {
+        const msgs = [...history.map(m => ({ role: m.role, content: m.content })), { role: "user", content: message }];
+        reply = await chat(msgs);
+      }
+    }
 
-    // Persist both messages
     await Messages.append(activeConversationId, "user", message);
     await Messages.append(activeConversationId, "assistant", reply);
 
-    // Auto-title conversation on first exchange
     if (history.length === 0) {
       await Conversations.rename(activeConversationId, message.slice(0, 60));
     }
@@ -209,10 +319,50 @@ async function sendChatMessage() {
         });
       } : null
     );
-    loadConversations(); // refresh tab titles
+    loadConversations();
   } catch (err) { showError(err.message); }
   titleInput.disabled = false;
   chatSendBtn.disabled = false;
+  if (attachBtn) attachBtn.disabled = false;
+}
+
+// ── Attachment helpers ────────────────────────────────────────────────────────
+function clearAttachment() {
+  attachedFile = null;
+  const preview = document.getElementById("attachPreview");
+  if (preview) { preview.innerHTML = ""; preview.style.display = "none"; }
+}
+
+function handleFileAttach(file) {
+  if (!file) return;
+  const isImage = file.type.startsWith("image/");
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const dataUrl = e.target.result;
+    const base64 = dataUrl.split(",")[1];
+    attachedFile = { base64, mimeType: file.type, name: file.name, isImage };
+
+    const preview = document.getElementById("attachPreview");
+    if (!preview) return;
+    if (isImage) {
+      preview.innerHTML = `
+        <div class="attach-chip">
+          <img src="${dataUrl}" class="attach-chip-thumb" alt="" />
+          <span class="attach-chip-name">${escapeHtml(file.name)}</span>
+          <button class="attach-chip-remove" id="attachRemove">✕</button>
+        </div>`;
+    } else {
+      preview.innerHTML = `
+        <div class="attach-chip">
+          <span class="attach-chip-icon">📎</span>
+          <span class="attach-chip-name">${escapeHtml(file.name)}</span>
+          <button class="attach-chip-remove" id="attachRemove">✕</button>
+        </div>`;
+    }
+    preview.style.display = "flex";
+    document.getElementById("attachRemove")?.addEventListener("click", clearAttachment);
+  };
+  reader.readAsDataURL(file);
 }
 
 titleInput.addEventListener("keydown", (e) => {
@@ -220,6 +370,43 @@ titleInput.addEventListener("keydown", (e) => {
 });
 
 chatSendBtn.addEventListener("click", sendChatMessage);
+
+// ── Attach button ─────────────────────────────────────────────────────────────
+const attachBtn      = document.getElementById("attachBtn");
+const attachFileInput = document.getElementById("attachFileInput");
+
+attachBtn.addEventListener("click", () => attachFileInput.click());
+attachFileInput.addEventListener("change", () => {
+  const file = attachFileInput.files?.[0];
+  if (file) handleFileAttach(file);
+  attachFileInput.value = "";
+});
+
+// ── Drag-and-drop image onto input bar ────────────────────────────────────────
+const chatInputBar = document.querySelector(".chat-input-bar");
+
+chatInputBar.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  chatInputBar.classList.add("drag-over");
+});
+chatInputBar.addEventListener("dragleave", (e) => {
+  if (!chatInputBar.contains(e.relatedTarget)) chatInputBar.classList.remove("drag-over");
+});
+chatInputBar.addEventListener("drop", (e) => {
+  e.preventDefault();
+  chatInputBar.classList.remove("drag-over");
+  const file = e.dataTransfer.files?.[0];
+  if (file) handleFileAttach(file);
+});
+
+// ── Paste image from clipboard ────────────────────────────────────────────────
+document.addEventListener("paste", (e) => {
+  const item = [...(e.clipboardData?.items ?? [])].find(i => i.type.startsWith("image/"));
+  if (!item) return;
+  const file = item.getAsFile();
+  if (file) handleFileAttach(file);
+});
+
 
 // ── Setup overlay ─────────────────────────────────────────────────────────────
 const setupOverlay  = document.getElementById("setupOverlay");
@@ -640,9 +827,9 @@ captureBtn.addEventListener("click", async () => {
     await Messages.append(activeConversationId, "assistant", selectedMode === "flashcard" ? JSON.stringify(cards) : markdown);
 
     if (cards) {
-      showFlashcards(cards, saved.title, selectedMode);
+      showFlashcards(cards, saved.title, selectedMode, saved.filename);
     } else {
-      showResult(markdown, saved.title, selectedMode);
+      showResult(markdown, saved.title, selectedMode, saved.filename);
     }
   } catch (err) { showError(err.message); }
   captureBtn.disabled = false;
@@ -694,9 +881,9 @@ askBtn.addEventListener("click", async () => {
     await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : markdown);
 
     if (cards) {
-      showFlashcards(cards, saved.title, selectedMode);
+      showFlashcards(cards, saved.title, selectedMode, saved.filename);
     } else {
-      showResult(markdown, saved.title, selectedMode);
+      showResult(markdown, saved.title, selectedMode, saved.filename);
     }
   } catch (err) { showError(err.message); }
   askBtn.disabled = false;
@@ -752,9 +939,9 @@ sessionFinish.addEventListener("click", async () => {
     await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : markdown);
 
     if (cards) {
-      showFlashcards(cards, saved.title, selectedMode);
+      showFlashcards(cards, saved.title, selectedMode, saved.filename);
     } else {
-      showResult(markdown, saved.title, selectedMode);
+      showResult(markdown, saved.title, selectedMode, saved.filename);
     }
   } catch (err) { showError(err.message); }
 
@@ -833,9 +1020,9 @@ async function finishAudio() {
     await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : finalMarkdown);
 
     if (cards) {
-      showFlashcards(cards, saved.title, audioMode);
+      showFlashcards(cards, saved.title, audioMode, saved.filename);
     } else {
-      showResult(finalMarkdown, saved.title, audioMode);
+      showResult(finalMarkdown, saved.title, audioMode, saved.filename);
     }
   } catch (err) { showError(err.message); }
   mediaRecorder = null;
@@ -863,7 +1050,7 @@ function showSpinner(msg) {
   const div = document.createElement("div");
   div.id = SPINNER_ID;
   div.className = "spinner";
-  div.textContent = msg;
+  div.innerHTML = `<span></span><span></span><span></span>`;
   resultArea.appendChild(div);
   resultArea.scrollTop = resultArea.scrollHeight;
 }
@@ -877,32 +1064,37 @@ function resultHeadline(mode, title) {
   return `<div class="result-headline">${display}${hasTitle ? `: ${escapeHtml(title)}` : ""}</div>`;
 }
 
-function showResult(markdown, title, mode) {
+function showResult(markdown, title, mode, filename) {
   const bodyHtml = (mode === "quiz")
     ? renderQuiz(markdown)
     : `<div class="md-body">${renderMarkdown(markdown)}</div>`;
+  const dashLink = filename ? `<div class="open-dash-row"><button class="open-dash-btn" data-filename="${escapeHtml(filename)}">↗ View in Dashboard</button></div>` : "";
 
   appendCard(`
     <div class="result-card">
       ${resultHeadline(mode, title)}
       ${bodyHtml}
+      ${dashLink}
     </div>`,
-    mode === "quiz" ? () => {
-      resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
-        btn.dataset.bound = "1";
-        btn.addEventListener("click", () => {
-          const el = document.getElementById(btn.dataset.answerId);
-          if (!el) return;
-          const hidden = el.style.display === "none";
-          el.style.display = hidden ? "block" : "none";
-          btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+    () => {
+      if (mode === "quiz") {
+        resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
+          btn.dataset.bound = "1";
+          btn.addEventListener("click", () => {
+            const el2 = document.getElementById(btn.dataset.answerId);
+            if (!el2) return;
+            const hidden = el2.style.display === "none";
+            el2.style.display = hidden ? "block" : "none";
+            btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+          });
         });
-      });
-    } : null
+      }
+      if (filename) bindDashBtn(filename);
+    }
   );
 }
 
-function showFlashcards(cards, title, mode = "flashcard") {
+function showFlashcards(cards, title, mode = "flashcard", filename) {
   const prefix = `fc${++_uid}_`;
   const grid = cards.map((card, i) => `
     <div class="flashcard" id="${prefix}${i}">
@@ -912,11 +1104,13 @@ function showFlashcards(cards, title, mode = "flashcard") {
       </div>
     </div>
   `).join("");
+  const dashLink = filename ? `<div class="open-dash-row"><button class="open-dash-btn" data-filename="${escapeHtml(filename)}">↗ View in Dashboard</button></div>` : "";
 
   appendCard(`
     <div class="result-card" style="background:transparent;border:none;padding:0">
       ${resultHeadline(mode, title)}
       <div class="flashcard-grid">${grid}</div>
+      ${dashLink}
     </div>`,
     () => {
       cards.forEach((_, i) => {
@@ -924,6 +1118,7 @@ function showFlashcards(cards, title, mode = "flashcard") {
           this.classList.toggle("flipped");
         });
       });
+      if (filename) bindDashBtn(filename);
     }
   );
 }
@@ -931,6 +1126,15 @@ function showFlashcards(cards, title, mode = "flashcard") {
 function showError(msg) {
   document.getElementById(SPINNER_ID)?.remove();
   appendCard(`<div class="error-card"><strong>Error:</strong> ${escapeHtml(msg)}</div>`);
+}
+
+function bindDashBtn(filename) {
+  resultArea.querySelectorAll(`.open-dash-btn[data-filename="${CSS.escape(filename)}"]:not([data-bound])`).forEach((btn) => {
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
+    });
+  });
 }
 
 function escapeHtml(str = "") {

@@ -432,15 +432,22 @@ export const Folders = {
 
   async delete(id) {
     const db = await openDB();
-    // Unset folder_id on notes that were in this folder
     const t = tx(db, ["folders", "notes"], "readwrite");
+    const folderStore = t.store("folders");
     const noteStore = t.store("notes");
-    const notesInFolder = await req2p(noteStore.index("folder_id").getAll(id));
-    for (const n of notesInFolder) {
-      n.folder_id = null;
-      await req2p(noteStore.put(n));
+    // Collect all descendant folder IDs to delete
+    const allFolders = await req2p(folderStore.getAll());
+    function collectIds(fid) {
+      const ids = [fid];
+      for (const f of allFolders) { if (f.parent_id === fid) ids.push(...collectIds(f.id)); }
+      return ids;
     }
-    await req2p(t.store("folders").delete(id));
+    const toDelete = collectIds(id);
+    for (const fid of toDelete) {
+      const notesInFolder = await req2p(noteStore.index("folder_id").getAll(fid));
+      for (const n of notesInFolder) { n.folder_id = null; await req2p(noteStore.put(n)); }
+      await req2p(folderStore.delete(fid));
+    }
     await t.done;
   },
 };

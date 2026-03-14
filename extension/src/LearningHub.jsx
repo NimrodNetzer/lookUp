@@ -180,6 +180,34 @@ function SidebarFolderDropTarget({ folder, depth, onDrop, onSelect }) {
   );
 }
 
+// ── Folder headline (drop target) ─────────────────────────────────────────────
+function FolderHeadline({ folder, showUnattached, activeType, visibleNotes, onDrop }) {
+  const [dragOver, setDragOver] = useState(false);
+  return (
+    <div
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.getData("text/plain"); if (f) onDrop(f); }}
+      className={clsx(
+        "flex items-center gap-3 mb-5 pb-3 border-b-2 rounded-sm transition-colors",
+        dragOver ? "border-teal/60 bg-teal/5 -mx-2 px-2" : "border-accent/30"
+      )}
+    >
+      <span className="text-2xl leading-none">{dragOver ? "📂" : "📁"}</span>
+      <h2 className="text-lg font-extrabold text-accent tracking-tight flex-1">
+        {folder?.name ?? "Folder"}
+        {showUnattached ? (
+          <span className="ml-2 text-sm font-semibold text-muted">— Unsorted</span>
+        ) : activeType !== null ? (
+          <span className="ml-2 text-sm font-semibold text-accent/60">— {TYPE_GROUPS.find((g) => g.key === activeType)?.label}</span>
+        ) : null}
+      </h2>
+      {dragOver && <span className="text-xs text-teal font-semibold">Drop to add to folder</span>}
+      <span className="text-xs text-muted">{visibleNotes.length} note{visibleNotes.length !== 1 ? "s" : ""}</span>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function LearningHub({ onOpenNote, onOpenChat }) {
   const [activeFolderId,  setActiveFolderId]  = useState(null);
@@ -405,17 +433,14 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
         )}
 
         <div>
-          {activeFolderId !== null && !showUnattached ? (
-            <div className="flex items-center gap-3 mb-5 pb-3 border-b-2 border-accent/30">
-              <span className="text-2xl leading-none">📁</span>
-              <h2 className="text-lg font-extrabold text-accent tracking-tight flex-1">
-                {activeFolder?.name ?? "Folder"}
-                {activeType !== null && (
-                  <span className="ml-2 text-sm font-semibold text-accent/60">— {TYPE_GROUPS.find((g) => g.key === activeType)?.label}</span>
-                )}
-              </h2>
-              <span className="text-xs text-muted">{visibleNotes.length} note{visibleNotes.length !== 1 ? "s" : ""}</span>
-            </div>
+          {activeFolderId !== null ? (
+            <FolderHeadline
+              folder={activeFolder}
+              showUnattached={showUnattached}
+              activeType={activeType}
+              visibleNotes={visibleNotes}
+              onDrop={(filename) => handleDropNote(filename, activeFolderId)}
+            />
           ) : (
             <div className="flex items-center gap-3 mb-4 pb-2 border-b border-border">
               <h2 className="text-sm font-bold text-text">{notesLabel}</h2>

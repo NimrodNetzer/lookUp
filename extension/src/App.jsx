@@ -14,6 +14,17 @@ export default function App() {
     Settings.isConfigured().then(setConfigured);
   }, []);
 
+  // Auto-open a note if the sidebar search navigated here with a pending note
+  useEffect(() => {
+    if (configured !== true) return;
+    chrome.storage.local.get("pendingOpenNote").then(({ pendingOpenNote }) => {
+      if (pendingOpenNote) {
+        chrome.storage.local.remove("pendingOpenNote");
+        openNote(pendingOpenNote);
+      }
+    }).catch(() => {});
+  }, [configured]);
+
   function openNote(filename) {
     setActiveNote(filename);
     setPage("note");
