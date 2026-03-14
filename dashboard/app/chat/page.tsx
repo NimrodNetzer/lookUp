@@ -11,8 +11,6 @@ interface Message     { role: Role; content: string; }
 interface Conversation { id: number; title: string | null; }
 interface CtxMenu      { x: number; y: number; id: number; title: string; }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
 function parseFlashcards(content: string): { front: string; back: string }[] | null {
   try {
     const parsed = JSON.parse(content);
@@ -35,27 +33,19 @@ function renderMd(raw: string): string {
     .replace(/`([^`\n]+)`/g,   '<code class="chat-code">$1</code>')
     .replace(/^---+$/gm,       '<hr class="chat-hr">')
     .replace(/^[*-] (.+)$/gm,  '<li>$1</li>');
-
-  // wrap consecutive <li> runs in <ul>
   h = h.replace(/(<li>[\s\S]*?<\/li>)(\n<li>[\s\S]*?<\/li>)*/g,
     (m) => `<ul class="chat-ul">${m}</ul>`);
-
   h = h.replace(/\n\n+/g, '</p><p class="chat-p">').replace(/\n/g, "<br>");
   return `<p class="chat-p">${h}</p>`;
 }
-
-// ── Flashcard component ───────────────────────────────────────────────────────
 
 function FlashcardGrid({ cards }: { cards: { front: string; back: string }[] }) {
   const [flipped, setFlipped] = useState<Record<number, boolean>>({});
   return (
     <div className="chat-fc-grid">
       {cards.map((card, i) => (
-        <div
-          key={i}
-          className={`chat-fc${flipped[i] ? " flipped" : ""}`}
-          onClick={() => setFlipped(f => ({ ...f, [i]: !f[i] }))}
-        >
+        <div key={i} className={`chat-fc${flipped[i] ? " flipped" : ""}`}
+          onClick={() => setFlipped(f => ({ ...f, [i]: !f[i] }))}>
           <div className="chat-fc-inner">
             <div className="chat-fc-front" dangerouslySetInnerHTML={{ __html: renderMd(card.front) }} />
             <div className="chat-fc-back"  dangerouslySetInnerHTML={{ __html: renderMd(card.back) }} />
@@ -66,16 +56,11 @@ function FlashcardGrid({ cards }: { cards: { front: string; back: string }[] }) 
   );
 }
 
-// ── Quiz component ────────────────────────────────────────────────────────────
-
 function QuizContent({ content }: { content: string }) {
   const [revealed, setRevealed] = useState<Record<number, boolean>>({});
-
   let blocks = content.split(/\n[ \t]*---[ \t]*\n/);
-  if (blocks.length <= 1 && (content.match(/\*\*Answer:\*\*/g) ?? []).length > 1) {
+  if (blocks.length <= 1 && (content.match(/\*\*Answer:\*\*/g) ?? []).length > 1)
     blocks = content.split(/\n\n(?=\*\*Q\d)/);
-  }
-
   let qIdx = 0;
   return (
     <div>
@@ -83,29 +68,17 @@ function QuizContent({ content }: { content: string }) {
         const trimmed = block.trim();
         if (!trimmed) return null;
         const answerAt = trimmed.indexOf("**Answer:**");
-        if (answerAt === -1) {
-          return (
-            <div key={bi} dangerouslySetInnerHTML={{ __html: renderMd(trimmed) }} />
-          );
-        }
+        if (answerAt === -1) return <div key={bi} dangerouslySetInnerHTML={{ __html: renderMd(trimmed) }} />;
         const q = qIdx++;
         const questionPart = trimmed.slice(0, answerAt).trim();
         const answerPart   = trimmed.slice(answerAt + "**Answer:**".length).trim();
         return (
           <div key={bi} className="chat-quiz-block">
             <div dangerouslySetInnerHTML={{ __html: renderMd(questionPart) }} />
-            <button
-              className="chat-quiz-reveal"
-              onClick={() => setRevealed(r => ({ ...r, [q]: !r[q] }))}
-            >
+            <button className="chat-quiz-reveal" onClick={() => setRevealed(r => ({ ...r, [q]: !r[q] }))}>
               {revealed[q] ? "▼ Hide Answer" : "▶ Show Answer"}
             </button>
-            {revealed[q] && (
-              <div
-                className="chat-quiz-answer"
-                dangerouslySetInnerHTML={{ __html: renderMd(answerPart) }}
-              />
-            )}
+            {revealed[q] && <div className="chat-quiz-answer" dangerouslySetInnerHTML={{ __html: renderMd(answerPart) }} />}
           </div>
         );
       })}
@@ -113,21 +86,12 @@ function QuizContent({ content }: { content: string }) {
   );
 }
 
-// ── AI message dispatcher ─────────────────────────────────────────────────────
-
 function AiContent({ content }: { content: string }) {
   const cards = parseFlashcards(content);
   if (cards) return <FlashcardGrid cards={cards} />;
   if (isQuiz(content)) return <QuizContent content={content} />;
-  return (
-    <div
-      className="msg-ai-body"
-      dangerouslySetInnerHTML={{ __html: renderMd(content) }}
-    />
-  );
+  return <div className="msg-ai-body" dangerouslySetInnerHTML={{ __html: renderMd(content) }} />;
 }
-
-// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -138,15 +102,14 @@ export default function ChatPage() {
   const [renamingId,    setRenamingId]    = useState<number | null>(null);
   const [renameVal,     setRenameVal]     = useState("");
   const [ctxMenu,       setCtxMenu]       = useState<CtxMenu | null>(null);
+  const [copiedIdx,     setCopiedIdx]     = useState<number | null>(null);
+  const [sidebarOpen,   setSidebarOpen]   = useState(true);
 
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const renameRef   = useRef<HTMLInputElement>(null);
-  const tabsRef     = useRef<HTMLDivElement>(null);
   const activeIdRef = useRef<number | null>(null);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
-
-  // ── Conversation list ────────────────────────────────────────────────────
 
   const loadConversations = useCallback(async () => {
     try {
@@ -154,8 +117,6 @@ export default function ChatPage() {
       if (r.ok) setConversations(await r.json());
     } catch {}
   }, []);
-
-  // ── Switch conversation ──────────────────────────────────────────────────
 
   const switchConversation = useCallback(async (id: number) => {
     setActiveId(id);
@@ -166,8 +127,6 @@ export default function ChatPage() {
     } catch {}
   }, []);
 
-  // ── Init on mount ────────────────────────────────────────────────────────
-
   useEffect(() => {
     (async () => {
       try {
@@ -175,22 +134,12 @@ export default function ChatPage() {
         if (!r.ok) return;
         const data = await r.json();
         await loadConversations();
-        if (data.id) {
-          setActiveId(data.id);
-          if (Array.isArray(data.messages)) setMessages(data.messages);
-        }
+        if (data.id) { setActiveId(data.id); if (Array.isArray(data.messages)) setMessages(data.messages); }
       } catch {}
     })();
   }, [loadConversations]);
 
-  // ── Poll every 3 s to stay in sync with sidebar ──────────────────────────
-
-  useEffect(() => {
-    const iv = setInterval(loadConversations, 3000);
-    return () => clearInterval(iv);
-  }, [loadConversations]);
-
-  // ── Poll active conversation messages (picks up sidebar captures) ─────────
+  useEffect(() => { const iv = setInterval(loadConversations, 3000); return () => clearInterval(iv); }, [loadConversations]);
 
   useEffect(() => {
     const iv = setInterval(async () => {
@@ -200,29 +149,15 @@ export default function ChatPage() {
         const r = await fetch(`${GATEWAY}/chat/history?conversationId=${id}`);
         if (r.ok) {
           const msgs: Message[] = await r.json();
-          setMessages(prev =>
-            JSON.stringify(prev) !== JSON.stringify(msgs) ? msgs : prev
-          );
+          setMessages(prev => JSON.stringify(prev) !== JSON.stringify(msgs) ? msgs : prev);
         }
       } catch {}
     }, 3000);
     return () => clearInterval(iv);
   }, []);
 
-  // ── Auto-scroll ──────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
-
-  // ── Focus rename input when opened ──────────────────────────────────────
-
-  useEffect(() => {
-    if (renamingId !== null) renameRef.current?.focus();
-  }, [renamingId]);
-
-  // ── Dismiss context menu on outside click ────────────────────────────────
-
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
+  useEffect(() => { if (renamingId !== null) renameRef.current?.focus(); }, [renamingId]);
   useEffect(() => {
     if (!ctxMenu) return;
     const close = () => setCtxMenu(null);
@@ -230,49 +165,64 @@ export default function ChatPage() {
     return () => document.removeEventListener("click", close);
   }, [ctxMenu]);
 
-  // ── Send message ─────────────────────────────────────────────────────────
-
   async function send() {
     const text = input.trim();
     if (!text || loading) return;
     setInput("");
     setLoading(true);
+    setMessages(prev => [...prev, { role: "user", content: text }, { role: "assistant", content: "" }]);
     try {
-      const res = await fetch(`${GATEWAY}/chat`, {
-        method:  "POST",
+      const res = await fetch(`${GATEWAY}/chat/stream`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ message: text, conversationId: activeId }),
+        body: JSON.stringify({ message: text, conversationId: activeId }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Gateway error");
-      if (data.conversationId) setActiveId(data.conversationId);
-      if (Array.isArray(data.history)) setMessages(data.history);
-      loadConversations(); // refresh titles after first message in new tab
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error ?? "Gateway error");
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = JSON.parse(line.slice(6)) as { delta?: string; done?: boolean; conversationId?: number; error?: string };
+          if (data.delta) {
+            setMessages(prev => {
+              const copy = [...prev];
+              copy[copy.length - 1] = { role: "assistant", content: copy[copy.length - 1].content + data.delta };
+              return copy;
+            });
+          }
+          if (data.done) { if (data.conversationId) setActiveId(data.conversationId); loadConversations(); }
+          if (data.error) throw new Error(data.error);
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
-      setMessages(prev => [
-        ...prev,
-        { role: "user",      content: text },
-        { role: "assistant", content: `**Error:** ${msg}` },
-      ]);
+      setMessages(prev => { const copy = [...prev]; copy[copy.length - 1] = { role: "assistant", content: `**Error:** ${msg}` }; return copy; });
     }
     setLoading(false);
   }
 
-  // ── New conversation ─────────────────────────────────────────────────────
+  function copyMessage(content: string, idx: number) {
+    navigator.clipboard.writeText(content).then(() => { setCopiedIdx(idx); setTimeout(() => setCopiedIdx(null), 2000); }).catch(() => {});
+  }
 
   async function newConversation() {
     try {
       const r = await fetch(`${GATEWAY}/conversations/new`, { method: "POST" });
       if (!r.ok) return;
       const { id } = await r.json();
-      setActiveId(id);
-      setMessages([]);
-      await loadConversations();
+      setActiveId(id); setMessages([]); await loadConversations();
     } catch {}
   }
-
-  // ── Delete conversation ──────────────────────────────────────────────────
 
   async function deleteConversation(id: number) {
     try {
@@ -280,22 +230,15 @@ export default function ChatPage() {
       if (!r.ok) return;
       const remaining = conversations.filter(c => c.id !== id);
       if (id === activeId) {
-        if (remaining.length > 0) {
-          await switchConversation(remaining[0].id);
-        } else {
+        if (remaining.length > 0) { await switchConversation(remaining[0].id); }
+        else {
           const nr = await fetch(`${GATEWAY}/conversations/new`, { method: "POST" });
-          if (nr.ok) {
-            const { id: newId } = await nr.json();
-            setActiveId(newId);
-            setMessages([]);
-          }
+          if (nr.ok) { const { id: newId } = await nr.json(); setActiveId(newId); setMessages([]); }
         }
       }
       await loadConversations();
     } catch {}
   }
-
-  // ── Rename conversation ──────────────────────────────────────────────────
 
   async function confirmRename() {
     if (!renamingId) { setRenamingId(null); return; }
@@ -303,17 +246,14 @@ export default function ChatPage() {
     if (trimmed) {
       try {
         await fetch(`${GATEWAY}/conversations/${renamingId}`, {
-          method:  "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ title: trimmed }),
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: trimmed }),
         });
         await loadConversations();
       } catch {}
     }
     setRenamingId(null);
   }
-
-  // ── Keyboard / textarea ──────────────────────────────────────────────────
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
@@ -326,39 +266,32 @@ export default function ChatPage() {
     el.style.height = Math.min(el.scrollHeight, 160) + "px";
   }
 
-  // ── Tab scroll with mouse wheel ──────────────────────────────────────────
-
-  function onTabsWheel(e: React.WheelEvent<HTMLDivElement>) {
-    e.preventDefault();
-    tabsRef.current?.scrollBy({ left: e.deltaY !== 0 ? e.deltaY : e.deltaX });
-  }
-
-  // ── Context menu ─────────────────────────────────────────────────────────
-
   function openCtxMenu(e: React.MouseEvent, id: number, title: string) {
     e.preventDefault();
     setCtxMenu({ x: e.clientX, y: e.clientY, id, title });
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
+  const lastMsg = messages[messages.length - 1];
+  const showTyping = loading && (lastMsg?.role !== "assistant" || lastMsg?.content === "");
 
   return (
     <>
     <CosmicBg variant="dark" />
     <div className="chat-page">
 
-      {/* ── Header + tabs (single row) ──────────────────────────────────────── */}
-      <header className="chat-header">
-        <span className="chat-logo">LookUp</span>
-        <div className="chat-header-divider" />
+      <aside className={`chat-sidebar${sidebarOpen ? "" : " collapsed"}`}>
+        <div className="chat-sidebar-top">
+          <span className="chat-sidebar-logo">LookUp</span>
+          <button className="chat-new-btn" onClick={newConversation} title="New conversation">+</button>
+        </div>
 
-        <div className="chat-tabs" ref={tabsRef} onWheel={onTabsWheel}>
+        <div className="chat-conv-list">
           {conversations.map(conv =>
             renamingId === conv.id ? (
-              <div key={conv.id} className="chat-tab active renaming">
+              <div key={conv.id} className="chat-conv-item active">
                 <input
                   ref={renameRef}
-                  className="chat-tab-rename"
+                  className="chat-conv-rename"
                   value={renameVal}
                   maxLength={60}
                   onChange={e => setRenameVal(e.target.value)}
@@ -372,102 +305,97 @@ export default function ChatPage() {
             ) : (
               <button
                 key={conv.id}
-                className={`chat-tab${conv.id === activeId ? " active" : ""}`}
+                className={`chat-conv-item${conv.id === activeId ? " active" : ""}`}
                 onClick={() => switchConversation(conv.id)}
                 onAuxClick={e => { if (e.button === 1) { e.preventDefault(); deleteConversation(conv.id); } }}
                 onContextMenu={e => openCtxMenu(e, conv.id, conv.title ?? "New conversation")}
                 title={conv.title ?? "New conversation"}
               >
-                <span className="chat-tab-label">{conv.title ?? "New conversation"}</span>
+                <span className="chat-conv-label">{conv.title ?? "New conversation"}</span>
               </button>
             )
           )}
         </div>
 
-        <button className="chat-new-tab" onClick={newConversation} title="New conversation">+</button>
-        <Link href="/" className="chat-back">← Dashboard</Link>
-      </header>
+        <div className="chat-sidebar-back">
+          <Link href="/">← Dashboard</Link>
+        </div>
+      </aside>
 
-      {/* ── Messages ───────────────────────────────────────────────────────── */}
-      <div className="chat-messages">
-
-        {messages.length === 0 && !loading && (
-          <div className="chat-empty">
-            <div className="chat-empty-icon">✦</div>
-            <div className="chat-empty-title">Ask anything</div>
-            <div className="chat-empty-sub">
-              Ask LookUp to explain a concept, quiz you on a topic, or summarise your lecture material.
-              This chat stays in sync with the extension sidebar.
+      <div className="chat-main">
+        <button
+          className="chat-toggle-btn"
+          onClick={() => setSidebarOpen(o => !o)}
+          title={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+        >
+          {sidebarOpen ? "◀" : "▶"}
+        </button>
+        <div className="chat-messages">
+          {messages.length === 0 && !loading && (
+            <div className="chat-empty">
+              <div className="chat-empty-icon">✦</div>
+              <div className="chat-empty-title">Ask anything</div>
+              <div className="chat-empty-sub">
+                Ask LookUp to explain a concept, quiz you on a topic, or summarise your lecture material.
+                This chat stays in sync with the extension sidebar.
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {messages.map((m, i) =>
-          m.role === "user" ? (
-            <div key={i} className="msg-user">
-              <div className="msg-user-bubble">{m.content}</div>
-            </div>
-          ) : (
-            <div key={i} className="msg-ai">
+          {messages.map((m, i) =>
+            m.role === "user" ? (
+              <div key={i} className="msg-user">
+                <div className="msg-user-bubble">{m.content}</div>
+              </div>
+            ) : m.content === "" ? null : (
+              <div key={i} className="msg-ai">
+                <div className="msg-ai-icon">✦</div>
+                <div className="msg-ai-wrap">
+                  <AiContent content={m.content} />
+                  <button className="msg-ai-copy" onClick={() => copyMessage(m.content, i)} title="Copy response">
+                    {copiedIdx === i ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+              </div>
+            )
+          )}
+
+          {showTyping && (
+            <div className="msg-ai">
               <div className="msg-ai-icon">✦</div>
-              <AiContent content={m.content} />
+              <div className="typing"><span /><span /><span /></div>
             </div>
-          )
-        )}
+          )}
 
-        {loading && (
-          <div className="msg-ai">
-            <div className="msg-ai-icon">✦</div>
-            <div className="typing"><span /><span /><span /></div>
+          <div ref={bottomRef} />
+        </div>
+
+        <div className="chat-input-bar">
+          <div className="chat-input-wrap">
+            <textarea
+              ref={textareaRef}
+              className="chat-textarea"
+              placeholder="Ask a question..."
+              rows={1}
+              value={input}
+              onChange={e => { setInput(e.target.value); autoResize(); }}
+              onKeyDown={handleKey}
+            />
+            <button className="chat-send" onClick={send} disabled={loading || !input.trim()} aria-label="Send">
+              &#x2191;
+            </button>
           </div>
-        )}
-
-        <div ref={bottomRef} />
-      </div>
-
-      {/* ── Input bar ──────────────────────────────────────────────────────── */}
-      <div className="chat-input-bar">
-        <div className="chat-input-wrap">
-          <textarea
-            ref={textareaRef}
-            className="chat-textarea"
-            placeholder="Ask a question…"
-            rows={1}
-            value={input}
-            onChange={e => { setInput(e.target.value); autoResize(); }}
-            onKeyDown={handleKey}
-          />
-          <button
-            className="chat-send"
-            onClick={send}
-            disabled={loading || !input.trim()}
-            aria-label="Send"
-          >↑</button>
+          <p className="chat-hint">Enter to send · Shift+Enter for new line</p>
         </div>
       </div>
 
-      {/* ── Context menu ───────────────────────────────────────────────────── */}
       {ctxMenu && (
-        <div
-          className="chat-ctx-menu"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
-          onClick={e => e.stopPropagation()}
-        >
-          <button
-            className="chat-ctx-item"
-            onClick={() => {
-              setRenamingId(ctxMenu.id);
-              setRenameVal(ctxMenu.title);
-              setCtxMenu(null);
-            }}
-          >
-            ✏️ Rename
+        <div className="chat-ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={e => e.stopPropagation()}>
+          <button className="chat-ctx-item" onClick={() => { setRenamingId(ctxMenu.id); setRenameVal(ctxMenu.title); setCtxMenu(null); }}>
+            Rename
           </button>
-          <button
-            className="chat-ctx-item chat-ctx-delete"
-            onClick={() => { deleteConversation(ctxMenu.id); setCtxMenu(null); }}
-          >
-            🗑️ Delete
+          <button className="chat-ctx-item chat-ctx-delete" onClick={() => { deleteConversation(ctxMenu.id); setCtxMenu(null); }}>
+            Delete
           </button>
         </div>
       )}

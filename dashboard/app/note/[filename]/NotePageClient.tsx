@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import FlashcardViewer from "../../components/FlashcardViewer";
+import CosmicBg from "../../components/CosmicBg";
 
 const GATEWAY = "http://localhost:18789";
 
@@ -138,6 +139,7 @@ function NotePageInner() {
   const [content, setContent] = useState<string | null>(null);
   const [cards, setCards] = useState<{ front: string; back: string }[] | null>(null);
   const [messages, setMessages] = useState<Message[] | null>(null);
+  const [quiz, setQuiz] = useState<{ q: string; a: string }[] | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
@@ -174,6 +176,12 @@ function NotePageInner() {
               .then(data => { if (data?.messages) setMessages(data.messages); })
               .catch(() => {});
           }
+        }
+
+        if (mode === "quiz") {
+          const body = text.replace(/^---[\s\S]*?---\n\n?/, "");
+          const quiz = parseQuiz(body);
+          if (quiz) setQuiz(quiz);
         }
       })
       .catch(() => setNotFound(true));
@@ -231,6 +239,8 @@ function NotePageInner() {
         </div>
       ) : mode === "flashcard" && cards ? (
         <FlashcardViewer cards={cards} />
+      ) : mode === "quiz" && quiz ? (
+        <QuizViewer pairs={quiz} />
       ) : (
         <article className="prose">
           <ReactMarkdown
@@ -247,8 +257,13 @@ function NotePageInner() {
 
 export default function NotePageClient() {
   return (
-    <Suspense fallback={<main className="max-w-2xl mx-auto px-5 py-8"><p className="text-muted">Loading…</p></main>}>
-      <NotePageInner />
-    </Suspense>
+    <>
+      <CosmicBg />
+      <div className="relative z-10">
+        <Suspense fallback={<main className="max-w-2xl mx-auto px-5 py-8"><p className="text-muted">Loading…</p></main>}>
+          <NotePageInner />
+        </Suspense>
+      </div>
+    </>
   );
 }

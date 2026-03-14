@@ -1,29 +1,19 @@
-"use client";
-
 import { useState, useRef, useEffect } from "react";
 import { Sparkles } from "lucide-react";
 import clsx from "clsx";
+import { Settings, Notes, Folders } from "../storage.js";
+import { processCommand } from "../groq-client.js";
 
-const GATEWAY = "http://127.0.0.1:18789";
-
-interface LogEntry {
-  type: "command" | "result" | "error";
-  text: string;
-}
-
-export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
+export default function CommandChat({ onRefresh }) {
   const [input,   setInput]   = useState("");
-  const [log,     setLog]     = useState<LogEntry[]>([]);
+  const [log,     setLog]     = useState([]);
   const [loading, setLoading] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
-    fetch(`${GATEWAY}/command/log`)
-      .then(r => r.ok ? r.json() : [])
-      .then((entries: { type: string; text: string }[]) => {
-        setLog(entries.map(e => ({ type: e.type as LogEntry["type"], text: e.text })));
-      })
-      .catch(() => {});
+    Settings.getCommandLog().then((entries) => {
+      setLog(entries.map((e) => ({ type: e.type, text: e.text })));
+    }).catch(() => {});
   }, []);
 
   async function send() {
@@ -34,39 +24,53 @@ export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
     setLog((prev) => [...prev, { type: "command", text: cmd }]);
 
     try {
-      const res = await fetch(`${GATEWAY}/command`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: cmd }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Gateway error");
+      const allNotes  = await Notes.list();
+      const prefs     = await Settings.getPreferences();
+      const rawJson   = await processCommand(cmd, allNotes, prefs?.aiOrganiserPreferences ?? "");
+      const actions   = JSON.parse(rawJson);
 
-      const lines: string[] = data.results?.length
-        ? data.results
-        : [data.message ?? "Done."];
+      const results = [];
+      for (const action of actions) {
+        if (action.action === "message") {
+          results.push(action.text);
+        } else if (action.action === "rename") {
+          await Notes.updateMeta(action.filename, { title: action.title });
+          results.push(`Renamed "${action.filename}" → "${action.title}"`);
+        } else if (action.action === "set_course") {
+          await Notes.updateMeta(action.filename, { course: action.course });
+          results.push(`Set course "${action.course}" on "${action.filename}"`);
+        } else if (action.action === "merge") {
+          const ts = new Date().toISOString().replace(/[:.]/g, "-");
+          const slug = (action.title || "merged").toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+          const newFilename = `${ts}_${slug}.md`;
+          await Notes.merge(action.filenames, newFilename, action.title ?? "Merged Note");
+          results.push(`Merged ${action.filenames.length} notes → "${action.title}"`);
+        }
+      }
 
-      setLog((prev) => [...prev, { type: "result", text: lines.join("\n") }]);
+      const resultText = results.join("\n") || "Done.";
+      setLog((prev) => [...prev, { type: "result", text: resultText }]);
+      await Settings.appendCommandLog({ type: "command", text: cmd });
+      await Settings.appendCommandLog({ type: "result", text: resultText });
 
-      if (data.actions?.some((a: { action: string }) => a.action !== "message")) {
+      if (actions.some((a) => a.action !== "message")) {
         onRefresh();
       }
-    } catch (err: unknown) {
+    } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       setLog((prev) => [...prev, { type: "error", text: msg }]);
+      await Settings.appendCommandLog({ type: "error", text: msg });
     }
     setLoading(false);
   }
 
   return (
     <div className="bg-surface border border-border rounded-xl overflow-hidden">
-      {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <Sparkles className="w-3.5 h-3.5 text-accent" />
         <span className="text-xs font-semibold text-muted uppercase tracking-widest">AI Organiser</span>
       </div>
 
-      {/* Log */}
       {log.length > 0 && (
         <div className="max-h-48 overflow-y-auto px-3 py-2 flex flex-col gap-2 border-b border-border">
           {log.slice(-6).map((entry, i) => (
@@ -81,7 +85,7 @@ export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
           ))}
           {loading && (
             <div className="flex gap-1 px-3 py-2">
-              {[0, 1, 2].map((i) => (
+              {[0,1,2].map((i) => (
                 <span key={i} className="w-1.5 h-1.5 rounded-full bg-accent/60 animate-bounce"
                   style={{ animationDelay: `${i * 0.15}s` }} />
               ))}
@@ -90,7 +94,6 @@ export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
         </div>
       )}
 
-      {/* Input */}
       <div className="px-3 py-2">
         <div className="flex items-center gap-1.5 bg-bg border border-border rounded-lg px-3 py-1.5 focus-within:border-accent transition-colors">
           <input
@@ -112,7 +115,6 @@ export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
           </button>
         </div>
       </div>
-
     </div>
   );
 }

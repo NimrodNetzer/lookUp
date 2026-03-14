@@ -6,12 +6,13 @@ import { mkdirSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
-import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, transcribeAndSummarize, chat, processCommand, resetGroqClient } from "./groq.js";
+import { analyzeScreenshot, analyzeMulti, analyzeText, analyzeWithQuestion, transcribeAndSummarize, chat, chatStream, processCommand, resetGroqClient } from "./groq.js";
 import { logActivity, getActivity, getStreak, getSetting, setSetting,
          getActiveConversation, createConversation, saveConversation, getConversation,
          listConversations, touchConversation, deleteConversation, renameConversation,
          reorderConversations, mergeConversations,
-         getFolderTree, createFolder, renameFolder, deleteFolder } from "./db.js";
+         getFolderTree, createFolder, renameFolder, deleteFolder,
+         appendCommandLog, getCommandLog } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // When running as a pkg exe, paths are relative to the exe; in dev, to the project root.
@@ -453,6 +454,42 @@ app.post("/conversations/:id/merge", (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// --- POST /chat/stream — streaming multi-turn conversation ---
+app.post("/chat/stream", async (req, res) => {
+  const { message, conversationId } = req.body;
+  if (!message) return res.status(400).json({ error: "message is required" });
+
+  let conv = conversationId ? getConversation(conversationId) : null;
+  if (!conv) conv = getActiveConversation();
+
+  const messages = [...conv.messages, { role: "user", content: message }];
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  try {
+    const stream = await chatStream(messages);
+    let fullContent = "";
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content ?? "";
+      if (delta) {
+        fullContent += delta;
+        res.write(`data: ${JSON.stringify({ delta })}\n\n`);
+      }
+    }
+    const updatedMessages = [...messages, { role: "assistant", content: fullContent }];
+    const title = conv.messages.length === 0 ? message.slice(0, 60) : conv.title;
+    saveConversation(conv.id, updatedMessages, title);
+    await writeConversationNote({ ...conv, messages: updatedMessages, title });
+    res.write(`data: ${JSON.stringify({ done: true, conversationId: conv.id })}\n\n`);
+  } catch (err) {
+    console.error(err);
+    res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+  }
+  res.end();
+});
+
 // --- POST /chat — multi-turn conversation (DB-persisted) ---
 app.post("/chat", async (req, res) => {
   const { message, conversationId } = req.body;
@@ -493,6 +530,36 @@ app.post("/chat/clear", (_req, res) => {
   try {
     const conv = createConversation();
     res.json({ success: true, conversationId: conv.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- GET /notes/search?q= — full-text search across note content ---
+app.get("/notes/search", async (req, res) => {
+  const q = (req.query.q ?? "").trim().toLowerCase();
+  if (!q) return res.json([]);
+  try {
+    const files = await fs.readdir(NOTES_DIR);
+    const results = [];
+    for (const filename of files.filter((f) => f.endsWith(".md"))) {
+      const content = await fs.readFile(path.join(NOTES_DIR, filename), "utf-8");
+      if (!content.toLowerCase().includes(q)) continue;
+      const title = content.match(/^title:\s*"(.+)"/m)?.[1] ?? filename;
+      const mode  = content.match(/^mode:\s*"(.+)"/m)?.[1]  ?? "summary";
+      const date  = content.match(/^date:\s*"(.+)"/m)?.[1]  ?? "";
+      // Extract a short snippet around the match (from body, not frontmatter)
+      const bodyStart = content.indexOf("---\n\n");
+      const body = bodyStart !== -1 ? content.slice(bodyStart + 5) : content;
+      const lower = body.toLowerCase();
+      const idx = lower.indexOf(q);
+      const snippet = idx !== -1
+        ? body.slice(Math.max(0, idx - 60), idx + 120).replace(/\n/g, " ").trim()
+        : "";
+      results.push({ filename, title, mode, date, snippet });
+    }
+    results.sort((a, b) => b.date.localeCompare(a.date));
+    res.json(results.slice(0, 30));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -605,9 +672,20 @@ app.post("/command", async (req, res) => {
       }
     }
 
+    appendCommandLog("command", command);
+    if (results.length > 0) appendCommandLog("result", results.join("\n"));
     res.json({ success: true, actions, results });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- GET /command/log ---
+app.get("/command/log", (_req, res) => {
+  try {
+    res.json(getCommandLog(40));
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

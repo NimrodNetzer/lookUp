@@ -1,4 +1,5 @@
-const GATEWAY = "http://127.0.0.1:18789";
+import { Settings, Conversations, Messages, Notes } from "./storage.js";
+import { analyzeScreenshot, analyzeMulti, analyzeText, transcribeAndSummarize, chat, verifyApiKey, analyzeWithQuestion } from "./groq-client.js";
 
 // --- DOM refs ---
 const convTabs         = document.getElementById("convTabs");
@@ -20,6 +21,12 @@ const modeDropdown     = document.getElementById("modeDropdown");
 const modeLabel        = document.getElementById("modeLabel");
 const dropdownItems    = document.querySelectorAll(".dropdown-item");
 const dashboardBtn     = document.getElementById("dashboardBtn");
+const searchBtn        = document.getElementById("searchBtn");
+const searchOverlay    = document.getElementById("searchOverlay");
+const searchInput      = document.getElementById("searchInput");
+const searchClose      = document.getElementById("searchClose");
+const searchResults    = document.getElementById("searchResults");
+const searchEmpty      = document.getElementById("searchEmpty");
 const selectionBar     = document.getElementById("selectionBar");
 const selectionPreview = document.getElementById("selectionPreview");
 const askBtn           = document.getElementById("askBtn");
@@ -41,6 +48,9 @@ let activeConversationId = null;
 const tabResults        = new Map(); // conversationId → saved resultArea innerHTML
 let _uid = 0; // unique ID counter for quiz/flashcard elements
 const SPINNER_ID = "inlineSpinner";
+
+// Attached file state
+let attachedFile = null; // { base64, mimeType, name, isImage }
 
 // ── Tab drag state ────────────────────────────────────────────────────────────
 let dragConvId     = null;
@@ -74,11 +84,79 @@ new ResizeObserver(updateTabArrows).observe(convTabs);
 
 // ── Dashboard / Chat links ───────────────────────────────────────────────────
 dashboardBtn.addEventListener("click", () => {
-  chrome.tabs.create({ url: "http://localhost:18789" });
+  chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
 });
 chatExpandBtn.addEventListener("click", () => {
-  chrome.tabs.create({ url: "http://localhost:18789/chat" });
+  chrome.tabs.create({ url: chrome.runtime.getURL("built/chat.html") });
 });
+
+// ── Note search ──────────────────────────────────────────────────────────────
+const MODE_ICONS = { summary:"📄", explain:"📖", quiz:"❓", flashcard:"🃏", session:"📚", chat:"💬" };
+
+searchBtn.addEventListener("click", () => openSearch());
+searchClose.addEventListener("click", () => closeSearch());
+searchOverlay.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSearch(); });
+
+function openSearch() {
+  searchOverlay.classList.remove("hidden");
+  searchInput.value = "";
+  searchInput.focus();
+  renderSearchResults([]);
+}
+function closeSearch() { searchOverlay.classList.add("hidden"); }
+
+let _searchTimer = null;
+searchInput.addEventListener("input", () => {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(runSearch, 180);
+});
+
+async function runSearch() {
+  const q = searchInput.value.trim().toLowerCase();
+  if (!q) { renderSearchResults([]); return; }
+  const all = await Notes.list();
+  const hits = all.filter((n) =>
+    (n.title ?? n.filename).toLowerCase().includes(q) ||
+    (n.mode ?? "").toLowerCase().includes(q)
+  ).slice(0, 20);
+  renderSearchResults(hits, q);
+}
+
+function renderSearchResults(notes, q = "") {
+  searchResults.innerHTML = "";
+  if (notes.length === 0) {
+    const p = document.createElement("p");
+    p.className = "search-empty";
+    p.textContent = q ? "No notes found." : "Type to search notes…";
+    searchResults.appendChild(p);
+    return;
+  }
+  for (const note of notes) {
+    const icon = MODE_ICONS[note.mode] ?? MODE_ICONS[(note.mode ?? "").replace(/^audio-/, "")] ?? "📄";
+    const date = note.modified ?? note.updatedAt ?? note.createdAt;
+    const item = document.createElement("div");
+    item.className = "search-result-item";
+    item.innerHTML = `
+      <span class="search-result-icon">${icon}</span>
+      <div class="search-result-text">
+        <div class="search-result-title">${escapeHtml(note.title ?? note.filename)}</div>
+        <div class="search-result-meta">${date ? new Date(date).toLocaleDateString() : ""}</div>
+      </div>
+      <button class="search-result-open" data-filename="${escapeHtml(note.filename)}">↗ Open</button>
+    `;
+    item.querySelector(".search-result-open").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openNoteInDashboard(note.filename);
+    });
+    searchResults.appendChild(item);
+  }
+}
+
+async function openNoteInDashboard(filename) {
+  await chrome.storage.local.set({ pendingOpenNote: filename });
+  chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
+  closeSearch();
+}
 
 // ── Mode dropdown ────────────────────────────────────────────────────────────
 modeTrigger.addEventListener("click", (e) => {
@@ -115,31 +193,118 @@ dropdownItems.forEach((item) => {
   });
 });
 
+// ── Conversation → note mapping (persisted so captures group per tab) ────────
+let conversationNoteMap = {}; // { [conversationId]: filename }
+
+async function loadConvNoteMap() {
+  const result = await chrome.storage.local.get("convNoteMap");
+  conversationNoteMap = result.convNoteMap ?? {};
+}
+
+async function saveConvNoteMap() {
+  await chrome.storage.local.set({ convNoteMap: conversationNoteMap });
+}
+
+function broadcastNotesUpdate() {
+  try { new BroadcastChannel("lookup-data").postMessage({ type: "notes-updated" }); } catch {}
+}
+
+// ── Note saving helper ────────────────────────────────────────────────────────
+// All captures in the same conversation tab are appended to the same note file.
+async function saveNote({ title, mode, markdown, cards = null }) {
+  // Store flashcard JSON directly so the dashboard can render flip cards properly
+  const storedContent = cards && Array.isArray(cards) ? JSON.stringify(cards) : markdown;
+  let existingFilename = conversationNoteMap[activeConversationId];
+
+  // Self-heal: if map entry is missing (e.g. storage was cleared), recover from IndexedDB
+  if (!existingFilename && activeConversationId) {
+    const allNotes = await Notes.list();
+    const match = allNotes.find((n) => n.conversation_id === activeConversationId);
+    if (match) {
+      existingFilename = match.filename;
+      conversationNoteMap[activeConversationId] = existingFilename;
+      await saveConvNoteMap();
+    }
+  }
+
+  if (existingFilename) {
+    const existing = await Notes.get(existingFilename);
+    if (existing) {
+      const newContent = existing.content + `\n\n---\n\n### ${title}\n\n` + storedContent;
+      const mergedCards = cards && Array.isArray(cards)
+        ? [...(existing.cards ?? []), ...cards]
+        : existing.cards ?? null;
+      await Notes.save(existingFilename, { ...existing }, newContent, mergedCards);
+      broadcastNotesUpdate();
+      return { filename: existingFilename, title: existing.title };
+    }
+  }
+
+  // Create a fresh note and record it for this conversation
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const slug = (title || mode).toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+  const filename = `${ts}_${slug}.md`;
+  await Notes.save(filename, { title: title ?? mode, mode, createdAt: Date.now(), conversation_id: activeConversationId }, storedContent, cards);
+  conversationNoteMap[activeConversationId] = filename;
+  await saveConvNoteMap();
+  broadcastNotesUpdate();
+  return { filename, title: title ?? mode };
+}
+
 // ── Shared chat send logic ────────────────────────────────────────────────────
 async function sendChatMessage() {
   const message = titleInput.value.trim();
-  if (!message) { captureBtn.click(); return; }
+  if (!message && !attachedFile) { captureBtn.click(); return; }
 
   titleInput.disabled = true;
   chatSendBtn.disabled = true;
+  const attachBtn = document.getElementById("attachBtn");
+  if (attachBtn) attachBtn.disabled = true;
 
-  appendCard(`<div class="msg-user">${escapeHtml(message)}</div>`);
+  // Build user bubble (show attachment thumbnail if present)
+  const localAttached = attachedFile;
+  let userBubbleHtml = "";
+  if (localAttached?.isImage) {
+    userBubbleHtml += `<img src="data:${localAttached.mimeType};base64,${localAttached.base64}" class="msg-attachment-thumb" alt="${escapeHtml(localAttached.name)}" />`;
+  } else if (localAttached) {
+    userBubbleHtml += `<div class="msg-attachment-file">📎 ${escapeHtml(localAttached.name)}</div>`;
+  }
+  if (message) userBubbleHtml += `<div>${escapeHtml(message)}</div>`;
+  appendCard(`<div class="msg-user">${userBubbleHtml}</div>`);
+
   titleInput.value = "";
+  clearAttachment();
   showSpinner("Thinking…");
 
   try {
-    const res = await fetch(`${GATEWAY}/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, conversationId: activeConversationId }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "Gateway error");
-    if (data.conversationId) activeConversationId = data.conversationId;
-    const isQuiz = data.reply.includes("**Answer:**");
+    const history = await Messages.listByConversation(activeConversationId);
+    let reply;
+
+    if (localAttached?.isImage) {
+      // User attached an image — use vision model with that image
+      reply = await analyzeWithQuestion(localAttached.base64, localAttached.mimeType, message || "Describe and analyze this image.");
+    } else {
+      // Always capture current tab as visual context; fall back to text-only if tab can't be captured
+      try {
+        const { base64, mimeType } = await captureTab();
+        reply = await analyzeWithQuestion(base64, mimeType, message);
+      } catch {
+        const msgs = [...history.map(m => ({ role: m.role, content: m.content })), { role: "user", content: message }];
+        reply = await chat(msgs);
+      }
+    }
+
+    await Messages.append(activeConversationId, "user", message);
+    await Messages.append(activeConversationId, "assistant", reply);
+
+    if (history.length === 0) {
+      await Conversations.rename(activeConversationId, message.slice(0, 60));
+    }
+
+    const isQuiz = reply.includes("**Answer:**");
     appendCard(`
       <div class="result-card">
-        ${isQuiz ? renderQuiz(data.reply) : `<div class="md-body">${renderMarkdown(data.reply)}</div>`}
+        ${isQuiz ? renderQuiz(reply) : `<div class="md-body">${renderMarkdown(reply)}</div>`}
       </div>`,
       isQuiz ? () => {
         resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
@@ -154,10 +319,50 @@ async function sendChatMessage() {
         });
       } : null
     );
-    loadConversations(); // refresh tab titles
+    loadConversations();
   } catch (err) { showError(err.message); }
   titleInput.disabled = false;
   chatSendBtn.disabled = false;
+  if (attachBtn) attachBtn.disabled = false;
+}
+
+// ── Attachment helpers ────────────────────────────────────────────────────────
+function clearAttachment() {
+  attachedFile = null;
+  const preview = document.getElementById("attachPreview");
+  if (preview) { preview.innerHTML = ""; preview.style.display = "none"; }
+}
+
+function handleFileAttach(file) {
+  if (!file) return;
+  const isImage = file.type.startsWith("image/");
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const dataUrl = e.target.result;
+    const base64 = dataUrl.split(",")[1];
+    attachedFile = { base64, mimeType: file.type, name: file.name, isImage };
+
+    const preview = document.getElementById("attachPreview");
+    if (!preview) return;
+    if (isImage) {
+      preview.innerHTML = `
+        <div class="attach-chip">
+          <img src="${dataUrl}" class="attach-chip-thumb" alt="" />
+          <span class="attach-chip-name">${escapeHtml(file.name)}</span>
+          <button class="attach-chip-remove" id="attachRemove">✕</button>
+        </div>`;
+    } else {
+      preview.innerHTML = `
+        <div class="attach-chip">
+          <span class="attach-chip-icon">📎</span>
+          <span class="attach-chip-name">${escapeHtml(file.name)}</span>
+          <button class="attach-chip-remove" id="attachRemove">✕</button>
+        </div>`;
+    }
+    preview.style.display = "flex";
+    document.getElementById("attachRemove")?.addEventListener("click", clearAttachment);
+  };
+  reader.readAsDataURL(file);
 }
 
 titleInput.addEventListener("keydown", (e) => {
@@ -166,15 +371,96 @@ titleInput.addEventListener("keydown", (e) => {
 
 chatSendBtn.addEventListener("click", sendChatMessage);
 
-// ── Gateway health check ────────────────────────────────────────────────────
-async function checkGateway() {
-  try {
-    const r = await fetch(`${GATEWAY}/health`, { signal: AbortSignal.timeout(2000) });
-    statusDot.classList.toggle("online", r.ok);
-  } catch { statusDot.classList.remove("online"); }
+// ── Attach button ─────────────────────────────────────────────────────────────
+const attachBtn      = document.getElementById("attachBtn");
+const attachFileInput = document.getElementById("attachFileInput");
+
+attachBtn.addEventListener("click", () => attachFileInput.click());
+attachFileInput.addEventListener("change", () => {
+  const file = attachFileInput.files?.[0];
+  if (file) handleFileAttach(file);
+  attachFileInput.value = "";
+});
+
+// ── Drag-and-drop image onto input bar ────────────────────────────────────────
+const chatInputBar = document.querySelector(".chat-input-bar");
+
+chatInputBar.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  chatInputBar.classList.add("drag-over");
+});
+chatInputBar.addEventListener("dragleave", (e) => {
+  if (!chatInputBar.contains(e.relatedTarget)) chatInputBar.classList.remove("drag-over");
+});
+chatInputBar.addEventListener("drop", (e) => {
+  e.preventDefault();
+  chatInputBar.classList.remove("drag-over");
+  const file = e.dataTransfer.files?.[0];
+  if (file) handleFileAttach(file);
+});
+
+// ── Paste image from clipboard ────────────────────────────────────────────────
+document.addEventListener("paste", (e) => {
+  const item = [...(e.clipboardData?.items ?? [])].find(i => i.type.startsWith("image/"));
+  if (!item) return;
+  const file = item.getAsFile();
+  if (file) handleFileAttach(file);
+});
+
+
+// ── Setup overlay ─────────────────────────────────────────────────────────────
+const setupOverlay  = document.getElementById("setupOverlay");
+const setupKeyInput = document.getElementById("setupKeyInput");
+const setupSaveBtn  = document.getElementById("setupSaveBtn");
+const setupError    = document.getElementById("setupError");
+const groqLink      = document.getElementById("groqLink");
+
+// Open the Groq keys page in a new tab (links don't work directly in sidepanel)
+groqLink.addEventListener("click", (e) => {
+  e.preventDefault();
+  chrome.tabs.create({ url: "https://console.groq.com/keys" });
+});
+
+setupSaveBtn.addEventListener("click", async () => {
+  const key = setupKeyInput.value.trim();
+  if (!key) { setupError.textContent = "Please paste your API key first."; return; }
+
+  setupSaveBtn.disabled = true;
+  setupSaveBtn.textContent = "Verifying…";
+  setupError.textContent = "";
+
+  const { ok, error } = await verifyApiKey(key);
+  if (!ok) {
+    setupError.textContent = error ?? "Invalid key — please check and try again.";
+    setupSaveBtn.disabled = false;
+    setupSaveBtn.textContent = "Verify & Save →";
+    return;
+  }
+
+  await Settings.setApiKey(key);
+  setupOverlay.classList.add("hidden");
+  statusDot.classList.add("online");
+  await loadActiveConversation();
+});
+
+// Show overlay if not configured, otherwise boot normally
+async function initSetup() {
+  const configured = await Settings.isConfigured();
+  if (configured) {
+    setupOverlay.classList.add("hidden");
+    await loadActiveConversation();
+  }
+  // If not configured, overlay stays visible — loadActiveConversation runs after save
 }
-checkGateway();
-setInterval(checkGateway, 10_000);
+initSetup();
+
+// ── API key status indicator ──────────────────────────────────────────────────
+async function checkStatus() {
+  const configured = await Settings.isConfigured();
+  statusDot.classList.toggle("online", configured);
+}
+checkStatus();
+setInterval(checkStatus, 10_000);
 
 // ── Conversation tabs ─────────────────────────────────────────────────────────
 let conversations = [];
@@ -253,11 +539,7 @@ function renderConvTabs() {
         newArr.splice(isBefore ? tgtIdx : tgtIdx + 1, 0, removed);
         conversations = newArr;
         renderConvTabs();
-        await fetch(`${GATEWAY}/conversations/reorder`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: conversations.map(c => c.id) }),
-        });
+        await Conversations.reorder(conversations.map(c => c.id));
       }
     });
     tab.dataset.id = String(conv.id);
@@ -269,11 +551,9 @@ function renderConvTabs() {
 
 async function loadConversations() {
   try {
-    const r = await fetch(`${GATEWAY}/conversations/list`);
-    if (!r.ok) return;
-    conversations = await r.json();
+    conversations = await Conversations.list();
     renderConvTabs();
-  } catch { /* gateway not running */ }
+  } catch (err) { console.error(err); }
 }
 
 const PLACEHOLDER_HTML = `<p class="placeholder">Choose a mode, then hit <strong>⚡ Capture</strong>.<br>Or select text on any page to <strong>Ask</strong> about it.</p>`;
@@ -284,6 +564,7 @@ async function switchConversation(id) {
     tabResults.set(activeConversationId, resultArea.innerHTML);
   }
   activeConversationId = id;
+  await Conversations.setActive(id);
 
   const cached = tabResults.get(id);
   if (cached !== undefined) {
@@ -291,14 +572,11 @@ async function switchConversation(id) {
     reattachResultListeners();
   } else {
     try {
-      const hr = await fetch(`${GATEWAY}/chat/history?conversationId=${id}`);
-      if (hr.ok) {
-        const messages = await hr.json();
-        if (messages.length > 0) {
-          renderAllMessages(messages);
-        } else {
-          resultArea.innerHTML = PLACEHOLDER_HTML;
-        }
+      const messages = await Messages.listByConversation(id);
+      if (messages.length > 0) {
+        renderAllMessages(messages);
+      } else {
+        resultArea.innerHTML = PLACEHOLDER_HTML;
       }
     } catch (err) { console.error(err); }
   }
@@ -307,21 +585,20 @@ async function switchConversation(id) {
 
 async function deleteConvTab(id) {
   try {
-    const r = await fetch(`${GATEWAY}/conversations/${id}`, { method: "DELETE" });
-    if (!r.ok) return;
+    await Conversations.delete(id);
     tabResults.delete(id);
+    delete conversationNoteMap[id];
+    await saveConvNoteMap();
     conversations = conversations.filter(c => c.id !== id);
     if (activeConversationId === id) {
       if (conversations.length > 0) {
         await switchConversation(conversations[0].id);
       } else {
-        const nr = await fetch(`${GATEWAY}/conversations/new`, { method: "POST" });
-        if (nr.ok) {
-          const { id: newId } = await nr.json();
-          activeConversationId = newId;
-          resultArea.innerHTML = PLACEHOLDER_HTML;
-          await loadConversations();
-        }
+        const conv = await Conversations.create();
+        activeConversationId = conv.id;
+        await Conversations.setActive(conv.id);
+        resultArea.innerHTML = PLACEHOLDER_HTML;
+        await loadConversations();
       }
     } else {
       renderConvTabs();
@@ -331,14 +608,9 @@ async function deleteConvTab(id) {
 
 async function mergeConvTabs(targetId, sourceId) {
   try {
-    const r = await fetch(`${GATEWAY}/conversations/${targetId}/merge`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sourceId }),
-    });
-    if (!r.ok) return;
+    await Conversations.merge(targetId, sourceId);
     tabResults.delete(sourceId);
-    tabResults.delete(targetId); // force re-fetch from DB
+    tabResults.delete(targetId); // force re-fetch
     if (activeConversationId === sourceId) activeConversationId = targetId;
     await loadConversations();
     if (activeConversationId === targetId) await switchConversation(targetId);
@@ -418,11 +690,11 @@ function startInlineRename(convId, currentTitle, labelEl) {
 
 async function renameConvTab(id, title) {
   try {
-    await fetch(`${GATEWAY}/conversations/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
-    });
+    await Conversations.rename(id, title);
+    const noteFilename = conversationNoteMap[id];
+    if (noteFilename) {
+      try { await Notes.updateMeta(noteFilename, { title }); } catch {}
+    }
     await loadConversations();
   } catch (err) { console.error(err); }
 }
@@ -438,10 +710,13 @@ function reattachResultListeners() {
       btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
     });
   });
-  resultArea.querySelectorAll(".flashcard").forEach((fc) => {
-    fc.addEventListener("click", function () { this.classList.toggle("flipped"); });
-  });
 }
+
+// Single delegated listener — survives innerHTML replacement
+resultArea.addEventListener("click", (e) => {
+  const fc = e.target.closest(".flashcard");
+  if (fc && resultArea.contains(fc)) fc.classList.toggle("flipped");
+});
 
 function renderAllMessages(messages) {
   resultArea.innerHTML = "";
@@ -455,11 +730,8 @@ function renderAllMessages(messages) {
       let cards = null;
       try {
         const p = JSON.parse(msg.content);
-        console.log("[LookUp] assistant msg parsed:", p);
         if (Array.isArray(p) && p[0]?.front !== undefined) cards = p;
-      } catch (e) {
-        console.log("[LookUp] assistant msg not JSON, content:", msg.content.slice(0, 80));
-      }
+      } catch {}
       if (cards) {
         showFlashcards(cards, null, "flashcard");
       } else {
@@ -478,10 +750,9 @@ newConvBtn.addEventListener("click", async () => {
     tabResults.set(activeConversationId, resultArea.innerHTML);
   }
   try {
-    const r = await fetch(`${GATEWAY}/conversations/new`, { method: "POST" });
-    if (!r.ok) return;
-    const { id } = await r.json();
-    activeConversationId = id;
+    const conv = await Conversations.create();
+    activeConversationId = conv.id;
+    await Conversations.setActive(conv.id);
     resultArea.innerHTML = PLACEHOLDER_HTML;
     await loadConversations();
   } catch (err) { console.error(err); }
@@ -489,36 +760,21 @@ newConvBtn.addEventListener("click", async () => {
 
 // ── Restore conversation on open ─────────────────────────────────────────────
 async function loadActiveConversation() {
+  await loadConvNoteMap();
   try {
-    const r = await fetch(`${GATEWAY}/conversations/active`);
-    if (!r.ok) return;
-    const { id, messages } = await r.json();
-    activeConversationId = id;
+    // Ensure at least one conversation exists
+    let conv = await Conversations.getActive();
+    if (!conv) {
+      const all = await Conversations.list();
+      conv = all.length > 0 ? all[0] : await Conversations.create();
+      await Conversations.setActive(conv.id);
+    }
+    activeConversationId = conv.id;
     await loadConversations();
-    // Show last AI reply if there is one
-    if (messages.length > 0) {
-      renderAllMessages(messages);
-    }
-  } catch { /* gateway not running yet */ }
+    const messages = await Messages.listByConversation(conv.id);
+    if (messages.length > 0) renderAllMessages(messages);
+  } catch (err) { console.error(err); }
 }
-loadActiveConversation();
-
-// ── Poll every 3 s to stay in sync with the chat page ───────────────────────
-setInterval(async () => {
-  try {
-    // If the active conversation was changed externally (e.g. from the dashboard
-    // chat page), update our local activeConversationId so the correct tab is
-    // highlighted when we re-render the tabs.
-    const r = await fetch(`${GATEWAY}/conversations/active`);
-    if (r.ok) {
-      const { id } = await r.json();
-      if (id && id !== activeConversationId) {
-        activeConversationId = id;
-      }
-    }
-    await loadConversations(); // re-renders tabs with updated activeConversationId
-  } catch { /* gateway not running */ }
-}, 3000);
 
 // ── Tab capture helper ──────────────────────────────────────────────────────
 async function captureTab() {
@@ -529,7 +785,6 @@ async function captureTab() {
 }
 
 // ── Main capture button ─────────────────────────────────────────────────────
-// ── Add Page button (multi-page session) ─────────────────────────────────────
 addPageBtn.addEventListener("click", async () => {
   addPageBtn.disabled = true;
   showSpinner("Capturing page…");
@@ -546,30 +801,38 @@ captureBtn.addEventListener("click", async () => {
   if (selectedMode === "audio") { startAudioCapture(); return; }
 
   captureBtn.disabled = true;
-
   showSpinner("Capturing screen…");
+
   try {
     const { base64, mimeType } = await captureTab();
     showSpinner("Analyzing…");
-    const res = await fetch(`${GATEWAY}/action`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        screenshot: base64,
-        mimeType,
-        mode: selectedMode,
-        title: titleInput.value.trim() || undefined,
-        conversationId: activeConversationId,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "Gateway error");
 
-    if (data.conversationId) activeConversationId = data.conversationId;
-    if (selectedMode === "flashcard" && data.cards) {
-      showFlashcards(data.cards, data.title, selectedMode);
+    const raw = await analyzeScreenshot(base64, mimeType, selectedMode);
+    const noteTitle = titleInput.value.trim() || selectedMode;
+
+    let markdown = raw;
+    let cards = null;
+
+    if (selectedMode === "flashcard") {
+      try {
+        const jsonStr = raw.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+        cards = JSON.parse(jsonStr);
+      } catch {
+        cards = [{ front: "Parse error", back: raw }];
+      }
+      markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
+    }
+
+    const saved = await saveNote({ title: noteTitle, mode: selectedMode, markdown, cards });
+
+    // Append to conversation
+    await Messages.append(activeConversationId, "user", `📸 Screenshot (${selectedMode})`);
+    await Messages.append(activeConversationId, "assistant", selectedMode === "flashcard" ? JSON.stringify(cards) : markdown);
+
+    if (cards) {
+      showFlashcards(cards, saved.title, selectedMode, saved.filename);
     } else {
-      showResult(data.markdown, data.title, selectedMode);
+      showResult(markdown, saved.title, selectedMode, saved.filename);
     }
   } catch (err) { showError(err.message); }
   captureBtn.disabled = false;
@@ -597,24 +860,33 @@ askBtn.addEventListener("click", async () => {
   if (!selectedText) return;
   askBtn.disabled = true;
   showSpinner("Analyzing selected text…");
+
   try {
-    const res = await fetch(`${GATEWAY}/ask`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        selectedText,
-        mode: selectedMode,
-        title: titleInput.value.trim() || undefined,
-        conversationId: activeConversationId,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "Gateway error");
-    if (data.conversationId) activeConversationId = data.conversationId;
-    if (selectedMode === "flashcard" && data.cards) {
-      showFlashcards(data.cards, data.title, selectedMode);
+    const raw = await analyzeText(selectedText, selectedMode);
+    const noteTitle = titleInput.value.trim() || "Selected text";
+
+    let markdown = raw;
+    let cards = null;
+
+    if (selectedMode === "flashcard") {
+      try {
+        const jsonStr = raw.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+        cards = JSON.parse(jsonStr);
+      } catch {
+        cards = [{ front: "Parse error", back: raw }];
+      }
+      markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
+    }
+
+    const saved = await saveNote({ title: noteTitle, mode: selectedMode, markdown, cards });
+
+    await Messages.append(activeConversationId, "user", `📝 Selected text (${selectedMode})`);
+    await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : markdown);
+
+    if (cards) {
+      showFlashcards(cards, saved.title, selectedMode, saved.filename);
     } else {
-      showResult(data.markdown, data.title, selectedMode);
+      showResult(markdown, saved.title, selectedMode, saved.filename);
     }
   } catch (err) { showError(err.message); }
   askBtn.disabled = false;
@@ -648,19 +920,31 @@ sessionFinish.addEventListener("click", async () => {
   showSpinner(`Analyzing ${sessionFrames.length} pages…`);
 
   try {
-    const res = await fetch(`${GATEWAY}/session`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ frames: sessionFrames, mode: selectedMode, title: titleInput.value.trim() || undefined, conversationId: activeConversationId }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "Gateway error");
+    const raw = await analyzeMulti(sessionFrames, selectedMode);
+    const noteTitle = titleInput.value.trim() || `Multi (${sessionFrames.length} pages)`;
 
-    if (data.conversationId) activeConversationId = data.conversationId;
-    if (selectedMode === "flashcard" && data.cards) {
-      showFlashcards(data.cards, data.title, selectedMode);
+    let markdown = raw;
+    let cards = null;
+
+    if (selectedMode === "flashcard") {
+      try {
+        const jsonStr = raw.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+        cards = JSON.parse(jsonStr);
+      } catch {
+        cards = [{ front: "Parse error", back: raw }];
+      }
+      markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
+    }
+
+    const saved = await saveNote({ title: noteTitle, mode: selectedMode, markdown, cards });
+
+    await Messages.append(activeConversationId, "user", `📸 ${sessionFrames.length} pages (${selectedMode})`);
+    await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : markdown);
+
+    if (cards) {
+      showFlashcards(cards, saved.title, selectedMode, saved.filename);
     } else {
-      showResult(data.markdown, data.title, selectedMode);
+      showResult(markdown, saved.title, selectedMode, saved.filename);
     }
   } catch (err) { showError(err.message); }
 
@@ -721,37 +1005,31 @@ stopAudio.addEventListener("click", () => {
 async function finishAudio() {
   try {
     const blob = new Blob(audioChunks, { type: "audio/webm" });
-    const base64 = await blobToBase64(blob);
-    const res = await fetch(`${GATEWAY}/transcribe`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        audio: base64,
-        mode: selectedMode,
-        title: titleInput.value.trim() || undefined,
-        conversationId: activeConversationId,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "Transcription error");
-    if (data.conversationId) activeConversationId = data.conversationId;
-    if (selectedMode === "flashcard" && data.cards) {
-      showFlashcards(data.cards, data.title, selectedMode);
+    const { transcript, markdown } = await transcribeAndSummarize(blob, selectedMode);
+    const noteTitle = titleInput.value.trim() || "Audio recording";
+    const audioMode = `audio-${selectedMode}`;
+
+    let cards = null;
+    let finalMarkdown = markdown;
+
+    if (selectedMode === "flashcard") {
+      try { cards = JSON.parse(markdown); } catch { cards = [{ front: "Parse error", back: markdown }]; }
+      finalMarkdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
+    }
+
+    const saved = await saveNote({ title: noteTitle, mode: audioMode, markdown: finalMarkdown, cards });
+
+    await Messages.append(activeConversationId, "user", `🎙️ Audio recording (${selectedMode})`);
+    await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : finalMarkdown);
+
+    if (cards) {
+      showFlashcards(cards, saved.title, audioMode, saved.filename);
     } else {
-      showResult(data.markdown, data.title, selectedMode);
+      showResult(finalMarkdown, saved.title, audioMode, saved.filename);
     }
   } catch (err) { showError(err.message); }
   mediaRecorder = null;
   captureBtn.disabled = false;
-}
-
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(",")[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
 }
 
 // ── UI helpers ──────────────────────────────────────────────────────────────
@@ -775,7 +1053,7 @@ function showSpinner(msg) {
   const div = document.createElement("div");
   div.id = SPINNER_ID;
   div.className = "spinner";
-  div.textContent = msg;
+  div.innerHTML = `<span></span><span></span><span></span>`;
   resultArea.appendChild(div);
   resultArea.scrollTop = resultArea.scrollHeight;
 }
@@ -789,53 +1067,54 @@ function resultHeadline(mode, title) {
   return `<div class="result-headline">${display}${hasTitle ? `: ${escapeHtml(title)}` : ""}</div>`;
 }
 
-function showResult(markdown, title, mode) {
+function showResult(markdown, title, mode, filename) {
   const bodyHtml = (mode === "quiz")
     ? renderQuiz(markdown)
     : `<div class="md-body">${renderMarkdown(markdown)}</div>`;
+  const dashLink = filename ? `<div class="open-dash-row"><button class="open-dash-btn" data-filename="${escapeHtml(filename)}">↗ View in Dashboard</button></div>` : "";
 
   appendCard(`
     <div class="result-card">
       ${resultHeadline(mode, title)}
       ${bodyHtml}
+      ${dashLink}
     </div>`,
-    mode === "quiz" ? () => {
-      resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
-        btn.dataset.bound = "1";
-        btn.addEventListener("click", () => {
-          const el = document.getElementById(btn.dataset.answerId);
-          if (!el) return;
-          const hidden = el.style.display === "none";
-          el.style.display = hidden ? "block" : "none";
-          btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+    () => {
+      if (mode === "quiz") {
+        resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
+          btn.dataset.bound = "1";
+          btn.addEventListener("click", () => {
+            const el2 = document.getElementById(btn.dataset.answerId);
+            if (!el2) return;
+            const hidden = el2.style.display === "none";
+            el2.style.display = hidden ? "block" : "none";
+            btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+          });
         });
-      });
-    } : null
+      }
+      if (filename) bindDashBtn(filename);
+    }
   );
 }
 
-function showFlashcards(cards, title, mode = "flashcard") {
+function showFlashcards(cards, title, mode = "flashcard", filename) {
   const prefix = `fc${++_uid}_`;
   const grid = cards.map((card, i) => `
     <div class="flashcard" id="${prefix}${i}">
-      <div class="flashcard-inner">
-        <div class="flashcard-front">${renderMarkdown(card.front)}</div>
-        <div class="flashcard-back">${renderMarkdown(card.back)}</div>
-      </div>
+      <div class="flashcard-front">${renderMarkdown(card.front)}</div>
+      <div class="flashcard-back">${renderMarkdown(card.back)}</div>
     </div>
   `).join("");
+  const dashLink = filename ? `<div class="open-dash-row"><button class="open-dash-btn" data-filename="${escapeHtml(filename)}">↗ View in Dashboard</button></div>` : "";
 
   appendCard(`
     <div class="result-card" style="background:transparent;border:none;padding:0">
       ${resultHeadline(mode, title)}
       <div class="flashcard-grid">${grid}</div>
+      ${dashLink}
     </div>`,
     () => {
-      cards.forEach((_, i) => {
-        document.getElementById(`${prefix}${i}`)?.addEventListener("click", function () {
-          this.classList.toggle("flipped");
-        });
-      });
+      if (filename) bindDashBtn(filename);
     }
   );
 }
@@ -843,6 +1122,15 @@ function showFlashcards(cards, title, mode = "flashcard") {
 function showError(msg) {
   document.getElementById(SPINNER_ID)?.remove();
   appendCard(`<div class="error-card"><strong>Error:</strong> ${escapeHtml(msg)}</div>`);
+}
+
+function bindDashBtn(filename) {
+  resultArea.querySelectorAll(`.open-dash-btn[data-filename="${CSS.escape(filename)}"]:not([data-bound])`).forEach((btn) => {
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
+    });
+  });
 }
 
 function escapeHtml(str = "") {
@@ -855,7 +1143,6 @@ function escapeHtml(str = "") {
 function renderQuiz(markdown) {
   let blocks = markdown.split(/\n[ \t]*---[ \t]*\n/);
 
-  // If no --- separators but multiple **Answer:** found, split at question boundaries (**Q1., **Q2. etc.)
   if (blocks.length <= 1 && (markdown.match(/\*\*Answer:\*\*/g) ?? []).length > 1) {
     blocks = markdown.split(/\n\n(?=\*\*Q\d)/);
   }
@@ -870,7 +1157,6 @@ function renderQuiz(markdown) {
 
     const answerIdx = trimmed.indexOf("**Answer:**");
     if (answerIdx === -1) {
-      // Non-Q&A block (e.g. intro text) — render normally
       html += `<div class="md-body">${renderMarkdown(trimmed)}</div>`;
       continue;
     }
@@ -891,37 +1177,29 @@ function renderQuiz(markdown) {
   return html || `<div class="md-body">${renderMarkdown(markdown)}</div>`;
 }
 
-// ── Math renderer — converts LaTeX commands to Unicode/HTML ──────────────────
+// ── Math renderer ────────────────────────────────────────────────────────────
 const MATH_SYMBOLS = {
-  // Greek lowercase
   '\\alpha':'α','\\beta':'β','\\gamma':'γ','\\delta':'δ','\\epsilon':'ε',
   '\\varepsilon':'ε','\\zeta':'ζ','\\eta':'η','\\theta':'θ','\\vartheta':'ϑ',
   '\\iota':'ι','\\kappa':'κ','\\lambda':'λ','\\mu':'μ','\\nu':'ν','\\xi':'ξ',
   '\\pi':'π','\\varpi':'ϖ','\\rho':'ρ','\\varrho':'ϱ','\\sigma':'σ',
   '\\varsigma':'ς','\\tau':'τ','\\upsilon':'υ','\\phi':'φ','\\varphi':'φ',
   '\\chi':'χ','\\psi':'ψ','\\omega':'ω',
-  // Greek uppercase
   '\\Gamma':'Γ','\\Delta':'Δ','\\Theta':'Θ','\\Lambda':'Λ','\\Xi':'Ξ',
   '\\Pi':'Π','\\Sigma':'Σ','\\Upsilon':'Υ','\\Phi':'Φ','\\Psi':'Ψ','\\Omega':'Ω',
-  // Set theory
   '\\cup':'∪','\\cap':'∩','\\in':'∈','\\notin':'∉','\\ni':'∋',
   '\\subset':'⊂','\\subseteq':'⊆','\\supset':'⊃','\\supseteq':'⊇',
   '\\emptyset':'∅','\\varnothing':'∅','\\setminus':'∖','\\complement':'∁',
-  // Relations
   '\\leq':'≤','\\geq':'≥','\\neq':'≠','\\approx':'≈','\\equiv':'≡',
   '\\sim':'∼','\\simeq':'≃','\\cong':'≅','\\ll':'≪','\\gg':'≫','\\propto':'∝',
-  // Arrows
   '\\rightarrow':'→','\\leftarrow':'←','\\Rightarrow':'⇒','\\Leftarrow':'⇐',
   '\\leftrightarrow':'↔','\\Leftrightarrow':'⟺','\\to':'→','\\gets':'←',
   '\\uparrow':'↑','\\downarrow':'↓','\\mapsto':'↦',
-  // Logic
   '\\forall':'∀','\\exists':'∃','\\nexists':'∄','\\neg':'¬','\\lnot':'¬',
   '\\land':'∧','\\wedge':'∧','\\lor':'∨','\\vee':'∨',
   '\\top':'⊤','\\bot':'⊥','\\vdash':'⊢','\\models':'⊨',
-  // Operators
   '\\cdot':'·','\\times':'×','\\div':'÷','\\pm':'±','\\mp':'∓',
   '\\oplus':'⊕','\\otimes':'⊗','\\circ':'∘','\\bullet':'•',
-  // Misc math
   '\\infty':'∞','\\partial':'∂','\\nabla':'∇','\\sqrt':'√',
   '\\ldots':'…','\\cdots':'⋯','\\vdots':'⋮','\\ddots':'⋱',
   '\\langle':'⟨','\\rangle':'⟩','\\lfloor':'⌊','\\rfloor':'⌋',
@@ -930,28 +1208,20 @@ const MATH_SYMBOLS = {
 
 function renderMath(expr) {
   let s = expr;
-  // \begin{cases}...\end{cases} → one line per row, processed recursively
   s = s.replace(/\\begin\{cases\}([\s\S]*?)\\end\{cases\}/g, (_, body) => {
     const lines = body.split(/\\\\/).map(l => renderMath(l.trim())).filter(Boolean);
     return lines.join('<br>');
   });
-  // \frac{a}{b} → (a/b)
   s = s.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)');
-  // \text{...} → just the text
   s = s.replace(/\\text\{([^}]*)\}/g, '$1');
-  // \mathbf, \mathrm, \mathcal etc. → strip wrapper
   s = s.replace(/\\math\w+\{([^}]*)\}/g, '$1');
-  // symbol substitutions
   for (const [cmd, sym] of Object.entries(MATH_SYMBOLS)) {
     s = s.split(cmd).join(sym);
   }
-  // superscripts: ^{...} or ^x
   s = s.replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>');
   s = s.replace(/\^([A-Za-z0-9])/g, '<sup>$1</sup>');
-  // subscripts: _{...} or _x
   s = s.replace(/_\{([^}]+)\}/g, '<sub>$1</sub>');
   s = s.replace(/_([A-Za-z0-9])/g, '<sub>$1</sub>');
-  // strip remaining lone backslashes before letters (unknown commands)
   s = s.replace(/\\([A-Za-z]+)/g, '$1');
   return s;
 }
@@ -960,7 +1230,6 @@ function renderMath(expr) {
 function renderMarkdown(raw) {
   const blocks = [];
 
-  // 1. Extract fenced code blocks → placeholder (before HTML escaping)
   let text = raw.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, _lang, code) => {
     const i = blocks.length;
     const escaped = code.trim()
@@ -969,21 +1238,18 @@ function renderMarkdown(raw) {
     return `\x00B${i}\x00`;
   });
 
-  // 1b. Extract block math $$...$$ → placeholder (before HTML escaping)
   text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
     const i = blocks.length;
     blocks.push(`<div class="math-block">${renderMath(math.trim())}</div>`);
     return `\x00B${i}\x00`;
   });
 
-  // 1c. Extract inline math $...$ → placeholder (before HTML escaping)
   text = text.replace(/\$([^$\n]+?)\$/g, (_, math) => {
     const i = blocks.length;
     blocks.push(`<span class="math-inline">${renderMath(math.trim())}</span>`);
     return `\x00B${i}\x00`;
   });
 
-  // 1d. Handle bare \begin{cases}...\end{cases} (AI sometimes skips $ delimiters)
   text = text.replace(/\\begin\{cases\}([\s\S]*?)\\end\{cases\}/g, (_, body) => {
     const i = blocks.length;
     const lines = body.split(/\\\\/).map(l => renderMath(l.trim())).filter(Boolean);
@@ -991,44 +1257,34 @@ function renderMarkdown(raw) {
     return `\x00B${i}\x00`;
   });
 
-  // 2. Escape remaining HTML
   text = text
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-  // 2b. Apply bare LaTeX symbol substitution (AI output outside $...$)
   for (const [cmd, sym] of Object.entries(MATH_SYMBOLS)) {
     text = text.split(cmd).join(sym);
   }
-  // Strip remaining bare \command sequences not in the symbol table
   text = text.replace(/\\([A-Za-z]+)/g, '$1');
 
-  // 3. Extract inline code → placeholder (content already escaped)
   text = text.replace(/`([^`\n]+)`/g, (_, c) => {
     const i = blocks.length;
     blocks.push(`<code class="md-code">${c}</code>`);
     return `\x00B${i}\x00`;
   });
 
-  // 4. Headers
   text = text.replace(/^#### (.+)$/gm, '<h4 class="md-h4" dir="auto">$1</h4>');
   text = text.replace(/^### (.+)$/gm,  '<h3 class="md-h3" dir="auto">$1</h3>');
   text = text.replace(/^## (.+)$/gm,   '<h2 class="md-h2" dir="auto">$1</h2>');
   text = text.replace(/^# (.+)$/gm,    '<h2 class="md-h2" dir="auto">$1</h2>');
 
-  // 5. Bold & italic
   text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/\*(.+?)\*/g,     '<em>$1</em>');
   text = text.replace(/__(.+?)__/g,     '<strong>$1</strong>');
   text = text.replace(/_(.+?)_/g,       '<em>$1</em>');
 
-  // 6. Horizontal rule
   text = text.replace(/^---+$/gm, '<hr class="md-hr">');
-
-  // 7. Blockquote (&gt; after HTML escaping)
   text = text.replace(/^&gt; (.+)$/gm, '<blockquote class="md-bq">$1</blockquote>');
 
-  // 8. Line-by-line: lists → <ul>/<ol>, everything else → <p>
   const BLOCK_STARTS = ['<h2', '<h3', '<h4', '<hr', '<blockquote', '<pre', '\x00B'];
   const lines = text.split('\n');
   const out = [];
@@ -1059,6 +1315,5 @@ function renderMarkdown(raw) {
   if (inUl) out.push('</ul>');
   if (inOl) out.push('</ol>');
 
-  // 9. Restore code blocks
   return out.join('').replace(/\x00B(\d+)\x00/g, (_, i) => blocks[+i]);
 }

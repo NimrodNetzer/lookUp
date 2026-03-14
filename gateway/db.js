@@ -224,4 +224,25 @@ export function renameConversation(id, title) {
     .run(title, new Date().toISOString(), id);
 }
 
+// ── Command log ───────────────────────────────────────────────────────────────
+
+try {
+  db.exec(`CREATE TABLE IF NOT EXISTS command_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    type       TEXT NOT NULL,
+    text       TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+} catch {}
+
+export function appendCommandLog(type, text) {
+  db.prepare("INSERT INTO command_log (type, text) VALUES (?, ?)").run(type, text);
+}
+
+export function getCommandLog(limit = 40) {
+  return db.prepare(
+    "SELECT type, text FROM command_log ORDER BY id DESC LIMIT ?"
+  ).all(limit).reverse();
+}
+
 export default db;
