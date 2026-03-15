@@ -68,7 +68,7 @@
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     }
     .header-sub { font-size: 10px; color: #333; }
-    .header-actions { display: flex; align-items: center; gap: 5px; margin-left: auto; }
+    .header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-right: 4px; }
 
     /* More-options dropdown */
     .btn-more {
@@ -263,7 +263,7 @@
       border-radius: 9px; color: var(--text);
       cursor: pointer; font-size: 12px; font-weight: 600;
       transition: border-color 0.18s, background 0.18s;
-      user-select: none; flex: 1; min-width: 0;
+      user-select: none; min-width: 0;
     }
     .mode-trigger:hover { border-color: rgba(124,106,245,0.5); background: rgba(124,106,245,0.1); }
     .mode-trigger.open  { border-color: var(--accent); background: rgba(124,106,245,0.1); }
@@ -276,9 +276,12 @@
       background: var(--mode-color, var(--accent)); flex-shrink: 0;
     }
 
+    .mode-trigger-wrap { position: relative; flex: 1; min-width: 0; }
+    .mode-trigger-wrap .mode-trigger { width: 100%; }
+
     .mode-dropdown {
       display: none; position: absolute;
-      top: calc(100% + 4px); left: 0; width: 230px;
+      top: calc(100% + 4px); left: 0; width: 100%;
       background: #16162a; border: 1px solid rgba(124,106,245,0.25);
       border-radius: 12px; padding: 6px; z-index: 100;
       box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(124,106,245,0.08);
@@ -714,50 +717,40 @@
     .chat-send-btn:disabled { opacity: 0.25; cursor: not-allowed; box-shadow: none; }
 
     /* ── NOTE SEARCH OVERLAY ────────────────── */
-    .search-overlay {
-      position: absolute; inset: 0;
-      background: var(--bg); z-index: 200;
-      display: flex; flex-direction: column;
+    /* ── INLINE SEARCH (inside more-dropdown) ── */
+    .more-search-wrap {
+      display: flex; align-items: center; gap: 7px;
+      padding: 5px 6px; margin-bottom: 2px;
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(124,106,245,0.2);
+      border-radius: 9px;
     }
-    .search-overlay.hidden { display: none; }
-    .search-header {
-      display: flex; align-items: center; gap: 8px;
-      padding: 10px 12px;
-      border-bottom: 1px solid rgba(124,106,245,0.12); flex-shrink: 0;
+    .more-search-icon { font-size: 12px; flex-shrink: 0; opacity: 0.5; }
+    .more-search-input {
+      flex: 1; background: none; border: none; outline: none;
+      color: var(--text); font-size: 11.5px; font-family: inherit;
+      padding: 0;
     }
-    .search-input {
-      flex: 1; background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 9px; color: var(--text);
-      font-size: 13px; padding: 6px 10px;
-      outline: none; font-family: inherit;
-      transition: border-color 0.2s;
+    .more-search-input::placeholder { color: #555; }
+    .more-search-results {
+      display: flex; flex-direction: column; gap: 1px;
+      max-height: 220px; overflow-y: auto;
     }
-    .search-input:focus { border-color: var(--accent); }
-    .search-input::placeholder { color: #333; }
-    .search-close {
-      background: none; border: none; color: #444;
-      font-size: 16px; cursor: pointer; padding: 2px 4px;
-      transition: color 0.15s; flex-shrink: 0;
-    }
-    .search-close:hover { color: #aaa; }
-    .search-results { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
-    .search-empty { color: #333; font-size: 12px; text-align: center; margin-top: 24px; }
+    .more-search-empty { color: #444; font-size: 11px; text-align: center; padding: 6px 0; margin: 0; }
     .search-result-item {
       display: flex; align-items: center;
-      padding: 9px 12px; border-radius: 9px;
+      padding: 6px 8px; border-radius: 8px;
       cursor: pointer; transition: background 0.12s;
-      border: 1px solid transparent; gap: 8px;
+      gap: 7px;
     }
-    .search-result-item:hover { background: var(--surface); border-color: rgba(124,106,245,0.2); }
-    .search-result-icon { font-size: 14px; flex-shrink: 0; }
+    .search-result-item:hover { background: rgba(124,106,245,0.1); }
+    .search-result-icon { font-size: 13px; flex-shrink: 0; }
     .search-result-text { flex: 1; min-width: 0; }
-    .search-result-title { font-size: 12px; font-weight: 600; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .search-result-title { font-size: 11px; font-weight: 600; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .search-result-meta  { font-size: 10px; color: #444; margin-top: 1px; }
     .search-result-open  {
       font-size: 10px; color: var(--accent);
       border: 1px solid rgba(124,106,245,0.3);
-      background: rgba(124,106,245,0.06); border-radius: 6px; padding: 2px 7px;
+      background: rgba(124,106,245,0.06); border-radius: 6px; padding: 2px 6px;
       cursor: pointer; transition: background 0.12s; flex-shrink: 0; white-space: nowrap;
     }
     .search-result-open:hover { background: rgba(124,106,245,0.18); }
@@ -852,8 +845,13 @@
         </div>
         <div class="more-divider"></div>
         <!-- Secondary actions -->
-        <div class="more-item" id="moreSearch">
-          <span class="more-icon">🔍</span> Search Notes
+        <!-- Inline search -->
+        <div class="more-search-wrap">
+          <span class="more-search-icon">🔍</span>
+          <input class="more-search-input" id="searchInput" type="text" placeholder="Search notes…" autocomplete="off" />
+        </div>
+        <div class="more-search-results" id="searchResults">
+          <p class="more-search-empty" id="searchEmpty"></p>
         </div>
         <div class="more-item" id="moreLang">
           <span class="more-icon">🌐</span> Language
@@ -879,7 +877,8 @@
   <!-- TOOLBAR -->
   <div class="toolbar">
     <div class="toolbar-main">
-      <!-- Mode trigger -->
+      <!-- Mode trigger + dropdown wrapper -->
+      <div class="mode-trigger-wrap">
       <button class="mode-trigger" id="modeTrigger" style="--mode-color:#7c6af5">
         <span class="mode-icon">📄</span>
         <span class="mode-label" id="modeLabel">Summary</span>
@@ -938,6 +937,7 @@
           <span class="d-check">✓</span>
         </div>
       </div>
+      </div><!-- end mode-trigger-wrap -->
 
       <!-- Capture button (in toolbar) -->
       <button class="btn-capture" id="captureBtn">⚡ Capture</button>
@@ -1002,7 +1002,7 @@
     <div class="attach-preview" id="attachPreview"></div>
     <div class="chat-input-wrap">
       <button class="attach-btn" id="attachBtn" title="Attach image or file">＋</button>
-      <input type="file" id="attachFileInput" accept="image/*,.pdf,.txt,.md" multiple style="display:none" />
+      <input type="file" id="attachFileInput" accept="image/*,.pdf,.pptx,.ppt,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.yaml,.yml" multiple style="display:none" />
       <input class="chat-input" id="titleInput" type="text" placeholder="Ask about this screen…" maxlength="200" />
       <button class="chat-send-btn" id="chatSendBtn">↑</button>
     </div>
@@ -1043,16 +1043,6 @@
   </div>
 
   <!-- NOTE SEARCH OVERLAY -->
-  <div class="search-overlay hidden" id="searchOverlay">
-    <div class="search-header">
-      <input class="search-input" id="searchInput" type="text" placeholder="Search notes…" autocomplete="off" />
-      <button class="search-close" id="searchClose">✕</button>
-    </div>
-    <div class="search-results" id="searchResults">
-      <p class="search-empty" id="searchEmpty">Type to search notes…</p>
-    </div>
-  </div>
-
   <!-- Full-panel drag-drop overlay -->
   <div id="dragOverlay" style="
     display:none; position:fixed; inset:0; z-index:500; pointer-events:none;
@@ -1078,6 +1068,8 @@
     </span>
   </div>
 
+  <script src="vendor/jszip.min.js"></script>
+  <script src="vendor/pdf.min.js"></script>
   <script type="module" src="sidepanel.js"></script>
 </body>
 </html>

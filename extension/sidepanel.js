@@ -21,9 +21,7 @@ const modeDropdown     = document.getElementById("modeDropdown");
 const modeLabel        = document.getElementById("modeLabel");
 const dropdownItems    = document.querySelectorAll(".dropdown-item");
 // (dashboardBtn and searchBtn now live inside the more-dropdown — handled below)
-const searchOverlay    = document.getElementById("searchOverlay");
 const searchInput      = document.getElementById("searchInput");
-const searchClose      = document.getElementById("searchClose");
 const searchResults    = document.getElementById("searchResults");
 const searchEmpty      = document.getElementById("searchEmpty");
 const selectionBar     = document.getElementById("selectionBar");
@@ -37,7 +35,6 @@ const avOptAudio       = document.getElementById("avOptAudio");
 const avOptMic         = document.getElementById("avOptMic");
 const moreBtn          = document.getElementById("moreBtn");
 const moreDropdown     = document.getElementById("moreDropdown");
-const moreSearch       = document.getElementById("moreSearch");
 
 const moreDashboard    = document.getElementById("moreDashboard");
 const moreChatBtn      = document.getElementById("moreChatBtn");
@@ -119,13 +116,12 @@ moreBtn.addEventListener("click", (e) => {
 document.addEventListener("click", () => {
   moreDropdown.classList.remove("open");
   moreBtn.classList.remove("open");
+  // Clear inline search when dropdown closes
+  searchInput.value = "";
+  renderSearchResults([]);
 });
 moreDropdown.addEventListener("click", (e) => e.stopPropagation());
 
-moreSearch.addEventListener("click", () => {
-  moreDropdown.classList.remove("open"); moreBtn.classList.remove("open");
-  openSearch();
-});
 moreDashboard.addEventListener("click", () => {
   moreDropdown.classList.remove("open"); moreBtn.classList.remove("open");
   chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
@@ -149,17 +145,6 @@ langOptHE.addEventListener("click", async () => {
 // ── Note search ──────────────────────────────────────────────────────────────
 const MODE_ICONS = { summary:"📄", explain:"📖", quiz:"❓", flashcard:"🃏", session:"📚", chat:"💬" };
 
-searchClose.addEventListener("click", () => closeSearch());
-searchOverlay.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSearch(); });
-
-function openSearch() {
-  searchOverlay.classList.remove("hidden");
-  searchInput.value = "";
-  searchInput.focus();
-  renderSearchResults([]);
-}
-function closeSearch() { searchOverlay.classList.add("hidden"); }
-
 let _searchTimer = null;
 searchInput.addEventListener("input", () => {
   clearTimeout(_searchTimer);
@@ -180,10 +165,12 @@ async function runSearch() {
 function renderSearchResults(notes, q = "") {
   searchResults.innerHTML = "";
   if (notes.length === 0) {
-    const p = document.createElement("p");
-    p.className = "search-empty";
-    p.textContent = q ? "No notes found." : "Type to search notes…";
-    searchResults.appendChild(p);
+    if (q) {
+      const p = document.createElement("p");
+      p.className = "more-search-empty";
+      p.textContent = "No notes found.";
+      searchResults.appendChild(p);
+    }
     return;
   }
   for (const note of notes) {
@@ -210,7 +197,10 @@ function renderSearchResults(notes, q = "") {
 async function openNoteInDashboard(filename) {
   await chrome.storage.local.set({ pendingOpenNote: filename });
   chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
-  closeSearch();
+  moreDropdown.classList.remove("open");
+  moreBtn.classList.remove("open");
+  searchInput.value = "";
+  renderSearchResults([]);
 }
 
 // ── Mode dropdown ────────────────────────────────────────────────────────────
@@ -341,22 +331,37 @@ async function sendChatMessage() {
     let reply;
 
     const imageFiles = localFiles.filter(f => f.isImage);
+    const textFiles  = localFiles.filter(f => f.isText);
+
+    // Build the effective message: user text + any text-file contents appended
+    let effectiveMessage = message || "";
+    if (textFiles.length > 0) {
+      const fileBlocks = textFiles.map(f =>
+        `\n\n--- File: ${f.name} ---\n${f.text}\n--- End of ${f.name} ---`
+      ).join("");
+      effectiveMessage = (effectiveMessage ? effectiveMessage + fileBlocks : fileBlocks.trimStart());
+    }
+
     if (imageFiles.length > 0) {
       // One or more images attached — pass all to vision model
       reply = await analyzeWithQuestion(
         imageFiles.map(f => ({ base64: f.base64, mimeType: f.mimeType })),
         null,
-        message || "Describe and analyze these images."
+        effectiveMessage || "Describe and analyze these images."
       );
-    } else {
-      // Always capture current tab as visual context; fall back to text-only if tab can't be captured
+    } else if (effectiveMessage) {
+      // Text files or plain message — text-only path (with optional tab screenshot)
       try {
         const { base64, mimeType } = await captureTab();
-        reply = await analyzeWithQuestion(base64, mimeType, message);
+        reply = await analyzeWithQuestion(base64, mimeType, effectiveMessage);
       } catch {
-        const msgs = [...history.map(m => ({ role: m.role, content: m.content })), { role: "user", content: message }];
+        const msgs = [...history.map(m => ({ role: m.role, content: m.content })), { role: "user", content: effectiveMessage }];
         reply = await chat(msgs);
       }
+    } else {
+      // No message and no files — fall back to screenshot
+      const { base64, mimeType } = await captureTab();
+      reply = await analyzeWithQuestion(base64, mimeType, "Describe and analyze this.");
     }
 
     await Messages.append(activeConversationId, "user", message);
@@ -431,17 +436,91 @@ function renderAttachPreview() {
   });
 }
 
+async function extractPdfText(arrayBuffer) {
+  // pdf.js loaded as global via vendor/pdf.min.js
+  const pdfjsLib = window.pdfjsLib;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("vendor/pdf.worker.min.js");
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const parts = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    parts.push(`[Page ${i}]\n` + content.items.map(s => s.str).join(" "));
+  }
+  return parts.join("\n\n");
+}
+
+async function extractPptxText(arrayBuffer) {
+  // JSZip loaded as global via vendor/jszip.min.js
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const slideFiles = Object.keys(zip.files)
+    .filter(n => /^ppt\/slides\/slide\d+\.xml$/i.test(n))
+    .sort((a, b) => {
+      const na = parseInt(a.match(/\d+/)[0]), nb = parseInt(b.match(/\d+/)[0]);
+      return na - nb;
+    });
+  const parts = [];
+  for (const name of slideFiles) {
+    const xml = await zip.files[name].async("string");
+    // Extract all <a:t> text nodes
+    const texts = [...xml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)].map(m => m[1]).filter(Boolean);
+    const slideNum = name.match(/\d+/)[0];
+    if (texts.length) parts.push(`[Slide ${slideNum}]\n${texts.join(" ")}`);
+  }
+  return parts.join("\n\n");
+}
+
 function handleFileAttach(file) {
   if (!file) return;
   const isImage = file.type.startsWith("image/");
+  const isPdf   = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+  const isPptx  = /\.(pptx|ppt)$/i.test(file.name) ||
+                  file.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  const isText  = !isImage && !isPdf && !isPptx &&
+                  (file.type.startsWith("text/") || /\.(txt|md|csv|json|js|ts|py|html|css|xml|yaml|yml)$/i.test(file.name));
+
   const reader = new FileReader();
-  reader.onload = (e) => {
-    const dataUrl = e.target.result;
-    const base64 = dataUrl.split(",")[1];
-    attachedFiles.push({ base64, mimeType: file.type, name: file.name, isImage });
-    renderAttachPreview();
-  };
-  reader.readAsDataURL(file);
+
+  if (isImage) {
+    reader.onload = (e) => {
+      const base64 = e.target.result.split(",")[1];
+      attachedFiles.push({ base64, mimeType: file.type, name: file.name, isImage: true, isText: false });
+      renderAttachPreview();
+    };
+    reader.readAsDataURL(file);
+
+  } else if (isPdf) {
+    reader.onload = async (e) => {
+      try {
+        const text = await extractPdfText(e.target.result);
+        if (!text.trim()) { showError(`"${file.name}" appears to have no selectable text (scanned PDF).`); return; }
+        attachedFiles.push({ text, mimeType: file.type, name: file.name, isImage: false, isText: true });
+        renderAttachPreview();
+      } catch (err) { showError(`Could not read PDF "${file.name}": ${err.message}`); }
+    };
+    reader.readAsArrayBuffer(file);
+
+  } else if (isPptx) {
+    reader.onload = async (e) => {
+      try {
+        const text = await extractPptxText(e.target.result);
+        if (!text.trim()) { showError(`"${file.name}" has no text content.`); return; }
+        attachedFiles.push({ text, mimeType: file.type, name: file.name, isImage: false, isText: true });
+        renderAttachPreview();
+      } catch (err) { showError(`Could not read PowerPoint "${file.name}": ${err.message}`); }
+    };
+    reader.readAsArrayBuffer(file);
+
+  } else if (isText) {
+    reader.onload = (e) => {
+      attachedFiles.push({ text: e.target.result, mimeType: file.type, name: file.name, isImage: false, isText: true });
+      renderAttachPreview();
+    };
+    reader.readAsText(file);
+
+  } else {
+    showError(`"${file.name}" is not a supported file type.`);
+  }
 }
 
 titleInput.addEventListener("keydown", (e) => {

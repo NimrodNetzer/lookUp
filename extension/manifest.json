@@ -44,7 +44,8 @@
         "built/chat.html",
         "built/assets/*",
         "mic-permission.html",
-        "mic-permission.js"
+        "mic-permission.js",
+        "vendor/pdf.worker.min.js"
       ],
       "matches": ["<all_urls>"]
     }
