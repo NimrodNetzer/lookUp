@@ -8,14 +8,13 @@
     "activeTab",
     "tabs",
     "sidePanel",
-    "scripting",
     "tabCapture",
-    "storage"
+    "storage",
+    "microphone"
   ],
 
   "host_permissions": [
-    "https://api.groq.com/*",
-    "<all_urls>"
+    "https://api.groq.com/*"
   ],
 
   "action": {
@@ -34,8 +33,7 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "run_at": "document_idle",
-      "all_frames": true
+      "run_at": "document_idle"
     }
   ],
 
@@ -44,7 +42,10 @@
       "resources": [
         "built/dashboard.html",
         "built/chat.html",
-        "built/assets/*"
+        "built/assets/*",
+        "mic-permission.html",
+        "mic-permission.js",
+        "vendor/pdf.worker.min.js"
       ],
       "matches": ["<all_urls>"]
     }

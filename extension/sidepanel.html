@@ -41,12 +41,13 @@
       z-index: 0;
     }
 
-    /* Stacking contexts — toolbar must be above result-area for dropdown */
-    header, .conv-tabs-wrap, .selection-bar, .session-bar,
+    /* Stacking contexts — header dropdown must be above everything */
+    .conv-tabs-wrap, .selection-bar, .session-bar,
     .audio-bar, .result-area, .chat-input-bar {
       position: relative; z-index: 1;
     }
     .toolbar { position: relative; z-index: 10; }
+    header { position: relative; z-index: 20; }
 
     /* Scrollbar */
     ::-webkit-scrollbar { width: 4px; }
@@ -67,21 +68,85 @@
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     }
     .header-sub { font-size: 10px; color: #333; }
-    .btn-search, .btn-dashboard, .btn-chat {
-      width: 26px; height: 26px;
+    .header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-right: 4px; }
+
+    /* More-options dropdown */
+    .btn-more {
+      width: 28px; height: 28px;
       background: rgba(124,106,245,0.06);
       border: 1px solid rgba(124,106,245,0.18);
       border-radius: 7px;
-      color: #555; cursor: pointer;
-      font-size: 12px; line-height: 1;
+      color: #777; cursor: pointer;
+      font-size: 16px; line-height: 1;
       display: flex; align-items: center; justify-content: center;
       transition: background 0.15s, border-color 0.15s, color 0.15s;
     }
-    .btn-dashboard { margin-left: auto; }
-    .btn-search:hover, .btn-dashboard:hover, .btn-chat:hover {
-      background: rgba(124,106,245,0.15);
-      border-color: rgba(124,106,245,0.45);
-      color: #c0b8ff;
+    .btn-more:hover, .btn-more.open {
+      background: rgba(124,106,245,0.15); border-color: rgba(124,106,245,0.45); color: #c0b8ff;
+    }
+    .more-dropdown {
+      display: none; position: absolute;
+      top: calc(100% + 6px); right: 0; width: 210px;
+      background: #16162a; border: 1px solid rgba(124,106,245,0.25);
+      border-radius: 14px; padding: 8px; z-index: 1000;
+      box-shadow: 0 10px 36px rgba(0,0,0,0.6);
+      animation: dropIn 0.15s ease;
+    }
+    .more-dropdown.open { display: block; }
+    /* Primary actions — side-by-side big buttons */
+    .more-primary {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;
+    }
+    .more-primary-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      padding: 9px 6px; border-radius: 10px;
+      background: rgba(124,106,245,0.08); border: 1px solid rgba(124,106,245,0.18);
+      cursor: pointer; transition: background 0.12s, border-color 0.12s;
+      font-size: 11px; font-weight: 700; color: #c0b8ff;
+    }
+    .more-primary-btn:hover { background: rgba(124,106,245,0.18); border-color: rgba(124,106,245,0.4); }
+    .more-primary-btn .mpb-icon { font-size: 18px; line-height: 1; }
+    /* Secondary items */
+    .more-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 7px 8px; border-radius: 8px;
+      cursor: pointer; transition: background 0.12s;
+      font-size: 11.5px; font-weight: 600; color: #999;
+    }
+    .more-item:hover { background: rgba(124,106,245,0.1); color: #ddd; }
+    .more-item .more-icon { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
+    /* Language toggle */
+    .lang-toggle {
+      margin-left: auto; display: flex; background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(124,106,245,0.25); border-radius: 20px; overflow: hidden;
+    }
+    .lang-toggle-opt {
+      padding: 2px 8px; font-size: 10px; font-weight: 700;
+      cursor: pointer; transition: background 0.15s, color 0.15s;
+      color: #666; user-select: none;
+    }
+    .lang-toggle-opt.active { background: rgba(124,106,245,0.4); color: #e0daff; }
+    .more-divider { height: 1px; background: rgba(124,106,245,0.12); margin: 4px 0; }
+
+    /* Inline mic permission banner */
+    .mic-perm-banner {
+      display: none; align-items: center; gap: 10px;
+      padding: 8px 12px;
+      background: rgba(167,139,250,0.07);
+      border-bottom: 1px solid rgba(167,139,250,0.2);
+      flex-shrink: 0;
+    }
+    .mic-perm-banner.active { display: flex; }
+    .mic-perm-banner p { font-size: 11px; color: #aaa; flex: 1; line-height: 1.4; }
+    .mic-perm-btn {
+      padding: 5px 12px; font-size: 11px; font-weight: 700;
+      border: none; border-radius: 7px;
+      background: linear-gradient(135deg, #7c6af5, #5b53d4);
+      color: #fff; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    }
+    .mic-perm-dismiss {
+      background: none; border: none; color: #444;
+      cursor: pointer; font-size: 14px; padding: 0 2px; flex-shrink: 0;
     }
     .status-dot {
       width: 7px; height: 7px; border-radius: 50%;
@@ -198,7 +263,7 @@
       border-radius: 9px; color: var(--text);
       cursor: pointer; font-size: 12px; font-weight: 600;
       transition: border-color 0.18s, background 0.18s;
-      user-select: none; flex: 1; min-width: 0;
+      user-select: none; min-width: 0;
     }
     .mode-trigger:hover { border-color: rgba(124,106,245,0.5); background: rgba(124,106,245,0.1); }
     .mode-trigger.open  { border-color: var(--accent); background: rgba(124,106,245,0.1); }
@@ -211,9 +276,12 @@
       background: var(--mode-color, var(--accent)); flex-shrink: 0;
     }
 
+    .mode-trigger-wrap { position: relative; flex: 1; min-width: 0; }
+    .mode-trigger-wrap .mode-trigger { width: 100%; }
+
     .mode-dropdown {
       display: none; position: absolute;
-      top: calc(100% + 4px); left: 0; width: 230px;
+      top: calc(100% + 4px); left: 0; width: 100%;
       background: #16162a; border: 1px solid rgba(124,106,245,0.25);
       border-radius: 12px; padding: 6px; z-index: 100;
       box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(124,106,245,0.08);
@@ -325,6 +393,30 @@
       cursor: pointer; font-size: 15px; padding: 0 2px;
     }
 
+    /* ── AUDIO VIDEO TOGGLE ─────────────────── */
+    .av-toggle-row {
+      display: none; align-items: center; gap: 7px;
+      padding: 5px 12px 4px;
+      border-bottom: 1px solid rgba(124,106,245,0.08);
+      flex-shrink: 0;
+    }
+    .av-toggle-row.active { display: flex; }
+    .av-toggle-label { font-size: 11px; color: #555; }
+    .av-toggle {
+      display: flex; align-items: center;
+      background: rgba(20,20,32,0.9);
+      border: 1px solid rgba(124,106,245,0.2);
+      border-radius: 20px; padding: 2px; gap: 1px;
+    }
+    .av-toggle-opt {
+      padding: 3px 10px; border-radius: 16px;
+      font-size: 11px; font-weight: 700; cursor: pointer;
+      color: #444; background: none; border: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .av-toggle-opt.active { background: rgba(236,72,153,0.2); color: #f472b6; }
+    .av-toggle-opt.mic.active { background: rgba(167,139,250,0.2); color: #c4b5fd; }
+
     /* ── AUDIO BAR ──────────────────────────── */
     .audio-bar {
       display: none; align-items: center; gap: 10px;
@@ -349,7 +441,7 @@
 
     /* ── RESULT AREA ────────────────────────── */
     .result-area {
-      flex: 1; overflow-y: auto;
+      flex: 1; overflow-y: auto; overflow-x: hidden;
       padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
     }
     .placeholder {
@@ -365,7 +457,17 @@
       border: 1px solid rgba(124,106,245,0.18);
       border-radius: 12px; padding: 14px; flex-shrink: 0;
       box-shadow: 0 1px 12px rgba(0,0,0,0.25);
+      position: relative;
     }
+    .card-copy-btn {
+      position: absolute; top: 8px; right: 8px;
+      background: none; border: 1px solid rgba(124,106,245,0.2);
+      border-radius: 6px; color: #555; font-size: 13px;
+      cursor: pointer; padding: 1px 6px; line-height: 1.4;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+    .card-copy-btn:hover { color: var(--accent); border-color: var(--accent); background: rgba(124,106,245,0.08); }
+    .card-copy-btn:active { color: #5eead4; border-color: #5eead4; }
 
     /* User bubble — matches .msg-user-bubble from chat page */
     .msg-user {
@@ -425,7 +527,13 @@
     }
 
     /* ── MARKDOWN BODY ──────────────────────── */
-    .md-body { font-size: 13.5px; line-height: 1.75; word-break: break-word; color: var(--text); }
+    .md-body {
+      font-size: 13.5px; line-height: 1.75; word-break: break-word; color: var(--text);
+      unicode-bidi: plaintext;
+    }
+    .md-body p, .md-body li, .md-body h2, .md-body h3, .md-body h4, .md-body blockquote {
+      unicode-bidi: plaintext;
+    }
     .md-body .md-h2 {
       font-size: 14px; font-weight: 700; color: #a89af5;
       margin: 16px 0 6px; padding-bottom: 4px;
@@ -539,23 +647,39 @@
       background: linear-gradient(to bottom, transparent, rgba(94,234,212,0.04) 60%);
     }
     .attach-preview {
-      display: none; align-items: center; gap: 6px; padding: 0 4px 6px;
+      display: none; align-items: center; gap: 6px;
+      padding: 0 4px 6px;
+      overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap;
     }
+    .attach-preview::-webkit-scrollbar { display: none; }
     .attach-chip {
-      display: inline-flex; align-items: center; gap: 6px;
+      display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
       background: rgba(124,106,245,0.08);
       border: 1px solid rgba(124,106,245,0.25);
-      border-radius: 8px; padding: 4px 8px;
-      font-size: 11px; color: #c0b8ff; max-width: 100%;
+      border-radius: 8px; padding: 3px 6px;
+      font-size: 11px; color: #c0b8ff;
+      cursor: context-menu;
+      transition: border-color 0.15s;
     }
-    .attach-chip-thumb { width: 28px; height: 28px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+    .attach-chip:hover { border-color: rgba(124,106,245,0.5); }
+    .attach-chip-thumb { width: 32px; height: 32px; border-radius: 5px; object-fit: cover; flex-shrink: 0; }
     .attach-chip-icon { font-size: 14px; flex-shrink: 0; }
-    .attach-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+    .attach-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 90px; }
     .attach-chip-remove {
-      background: none; border: none; color: #555; cursor: pointer;
-      font-size: 12px; padding: 0 2px; flex-shrink: 0; line-height: 1;
+      background: none; border: none; color: #444; cursor: pointer;
+      font-size: 11px; padding: 0 1px; flex-shrink: 0; line-height: 1;
+      transition: color 0.15s;
     }
     .attach-chip-remove:hover { color: #f87171; }
+    .parsing-chip { opacity: 0.6; pointer-events: none; animation: pulse 1s ease-in-out infinite alternate; }
+    @keyframes pulse { from { opacity: 0.4; } to { opacity: 0.8; } }
+    .msg-thumbs-row {
+      display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%;
+    }
+    .msg-thumbs-row .msg-attachment-thumb {
+      width: auto; max-width: 100%; max-height: 110px;
+      border-radius: 8px; object-fit: cover; flex-shrink: 0;
+    }
 
     .chat-input-wrap {
       display: flex; align-items: center; gap: 6px;
@@ -605,50 +729,40 @@
     .chat-send-btn:disabled { opacity: 0.25; cursor: not-allowed; box-shadow: none; }
 
     /* ── NOTE SEARCH OVERLAY ────────────────── */
-    .search-overlay {
-      position: absolute; inset: 0;
-      background: var(--bg); z-index: 200;
-      display: flex; flex-direction: column;
+    /* ── INLINE SEARCH (inside more-dropdown) ── */
+    .more-search-wrap {
+      display: flex; align-items: center; gap: 7px;
+      padding: 5px 6px; margin-bottom: 2px;
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(124,106,245,0.2);
+      border-radius: 9px;
     }
-    .search-overlay.hidden { display: none; }
-    .search-header {
-      display: flex; align-items: center; gap: 8px;
-      padding: 10px 12px;
-      border-bottom: 1px solid rgba(124,106,245,0.12); flex-shrink: 0;
+    .more-search-icon { font-size: 12px; flex-shrink: 0; opacity: 0.5; }
+    .more-search-input {
+      flex: 1; background: none; border: none; outline: none;
+      color: var(--text); font-size: 11.5px; font-family: inherit;
+      padding: 0;
     }
-    .search-input {
-      flex: 1; background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 9px; color: var(--text);
-      font-size: 13px; padding: 6px 10px;
-      outline: none; font-family: inherit;
-      transition: border-color 0.2s;
+    .more-search-input::placeholder { color: #555; }
+    .more-search-results {
+      display: flex; flex-direction: column; gap: 1px;
+      max-height: 220px; overflow-y: auto;
     }
-    .search-input:focus { border-color: var(--accent); }
-    .search-input::placeholder { color: #333; }
-    .search-close {
-      background: none; border: none; color: #444;
-      font-size: 16px; cursor: pointer; padding: 2px 4px;
-      transition: color 0.15s; flex-shrink: 0;
-    }
-    .search-close:hover { color: #aaa; }
-    .search-results { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
-    .search-empty { color: #333; font-size: 12px; text-align: center; margin-top: 24px; }
+    .more-search-empty { color: #444; font-size: 11px; text-align: center; padding: 6px 0; margin: 0; }
     .search-result-item {
       display: flex; align-items: center;
-      padding: 9px 12px; border-radius: 9px;
+      padding: 6px 8px; border-radius: 8px;
       cursor: pointer; transition: background 0.12s;
-      border: 1px solid transparent; gap: 8px;
+      gap: 7px;
     }
-    .search-result-item:hover { background: var(--surface); border-color: rgba(124,106,245,0.2); }
-    .search-result-icon { font-size: 14px; flex-shrink: 0; }
+    .search-result-item:hover { background: rgba(124,106,245,0.1); }
+    .search-result-icon { font-size: 13px; flex-shrink: 0; }
     .search-result-text { flex: 1; min-width: 0; }
-    .search-result-title { font-size: 12px; font-weight: 600; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .search-result-title { font-size: 11px; font-weight: 600; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .search-result-meta  { font-size: 10px; color: #444; margin-top: 1px; }
     .search-result-open  {
       font-size: 10px; color: var(--accent);
       border: 1px solid rgba(124,106,245,0.3);
-      background: rgba(124,106,245,0.06); border-radius: 6px; padding: 2px 7px;
+      background: rgba(124,106,245,0.06); border-radius: 6px; padding: 2px 6px;
       cursor: pointer; transition: background 0.12s; flex-shrink: 0; white-space: nowrap;
     }
     .search-result-open:hover { background: rgba(124,106,245,0.18); }
@@ -726,13 +840,41 @@
 <body>
 
   <!-- HEADER -->
-  <header>
+  <header style="position:relative">
     <h1>LookUp</h1>
     <span style="font-size:10px;color:#444">Study Sensei</span>
-    <button class="btn-search"    id="searchBtn"      title="Search notes">🔍</button>
-    <button class="btn-dashboard" id="dashboardBtn"   title="Open dashboard">📊</button>
-    <button class="btn-chat"      id="chatExpandBtn"  title="Open full chat">💬</button>
-    <div class="status-dot" id="statusDot"></div>
+    <div class="header-actions">
+      <button class="btn-more" id="moreBtn" title="More options">⋯</button>
+      <div class="more-dropdown" id="moreDropdown">
+        <!-- Primary actions -->
+        <div class="more-primary">
+          <div class="more-primary-btn" id="moreDashboard">
+            <span class="mpb-icon">📊</span>Dashboard
+          </div>
+          <div class="more-primary-btn" id="moreChatBtn">
+            <span class="mpb-icon">💬</span>Chat
+          </div>
+        </div>
+        <div class="more-divider"></div>
+        <!-- Secondary actions -->
+        <!-- Inline search -->
+        <div class="more-search-wrap">
+          <span class="more-search-icon">🔍</span>
+          <input class="more-search-input" id="searchInput" type="text" placeholder="Search notes…" autocomplete="off" />
+        </div>
+        <div class="more-search-results" id="searchResults">
+          <p class="more-search-empty" id="searchEmpty"></p>
+        </div>
+        <div class="more-item" id="moreLang">
+          <span class="more-icon">🌐</span> Language
+          <div class="lang-toggle" id="langToggle">
+            <span class="lang-toggle-opt active" id="langOptEN">EN</span>
+            <span class="lang-toggle-opt" id="langOptHE">עב</span>
+          </div>
+        </div>
+      </div>
+      <div class="status-dot" id="statusDot"></div>
+    </div>
   </header>
 
   <!-- CONVERSATION TABS -->
@@ -747,7 +889,8 @@
   <!-- TOOLBAR -->
   <div class="toolbar">
     <div class="toolbar-main">
-      <!-- Mode trigger -->
+      <!-- Mode trigger + dropdown wrapper -->
+      <div class="mode-trigger-wrap">
       <button class="mode-trigger" id="modeTrigger" style="--mode-color:#7c6af5">
         <span class="mode-icon">📄</span>
         <span class="mode-label" id="modeLabel">Summary</span>
@@ -793,11 +936,20 @@
           <span class="d-icon">🎙️</span>
           <span class="d-text">
             <span class="d-name">Audio</span>
-            <span class="d-desc">Transcribe &amp; summarize lecture audio</span>
+            <span class="d-desc">Tab audio or microphone recording</span>
+          </span>
+          <span class="d-check">✓</span>
+        </div>
+        <div class="dropdown-item" data-mode="video" data-icon="🎥" data-color="#a78bfa">
+          <span class="d-icon">🎥</span>
+          <span class="d-text">
+            <span class="d-name">Video</span>
+            <span class="d-desc">Record screen video + audio</span>
           </span>
           <span class="d-check">✓</span>
         </div>
       </div>
+      </div><!-- end mode-trigger-wrap -->
 
       <!-- Capture button (in toolbar) -->
       <button class="btn-capture" id="captureBtn">⚡ Capture</button>
@@ -806,6 +958,22 @@
       <button class="btn-session" id="sessionBtn">+ Multi</button>
     </div>
 
+  </div>
+
+  <!-- AUDIO SOURCE TOGGLE — shown when Audio mode is active -->
+  <div class="av-toggle-row" id="avToggleRow">
+    <span class="av-toggle-label">Source:</span>
+    <div class="av-toggle">
+      <button class="av-toggle-opt active" id="avOptAudio">🎙️ Tab</button>
+      <button class="av-toggle-opt mic"    id="avOptMic">🎤 Mic</button>
+    </div>
+  </div>
+
+  <!-- INLINE MIC PERMISSION BANNER -->
+  <div class="mic-perm-banner" id="micPermBanner">
+    <p>🎤 Tap <strong>Allow</strong> so Chrome can show the microphone permission dialog.</p>
+    <button class="mic-perm-btn" id="micPermGrantBtn">Allow</button>
+    <button class="mic-perm-dismiss" id="micPermDismiss">✕</button>
   </div>
 
   <!-- SELECTION BAR — appears when user selects text on page -->
@@ -829,7 +997,7 @@
   <div class="audio-bar" id="audioBar">
     <div class="rec-dot"></div>
     <span class="rec-timer" id="recTimer">0:00</span>
-    <span style="font-size:11px;color:#888">Recording tab audio…</span>
+    <span id="audioBarLabel" style="font-size:11px;color:#888">Recording tab audio…</span>
     <button class="stop-btn" id="stopAudio">Stop &amp; Transcribe</button>
   </div>
 
@@ -846,7 +1014,7 @@
     <div class="attach-preview" id="attachPreview"></div>
     <div class="chat-input-wrap">
       <button class="attach-btn" id="attachBtn" title="Attach image or file">＋</button>
-      <input type="file" id="attachFileInput" accept="image/*,.pdf,.txt,.md" style="display:none" />
+      <input type="file" id="attachFileInput" accept="image/*,.pdf,.pptx,.ppt,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.yaml,.yml" multiple style="display:none" />
       <input class="chat-input" id="titleInput" type="text" placeholder="Ask about this screen…" maxlength="200" />
       <button class="chat-send-btn" id="chatSendBtn">↑</button>
     </div>
@@ -887,16 +1055,33 @@
   </div>
 
   <!-- NOTE SEARCH OVERLAY -->
-  <div class="search-overlay hidden" id="searchOverlay">
-    <div class="search-header">
-      <input class="search-input" id="searchInput" type="text" placeholder="Search notes…" autocomplete="off" />
-      <button class="search-close" id="searchClose">✕</button>
-    </div>
-    <div class="search-results" id="searchResults">
-      <p class="search-empty" id="searchEmpty">Type to search notes…</p>
-    </div>
+  <!-- Full-panel drag-drop overlay -->
+  <div id="dragOverlay" style="
+    display:none; position:fixed; inset:0; z-index:500; pointer-events:none;
+    align-items:center; justify-content:center; flex-direction:column; gap:10px;
+    background: radial-gradient(ellipse at 50% 60%, rgba(124,106,245,0.13) 0%, rgba(1,1,8,0.7) 70%);
+  ">
+    <div style="
+      position:absolute; inset:8px; border-radius:14px;
+      border: 1.5px dashed rgba(124,106,245,0.55);
+      background: rgba(124,106,245,0.04);
+      box-shadow: inset 0 0 40px rgba(124,106,245,0.07), 0 0 30px rgba(124,106,245,0.1);
+    "></div>
+    <!-- corner accents -->
+    <div style="position:absolute;top:14px;left:14px;width:18px;height:18px;border-top:2px solid #7c6af5;border-left:2px solid #7c6af5;border-radius:3px 0 0 0;"></div>
+    <div style="position:absolute;top:14px;right:14px;width:18px;height:18px;border-top:2px solid #7c6af5;border-right:2px solid #7c6af5;border-radius:0 3px 0 0;"></div>
+    <div style="position:absolute;bottom:14px;left:14px;width:18px;height:18px;border-bottom:2px solid #7c6af5;border-left:2px solid #7c6af5;border-radius:0 0 0 3px;"></div>
+    <div style="position:absolute;bottom:14px;right:14px;width:18px;height:18px;border-bottom:2px solid #7c6af5;border-right:2px solid #7c6af5;border-radius:0 0 3px 0;"></div>
+    <span style="font-size:28px;position:relative;filter:drop-shadow(0 0 10px rgba(124,106,245,0.8))">📎</span>
+    <span style="position:relative;font-size:13px;font-weight:700;letter-spacing:0.06em;
+      background:linear-gradient(130deg,#9d8cff,#7c6af5 50%,#5eead4);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;">
+      DROP TO ATTACH
+    </span>
   </div>
 
+  <script src="vendor/jszip.min.js"></script>
+  <script src="vendor/pdf.min.js"></script>
   <script type="module" src="sidepanel.js"></script>
 </body>
 </html>

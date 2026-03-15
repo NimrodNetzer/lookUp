@@ -1,5 +1,5 @@
 import { Settings, Conversations, Messages, Notes } from "./storage.js";
-import { analyzeScreenshot, analyzeMulti, analyzeText, transcribeAndSummarize, chat, verifyApiKey, analyzeWithQuestion } from "./groq-client.js";
+import { analyzeScreenshot, analyzeMulti, analyzeText, transcribeAndSummarize, chat, verifyApiKey, analyzeWithQuestion, setResponseLanguage } from "./groq-client.js";
 
 // --- DOM refs ---
 const convTabs         = document.getElementById("convTabs");
@@ -20,11 +20,8 @@ const modeTrigger      = document.getElementById("modeTrigger");
 const modeDropdown     = document.getElementById("modeDropdown");
 const modeLabel        = document.getElementById("modeLabel");
 const dropdownItems    = document.querySelectorAll(".dropdown-item");
-const dashboardBtn     = document.getElementById("dashboardBtn");
-const searchBtn        = document.getElementById("searchBtn");
-const searchOverlay    = document.getElementById("searchOverlay");
+// (dashboardBtn and searchBtn now live inside the more-dropdown — handled below)
 const searchInput      = document.getElementById("searchInput");
-const searchClose      = document.getElementById("searchClose");
 const searchResults    = document.getElementById("searchResults");
 const searchEmpty      = document.getElementById("searchEmpty");
 const selectionBar     = document.getElementById("selectionBar");
@@ -32,11 +29,24 @@ const selectionPreview = document.getElementById("selectionPreview");
 const askBtn           = document.getElementById("askBtn");
 const selectionDismiss = document.getElementById("selectionDismiss");
 const chatSendBtn      = document.getElementById("chatSendBtn");
-const chatExpandBtn    = document.getElementById("chatExpandBtn");
 const addPageBtn       = document.getElementById("addPageBtn");
+const avToggleRow      = document.getElementById("avToggleRow");
+const avOptAudio       = document.getElementById("avOptAudio");
+const avOptMic         = document.getElementById("avOptMic");
+const moreBtn          = document.getElementById("moreBtn");
+const moreDropdown     = document.getElementById("moreDropdown");
+
+const moreDashboard    = document.getElementById("moreDashboard");
+const moreChatBtn      = document.getElementById("moreChatBtn");
+const langOptEN        = document.getElementById("langOptEN");
+const langOptHE        = document.getElementById("langOptHE");
+const micPermBanner    = document.getElementById("micPermBanner");
+const micPermGrantBtn  = document.getElementById("micPermGrantBtn");
+const micPermDismiss   = document.getElementById("micPermDismiss");
 
 // --- State ---
 let selectedMode        = "summary";
+
 let selectedText        = "";
 let sessionFrames       = [];
 let inSession           = false;
@@ -49,8 +59,8 @@ const tabResults        = new Map(); // conversationId → saved resultArea inne
 let _uid = 0; // unique ID counter for quiz/flashcard elements
 const SPINNER_ID = "inlineSpinner";
 
-// Attached file state
-let attachedFile = null; // { base64, mimeType, name, isImage }
+// Attached files state — supports multiple images / files
+let attachedFiles = []; // [{ base64, mimeType, name, isImage }, ...]
 
 // ── Tab drag state ────────────────────────────────────────────────────────────
 let dragConvId     = null;
@@ -82,28 +92,66 @@ convTabs.addEventListener("scroll", updateTabArrows);
 convTabs.addEventListener("wheel", (e) => { e.preventDefault(); convTabs.scrollBy({ left: e.deltaY !== 0 ? e.deltaY : e.deltaX, behavior: "smooth" }); }, { passive: false });
 new ResizeObserver(updateTabArrows).observe(convTabs);
 
-// ── Dashboard / Chat links ───────────────────────────────────────────────────
-dashboardBtn.addEventListener("click", () => {
+// ── Language toggle ───────────────────────────────────────────────────────────
+let _lang = "en";
+
+async function initLang() {
+  const prefs = await Settings.getPreferences();
+  _lang = prefs.language ?? "en";
+  applyLang();
+}
+
+function applyLang() {
+  setResponseLanguage(_lang);
+  langOptEN.classList.toggle("active", _lang === "en");
+  langOptHE.classList.toggle("active", _lang === "he");
+}
+
+// ── More-options dropdown ─────────────────────────────────────────────────────
+moreBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = moreDropdown.classList.toggle("open");
+  moreBtn.classList.toggle("open", open);
+});
+document.addEventListener("click", () => {
+  moreDropdown.classList.remove("open");
+  moreBtn.classList.remove("open");
+  // Clear inline search when dropdown closes
+  searchInput.value = "";
+  renderSearchResults([]);
+});
+moreDropdown.addEventListener("click", (e) => e.stopPropagation());
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && moreDropdown.classList.contains("open")) {
+    moreDropdown.classList.remove("open");
+    moreBtn.classList.remove("open");
+    searchInput.value = "";
+    renderSearchResults([]);
+  }
+});
+
+moreDashboard.addEventListener("click", () => {
+  moreDropdown.classList.remove("open"); moreBtn.classList.remove("open");
   chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
 });
-chatExpandBtn.addEventListener("click", () => {
+moreChatBtn.addEventListener("click", () => {
+  moreDropdown.classList.remove("open"); moreBtn.classList.remove("open");
   chrome.tabs.create({ url: chrome.runtime.getURL("built/chat.html") });
+});
+
+langOptEN.addEventListener("click", async () => {
+  if (_lang === "en") return;
+  _lang = "en"; applyLang();
+  await Settings.setPreferences({ language: _lang });
+});
+langOptHE.addEventListener("click", async () => {
+  if (_lang === "he") return;
+  _lang = "he"; applyLang();
+  await Settings.setPreferences({ language: _lang });
 });
 
 // ── Note search ──────────────────────────────────────────────────────────────
 const MODE_ICONS = { summary:"📄", explain:"📖", quiz:"❓", flashcard:"🃏", session:"📚", chat:"💬" };
-
-searchBtn.addEventListener("click", () => openSearch());
-searchClose.addEventListener("click", () => closeSearch());
-searchOverlay.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSearch(); });
-
-function openSearch() {
-  searchOverlay.classList.remove("hidden");
-  searchInput.value = "";
-  searchInput.focus();
-  renderSearchResults([]);
-}
-function closeSearch() { searchOverlay.classList.add("hidden"); }
 
 let _searchTimer = null;
 searchInput.addEventListener("input", () => {
@@ -125,10 +173,12 @@ async function runSearch() {
 function renderSearchResults(notes, q = "") {
   searchResults.innerHTML = "";
   if (notes.length === 0) {
-    const p = document.createElement("p");
-    p.className = "search-empty";
-    p.textContent = q ? "No notes found." : "Type to search notes…";
-    searchResults.appendChild(p);
+    if (q) {
+      const p = document.createElement("p");
+      p.className = "more-search-empty";
+      p.textContent = "No notes found.";
+      searchResults.appendChild(p);
+    }
     return;
   }
   for (const note of notes) {
@@ -155,7 +205,10 @@ function renderSearchResults(notes, q = "") {
 async function openNoteInDashboard(filename) {
   await chrome.storage.local.set({ pendingOpenNote: filename });
   chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
-  closeSearch();
+  moreDropdown.classList.remove("open");
+  moreBtn.classList.remove("open");
+  searchInput.value = "";
+  renderSearchResults([]);
 }
 
 // ── Mode dropdown ────────────────────────────────────────────────────────────
@@ -189,7 +242,9 @@ dropdownItems.forEach((item) => {
     modeTrigger.classList.remove("open");
 
     resetCaptureBtn();
-    sessionBtn.classList.toggle("hidden", selectedMode === "audio");
+    sessionBtn.classList.toggle("hidden", selectedMode === "audio" || selectedMode === "video");
+    avToggleRow.classList.toggle("active", selectedMode === "audio");
+    updateInputPlaceholder();
   });
 });
 
@@ -254,20 +309,23 @@ async function saveNote({ title, mode, markdown, cards = null }) {
 // ── Shared chat send logic ────────────────────────────────────────────────────
 async function sendChatMessage() {
   const message = titleInput.value.trim();
-  if (!message && !attachedFile) { captureBtn.click(); return; }
+  if (!message && attachedFiles.length === 0) { captureBtn.click(); return; }
 
   titleInput.disabled = true;
   chatSendBtn.disabled = true;
   const attachBtn = document.getElementById("attachBtn");
   if (attachBtn) attachBtn.disabled = true;
 
-  // Build user bubble (show attachment thumbnail if present)
-  const localAttached = attachedFile;
+  // Build user bubble (show thumbnails for all attached images)
+  const localFiles = [...attachedFiles];
   let userBubbleHtml = "";
-  if (localAttached?.isImage) {
-    userBubbleHtml += `<img src="data:${localAttached.mimeType};base64,${localAttached.base64}" class="msg-attachment-thumb" alt="${escapeHtml(localAttached.name)}" />`;
-  } else if (localAttached) {
-    userBubbleHtml += `<div class="msg-attachment-file">📎 ${escapeHtml(localAttached.name)}</div>`;
+  if (localFiles.length > 0) {
+    const thumbsHtml = localFiles.map(f =>
+      f.isImage
+        ? `<img src="data:${f.mimeType};base64,${f.base64}" class="msg-attachment-thumb" alt="" />`
+        : `<div class="msg-attachment-file">📎 ${escapeHtml(f.name)}</div>`
+    ).join("");
+    userBubbleHtml += `<div class="msg-thumbs-row">${thumbsHtml}</div>`;
   }
   if (message) userBubbleHtml += `<div>${escapeHtml(message)}</div>`;
   appendCard(`<div class="msg-user">${userBubbleHtml}</div>`);
@@ -280,31 +338,61 @@ async function sendChatMessage() {
     const history = await Messages.listByConversation(activeConversationId);
     let reply;
 
-    if (localAttached?.isImage) {
-      // User attached an image — use vision model with that image
-      reply = await analyzeWithQuestion(localAttached.base64, localAttached.mimeType, message || "Describe and analyze this image.");
-    } else {
-      // Always capture current tab as visual context; fall back to text-only if tab can't be captured
-      try {
-        const { base64, mimeType } = await captureTab();
-        reply = await analyzeWithQuestion(base64, mimeType, message);
-      } catch {
-        const msgs = [...history.map(m => ({ role: m.role, content: m.content })), { role: "user", content: message }];
-        reply = await chat(msgs);
-      }
+    const imageFiles = localFiles.filter(f => f.isImage);
+    const textFiles  = localFiles.filter(f => f.isText);
+
+    // Build the effective message: user text + any text-file contents appended
+    let effectiveMessage = message || "";
+    if (textFiles.length > 0) {
+      const fileBlocks = textFiles.map(f =>
+        `\n\n--- File: ${f.name} ---\n${f.text}\n--- End of ${f.name} ---`
+      ).join("");
+      effectiveMessage = (effectiveMessage ? effectiveMessage + fileBlocks : fileBlocks.trimStart());
     }
 
-    await Messages.append(activeConversationId, "user", message);
+    // Build history messages for multi-turn context
+    const historyMsgs = history.map(m => ({ role: m.role, content: m.content }));
+
+    if (imageFiles.length > 0) {
+      // One or more images — vision model, include prior text history as system context
+      const question = effectiveMessage || "Describe and analyze these images.";
+      reply = await analyzeWithQuestion(
+        imageFiles.map(f => ({ base64: f.base64, mimeType: f.mimeType })),
+        null,
+        historyMsgs.length > 0
+          ? `[Prior conversation context]\n${historyMsgs.map(m => `${m.role}: ${m.content}`).join("\n")}\n\n[User]\n${question}`
+          : question
+      );
+    } else if (effectiveMessage) {
+      // Text files or plain message — text-only path (with optional tab screenshot)
+      try {
+        const { base64, mimeType } = await captureTab();
+        reply = await analyzeWithQuestion(base64, mimeType, effectiveMessage);
+      } catch {
+        const msgs = [...historyMsgs, { role: "user", content: effectiveMessage }];
+        reply = await chat(msgs);
+      }
+    } else {
+      // No message and no files — fall back to screenshot
+      const { base64, mimeType } = await captureTab();
+      reply = await analyzeWithQuestion(base64, mimeType, "Describe and analyze this.");
+    }
+
+    // Save effectiveMessage so file contents are preserved in history for follow-ups
+    await Messages.append(activeConversationId, "user", effectiveMessage || message);
     await Messages.append(activeConversationId, "assistant", reply);
 
     if (history.length === 0) {
-      await Conversations.rename(activeConversationId, message.slice(0, 60));
+      // Use typed message for title; fall back to attached filenames
+      const title = message.trim() ||
+        localFiles.map(f => f.name).join(", ");
+      await Conversations.rename(activeConversationId, title.slice(0, 60));
     }
 
     const isQuiz = reply.includes("**Answer:**");
     appendCard(`
       <div class="result-card">
-        ${isQuiz ? renderQuiz(reply) : `<div class="md-body">${renderMarkdown(reply)}</div>`}
+        ${isQuiz ? renderQuiz(reply) : `<div class="md-body" dir="auto">${renderMarkdown(reply)}</div>`}
       </div>`,
       isQuiz ? () => {
         resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
@@ -328,41 +416,149 @@ async function sendChatMessage() {
 
 // ── Attachment helpers ────────────────────────────────────────────────────────
 function clearAttachment() {
-  attachedFile = null;
+  attachedFiles = [];
   const preview = document.getElementById("attachPreview");
   if (preview) { preview.innerHTML = ""; preview.style.display = "none"; }
+}
+
+function removeAttachmentAt(index) {
+  attachedFiles.splice(index, 1);
+  renderAttachPreview();
+}
+
+function renderAttachPreview() {
+  const preview = document.getElementById("attachPreview");
+  if (!preview) return;
+  if (attachedFiles.length === 0) { preview.innerHTML = ""; preview.style.display = "none"; return; }
+
+  preview.innerHTML = attachedFiles.map((f, i) => {
+    const thumb = f.isImage
+      ? `<img src="data:${f.mimeType};base64,${f.base64}" class="attach-chip-thumb" alt="" />`
+      : `<span class="attach-chip-icon">📎</span>`;
+    // No filename shown for images; show short name only for non-image files
+    const label = f.isImage ? "" : `<span class="attach-chip-name">${escapeHtml(f.name)}</span>`;
+    return `<div class="attach-chip" data-idx="${i}">
+      ${thumb}${label}
+      <button class="attach-chip-remove" data-idx="${i}">✕</button>
+    </div>`;
+  }).join("");
+  preview.style.display = "flex";
+
+  // Remove on ✕ click or middle-click
+  preview.querySelectorAll(".attach-chip-remove").forEach(btn => {
+    btn.addEventListener("click", () => removeAttachmentAt(+btn.dataset.idx));
+  });
+  preview.querySelectorAll(".attach-chip").forEach(chip => {
+    chip.addEventListener("auxclick", (e) => { if (e.button === 1) removeAttachmentAt(+chip.dataset.idx); });
+    chip.addEventListener("contextmenu", (e) => { e.preventDefault(); removeAttachmentAt(+chip.dataset.idx); });
+  });
+}
+
+async function extractPdfText(arrayBuffer) {
+  // pdf.js loaded as global via vendor/pdf.min.js
+  const pdfjsLib = window.pdfjsLib;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("vendor/pdf.worker.min.js");
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const parts = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    parts.push(`[Page ${i}]\n` + content.items.map(s => s.str).join(" "));
+  }
+  return parts.join("\n\n");
+}
+
+async function extractPptxText(arrayBuffer) {
+  // JSZip loaded as global via vendor/jszip.min.js
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const slideFiles = Object.keys(zip.files)
+    .filter(n => /^ppt\/slides\/slide\d+\.xml$/i.test(n))
+    .sort((a, b) => {
+      const na = parseInt(a.match(/\d+/)[0]), nb = parseInt(b.match(/\d+/)[0]);
+      return na - nb;
+    });
+  const parts = [];
+  for (const name of slideFiles) {
+    const xml = await zip.files[name].async("string");
+    // Extract all <a:t> text nodes
+    const texts = [...xml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)].map(m => m[1]).filter(Boolean);
+    const slideNum = name.match(/\d+/)[0];
+    if (texts.length) parts.push(`[Slide ${slideNum}]\n${texts.join(" ")}`);
+  }
+  return parts.join("\n\n");
+}
+
+function showParsingChip(name) {
+  const preview = document.getElementById("attachPreview");
+  if (!preview) return;
+  preview.style.display = "flex";
+  const chip = document.createElement("div");
+  chip.className = "attach-chip parsing-chip";
+  chip.innerHTML = `<span class="attach-chip-icon">⏳</span><span class="attach-chip-name">${escapeHtml(name)}</span>`;
+  preview.appendChild(chip);
+}
+
+function removeParsingChip() {
+  document.querySelector(".parsing-chip")?.remove();
+  const preview = document.getElementById("attachPreview");
+  if (preview && !preview.hasChildNodes()) preview.style.display = "none";
 }
 
 function handleFileAttach(file) {
   if (!file) return;
   const isImage = file.type.startsWith("image/");
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const dataUrl = e.target.result;
-    const base64 = dataUrl.split(",")[1];
-    attachedFile = { base64, mimeType: file.type, name: file.name, isImage };
+  const isPdf   = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+  const isPptx  = /\.(pptx|ppt)$/i.test(file.name) ||
+                  file.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  const isText  = !isImage && !isPdf && !isPptx &&
+                  (file.type.startsWith("text/") || /\.(txt|md|csv|json|js|ts|py|html|css|xml|yaml|yml)$/i.test(file.name));
 
-    const preview = document.getElementById("attachPreview");
-    if (!preview) return;
-    if (isImage) {
-      preview.innerHTML = `
-        <div class="attach-chip">
-          <img src="${dataUrl}" class="attach-chip-thumb" alt="" />
-          <span class="attach-chip-name">${escapeHtml(file.name)}</span>
-          <button class="attach-chip-remove" id="attachRemove">✕</button>
-        </div>`;
-    } else {
-      preview.innerHTML = `
-        <div class="attach-chip">
-          <span class="attach-chip-icon">📎</span>
-          <span class="attach-chip-name">${escapeHtml(file.name)}</span>
-          <button class="attach-chip-remove" id="attachRemove">✕</button>
-        </div>`;
-    }
-    preview.style.display = "flex";
-    document.getElementById("attachRemove")?.addEventListener("click", clearAttachment);
-  };
-  reader.readAsDataURL(file);
+  const reader = new FileReader();
+
+  if (isImage) {
+    reader.onload = (e) => {
+      const base64 = e.target.result.split(",")[1];
+      attachedFiles.push({ base64, mimeType: file.type, name: file.name, isImage: true, isText: false });
+      renderAttachPreview();
+    };
+    reader.readAsDataURL(file);
+
+  } else if (isPdf) {
+    showParsingChip(file.name);
+    reader.onload = async (e) => {
+      removeParsingChip();
+      try {
+        const text = await extractPdfText(e.target.result);
+        if (!text.trim()) { showError(`"${file.name}" appears to have no selectable text (scanned PDF).`); return; }
+        attachedFiles.push({ text, mimeType: file.type, name: file.name, isImage: false, isText: true });
+        renderAttachPreview();
+      } catch (err) { showError(`Could not read PDF "${file.name}": ${err.message}`); }
+    };
+    reader.readAsArrayBuffer(file);
+
+  } else if (isPptx) {
+    showParsingChip(file.name);
+    reader.onload = async (e) => {
+      removeParsingChip();
+      try {
+        const text = await extractPptxText(e.target.result);
+        if (!text.trim()) { showError(`"${file.name}" has no text content.`); return; }
+        attachedFiles.push({ text, mimeType: file.type, name: file.name, isImage: false, isText: true });
+        renderAttachPreview();
+      } catch (err) { showError(`Could not read PowerPoint "${file.name}": ${err.message}`); }
+    };
+    reader.readAsArrayBuffer(file);
+
+  } else if (isText) {
+    reader.onload = (e) => {
+      attachedFiles.push({ text: e.target.result, mimeType: file.type, name: file.name, isImage: false, isText: true });
+      renderAttachPreview();
+    };
+    reader.readAsText(file);
+
+  } else {
+    showError(`"${file.name}" is not a supported file type.`);
+  }
 }
 
 titleInput.addEventListener("keydown", (e) => {
@@ -377,34 +573,40 @@ const attachFileInput = document.getElementById("attachFileInput");
 
 attachBtn.addEventListener("click", () => attachFileInput.click());
 attachFileInput.addEventListener("change", () => {
-  const file = attachFileInput.files?.[0];
-  if (file) handleFileAttach(file);
+  [...(attachFileInput.files ?? [])].forEach(handleFileAttach);
   attachFileInput.value = "";
 });
 
-// ── Drag-and-drop image onto input bar ────────────────────────────────────────
-const chatInputBar = document.querySelector(".chat-input-bar");
+// ── Drag-and-drop anywhere on the sidebar ─────────────────────────────────────
+const dragOverlay = document.getElementById("dragOverlay");
+let dragCounter = 0; // track nested dragenter/dragleave
 
-chatInputBar.addEventListener("dragover", (e) => {
+document.addEventListener("dragenter", (e) => {
+  if (!e.dataTransfer?.types?.includes("Files")) return;
   e.preventDefault();
-  chatInputBar.classList.add("drag-over");
+  dragCounter++;
+  dragOverlay.style.display = "flex";
 });
-chatInputBar.addEventListener("dragleave", (e) => {
-  if (!chatInputBar.contains(e.relatedTarget)) chatInputBar.classList.remove("drag-over");
-});
-chatInputBar.addEventListener("drop", (e) => {
+document.addEventListener("dragover", (e) => {
+  if (!e.dataTransfer?.types?.includes("Files")) return;
   e.preventDefault();
-  chatInputBar.classList.remove("drag-over");
-  const file = e.dataTransfer.files?.[0];
-  if (file) handleFileAttach(file);
+});
+document.addEventListener("dragleave", () => {
+  dragCounter--;
+  if (dragCounter <= 0) { dragCounter = 0; dragOverlay.style.display = "none"; }
+});
+document.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragCounter = 0;
+  dragOverlay.style.display = "none";
+  [...(e.dataTransfer.files ?? [])].forEach(handleFileAttach);
 });
 
 // ── Paste image from clipboard ────────────────────────────────────────────────
 document.addEventListener("paste", (e) => {
-  const item = [...(e.clipboardData?.items ?? [])].find(i => i.type.startsWith("image/"));
-  if (!item) return;
-  const file = item.getAsFile();
-  if (file) handleFileAttach(file);
+  [...(e.clipboardData?.items ?? [])]
+    .filter(i => i.type.startsWith("image/"))
+    .forEach(i => { const f = i.getAsFile(); if (f) handleFileAttach(f); });
 });
 
 
@@ -445,6 +647,7 @@ setupSaveBtn.addEventListener("click", async () => {
 
 // Show overlay if not configured, otherwise boot normally
 async function initSetup() {
+  await initLang();
   const configured = await Settings.isConfigured();
   if (configured) {
     setupOverlay.classList.add("hidden");
@@ -737,7 +940,7 @@ function renderAllMessages(messages) {
       } else {
         const isQuiz = msg.content.includes("**Answer:**");
         const wrap = document.createElement("div");
-        wrap.innerHTML = `<div class="result-card">${isQuiz ? renderQuiz(msg.content) : `<div class="md-body">${renderMarkdown(msg.content)}</div>`}</div>`;
+        wrap.innerHTML = `<div class="result-card">${isQuiz ? renderQuiz(msg.content) : `<div class="md-body" dir="auto">${renderMarkdown(msg.content)}</div>`}</div>`;
         while (wrap.firstChild) resultArea.appendChild(wrap.firstChild);
       }
     }
@@ -776,6 +979,24 @@ async function loadActiveConversation() {
   } catch (err) { console.error(err); }
 }
 
+// ── Service worker keep-alive ────────────────────────────────────────────────
+// Ping the SW every 25s so it never sleeps and sendMessage calls don't hang.
+setInterval(() => { chrome.runtime.sendMessage({ type: "keepAlive" }).catch(() => {}); }, 25_000);
+
+// Wrapper: sendMessage with a 5-second timeout so the UI never hangs forever.
+function sendMessageSafe(msg) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Extension background timed out. Please reload the extension.")), 5000);
+    chrome.runtime.sendMessage(msg).then((res) => {
+      clearTimeout(timer);
+      resolve(res);
+    }).catch((err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
 // ── Tab capture helper ──────────────────────────────────────────────────────
 async function captureTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -798,7 +1019,12 @@ addPageBtn.addEventListener("click", async () => {
 });
 
 captureBtn.addEventListener("click", async () => {
-  if (selectedMode === "audio") { startAudioCapture(); return; }
+  if (selectedMode === "video") { startAudioCapture(true); return; }
+  if (selectedMode === "audio") {
+    const useMic = avOptMic.classList.contains("active");
+    if (useMic) { startMicCapture(); return; }
+    startAudioCapture(false); return;
+  }
 
   captureBtn.disabled = true;
   showSpinner("Capturing screen…");
@@ -955,32 +1181,44 @@ sessionFinish.addEventListener("click", async () => {
 });
 
 // ── Audio capture ───────────────────────────────────────────────────────────
-async function startAudioCapture() {
+async function startAudioCapture(isVideo = false) {
   captureBtn.disabled = true;
   try {
-    const stream = await new Promise((resolve, reject) => {
-      chrome.tabCapture.capture({ audio: true, video: false }, (s) => {
-        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-        else if (!s) reject(new Error("Could not capture tab audio. Make sure a tab with audio is active."));
-        else resolve(s);
-      });
+    const { streamId, error } = await sendMessageSafe({ type: "getTabCaptureStreamId" });
+    if (error) throw new Error(error);
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } },
+      video: isVideo
+        ? { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } }
+        : false,
     });
 
-    const audioCtx = new AudioContext();
-    const source = audioCtx.createMediaStreamSource(stream);
-    source.connect(audioCtx.destination);
+    if (!isVideo) {
+      // route audio to speakers so user can still hear the tab
+      const audioCtx = new AudioContext();
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(audioCtx.destination);
+      mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); audioCtx.close(); finishAudio(); };
+    } else {
+      // Route audio to speakers so user can still hear the tab while recording video
+      const audioCtxV = new AudioContext();
+      const sourceV = audioCtxV.createMediaStreamSource(stream);
+      sourceV.connect(audioCtxV.destination);
+      const mimeType = MediaRecorder.isTypeSupported("video/webm; codecs=vp9,opus")
+        ? "video/webm; codecs=vp9,opus"
+        : "video/webm";
+      mediaRecorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); audioCtxV.close(); finishAudio(); };
+    }
 
     audioChunks = [];
-    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
-    mediaRecorder.onstop = () => {
-      stream.getTracks().forEach(t => t.stop());
-      audioCtx.close();
-      finishAudio();
-    };
     mediaRecorder.start(1000);
 
     recSeconds = 0;
+    document.getElementById("audioBarLabel").textContent = isVideo ? "Recording screen video…" : "Recording tab audio…";
     audioBar.classList.add("active");
     timerInterval = setInterval(() => {
       recSeconds++;
@@ -990,27 +1228,179 @@ async function startAudioCapture() {
     }, 1000);
 
   } catch (err) {
-    showError(err.message);
-    captureBtn.disabled = false;
+    const isChromePage = err.message.includes("not been invoked") || err.message.includes("cannot be captured") || err.message.includes("activeTab");
+    showError(isChromePage
+      ? "Can't record audio on this page. Navigate to a regular website first."
+      : err.message);
+    resetAudioState();
   }
+}
+
+// Reset all audio recording state without processing
+function resetAudioState() {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.onstop = null; // prevent finishAudio from running
+    mediaRecorder.stop();
+  }
+  mediaRecorder = null;
+  audioChunks = [];
+  clearInterval(timerInterval);
+  audioBar.classList.remove("active");
+  document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
+  recTimer.textContent = "0:00";
+  captureBtn.disabled = false;
+}
+
+// Stop recording if user navigates to a chrome:// page while recording
+chrome.tabs.onActivated.addListener(() => {
+  if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+    if (!tab) return;
+    if (!tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://")) {
+      resetAudioState();
+      showError("Recording stopped — can't capture audio on this page.");
+    }
+  });
+});
+
+// ── Inline mic permission banner ─────────────────────────────────────────────
+micPermDismiss.addEventListener("click", () => micPermBanner.classList.remove("active"));
+
+// Called from the "Allow" button inside the sidepanel — this IS a user gesture,
+// so Chrome will show the permission dialog here without needing a new tab.
+micPermGrantBtn.addEventListener("click", async () => {
+  micPermGrantBtn.disabled = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    stream.getTracks().forEach(t => t.stop()); // just granting; actual recording starts on next Record click
+    micPermBanner.classList.remove("active");
+  } catch (err) {
+    micPermGrantBtn.disabled = false;
+    if (err.name === "NotAllowedError") {
+      showError("Microphone blocked. Enable it at: chrome://settings/content/microphone");
+    } else {
+      showError(err.message);
+    }
+  }
+});
+
+// ── Microphone capture ───────────────────────────────────────────────────────
+async function startMicCapture() {
+  captureBtn.disabled = true;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch (err) {
+    captureBtn.disabled = false;
+    if (err.name === "NotAllowedError" || err.message.toLowerCase().includes("dismiss") || err.message.toLowerCase().includes("denied")) {
+      const permState = await navigator.permissions.query({ name: "microphone" }).catch(() => ({ state: "unknown" }));
+      if (permState.state === "denied") {
+        showError("Microphone blocked. Enable it at: chrome://settings/content/microphone");
+      } else {
+        // Show inline banner — clicking "Allow" triggers getUserMedia with a real user gesture
+        micPermBanner.classList.add("active");
+        micPermGrantBtn.disabled = false;
+      }
+    } else {
+      showError(err.message);
+    }
+    return;
+  }
+  const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg";
+
+  audioChunks = [];
+  mediaRecorder = new MediaRecorder(stream, { mimeType });
+  mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    finishAudio();
+  };
+  mediaRecorder.start(1000);
+
+  recSeconds = 0;
+  document.getElementById("audioBarLabel").textContent = "Recording microphone…";
+  audioBar.classList.add("active");
+  timerInterval = setInterval(() => {
+    recSeconds++;
+    const m = Math.floor(recSeconds / 60);
+    const s = String(recSeconds % 60).padStart(2, "0");
+    recTimer.textContent = `${m}:${s}`;
+  }, 1000);
 }
 
 stopAudio.addEventListener("click", () => {
   if (mediaRecorder?.state !== "inactive") mediaRecorder.stop();
   clearInterval(timerInterval);
   audioBar.classList.remove("active");
-  showSpinner("Transcribing audio with Whisper…");
+  document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
+  showSpinner(selectedMode === "video" ? "Extracting frames & transcribing…" : "Transcribing audio with Whisper…");
 });
 
-async function finishAudio() {
-  try {
-    const blob = new Blob(audioChunks, { type: "audio/webm" });
-    const { transcript, markdown } = await transcribeAndSummarize(blob, selectedMode);
-    const noteTitle = titleInput.value.trim() || "Audio recording";
-    const audioMode = `audio-${selectedMode}`;
+// Extract up to `count` evenly-spaced JPEG frames from a video blob as base64 strings.
+async function extractVideoFrames(videoBlob, count = 4) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(videoBlob);
+    const video = document.createElement("video");
+    video.muted = true;
+    video.src = url;
+    video.addEventListener("loadedmetadata", async () => {
+      const duration = video.duration;
+      if (!duration || !isFinite(duration)) { URL.revokeObjectURL(url); resolve([]); return; }
+      const canvas = document.createElement("canvas");
+      canvas.width  = Math.min(video.videoWidth,  1280);
+      canvas.height = Math.round(canvas.width * (video.videoHeight / video.videoWidth));
+      const ctx = canvas.getContext("2d");
+      const frames = [];
+      for (let i = 0; i < count; i++) {
+        video.currentTime = (duration * (i + 0.5)) / count;
+        await new Promise(r => video.addEventListener("seeked", r, { once: true }));
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        frames.push(canvas.toDataURL("image/jpeg", 0.82).replace(/^data:image\/jpeg;base64,/, ""));
+      }
+      URL.revokeObjectURL(url);
+      resolve(frames);
+    });
+    video.addEventListener("error", () => { URL.revokeObjectURL(url); resolve([]); });
+  });
+}
 
-    let cards = null;
-    let finalMarkdown = markdown;
+async function finishAudio() {
+  const wasVideo = selectedMode === "video";
+  try {
+    const blobType = wasVideo ? "video/webm" : "audio/webm";
+    const blob = new Blob(audioChunks, { type: blobType });
+    const userNote = titleInput.value.trim();
+    if (userNote) titleInput.value = "";
+
+    let markdown, transcript, finalMarkdown, cards;
+    const audioMode = wasVideo ? `video-summary` : `audio-${selectedMode}`;
+
+    if (wasVideo) {
+      // Extract frames for visual context, transcribe audio for text context
+      const [frames, transcribeResult] = await Promise.all([
+        extractVideoFrames(blob),
+        transcribeAndSummarize(blob, selectedMode, userNote),
+      ]);
+      transcript = transcribeResult.transcript;
+      // If we got frames, enrich the result with visual analysis
+      if (frames.length > 0) {
+        const modePrompt = selectedMode === "flashcard"
+          ? `Generate flashcards based on both the visual content of these frames and this transcript.\nReturn ONLY a valid JSON array: [{\"front\":\"...\",\"back\":\"...\"}]\nTranscript: ${transcript}`
+          : `${userNote ? `User instruction: "${userNote}"\n\n` : ""}Analyze these video frames together with the following transcript and produce a ${selectedMode} study note.\n\nTranscript:\n${transcript}`;
+        markdown = await analyzeWithQuestion(
+          frames.map(b => ({ base64: b, mimeType: "image/jpeg" })),
+          "image/jpeg",
+          modePrompt,
+        );
+      } else {
+        markdown = transcribeResult.markdown;
+      }
+    } else {
+      ({ transcript, markdown } = await transcribeAndSummarize(blob, selectedMode, userNote));
+    }
+
+    const noteTitle = userNote || "Recording";
+    finalMarkdown = markdown;
 
     if (selectedMode === "flashcard") {
       try { cards = JSON.parse(markdown); } catch { cards = [{ front: "Parse error", back: markdown }]; }
@@ -1019,7 +1409,8 @@ async function finishAudio() {
 
     const saved = await saveNote({ title: noteTitle, mode: audioMode, markdown: finalMarkdown, cards });
 
-    await Messages.append(activeConversationId, "user", `🎙️ Audio recording (${selectedMode})`);
+    const msgIcon = wasVideo ? "🎥" : "🎙️";
+    await Messages.append(activeConversationId, "user", `${msgIcon} Recording (${selectedMode})`);
     await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : finalMarkdown);
 
     if (cards) {
@@ -1033,8 +1424,31 @@ async function finishAudio() {
 }
 
 // ── UI helpers ──────────────────────────────────────────────────────────────
+// ── Audio source toggle (Tab / Mic) ─────────────────────────────────────────
+avOptAudio.addEventListener("click", () => {
+  avOptAudio.classList.add("active");
+  avOptMic.classList.remove("active");
+  resetCaptureBtn();
+});
+avOptMic.addEventListener("click", () => {
+  avOptMic.classList.add("active");
+  avOptAudio.classList.remove("active");
+  resetCaptureBtn();
+});
+
 function resetCaptureBtn() {
-  captureBtn.textContent = selectedMode === "audio" ? "🎙️ Record" : "⚡ Capture";
+  if (selectedMode === "video") captureBtn.textContent = "🎥 Record";
+  else if (selectedMode === "audio") {
+    captureBtn.textContent = avOptMic.classList.contains("active") ? "🎤 Record" : "🎙️ Record";
+  } else captureBtn.textContent = "⚡ Capture";
+}
+
+function updateInputPlaceholder() {
+  if (selectedMode === "audio" || selectedMode === "video") {
+    titleInput.placeholder = "Instructions for AI, e.g. 'explain deeply' or 'just transcribe'…";
+  } else {
+    titleInput.placeholder = "Ask about this screen…";
+  }
 }
 
 function appendCard(htmlStr, afterInsert) {
@@ -1042,6 +1456,21 @@ function appendCard(htmlStr, afterInsert) {
   resultArea.querySelector(".placeholder")?.remove();
   const wrap = document.createElement("div");
   wrap.innerHTML = htmlStr;
+  // Inject copy button into every result-card (not user bubbles or error cards)
+  wrap.querySelectorAll(".result-card").forEach(card => {
+    const btn = document.createElement("button");
+    btn.className = "card-copy-btn";
+    btn.title = "Copy to clipboard";
+    btn.textContent = "⎘";
+    btn.addEventListener("click", () => {
+      const text = card.innerText.replace(/^⎘\s*/m, "").trim();
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = "✓";
+        setTimeout(() => { btn.textContent = "⎘"; }, 1500);
+      });
+    });
+    card.appendChild(btn);
+  });
   while (wrap.firstChild) resultArea.appendChild(wrap.firstChild);
   if (afterInsert) afterInsert();
   resultArea.scrollTop = resultArea.scrollHeight;
@@ -1070,7 +1499,7 @@ function resultHeadline(mode, title) {
 function showResult(markdown, title, mode, filename) {
   const bodyHtml = (mode === "quiz")
     ? renderQuiz(markdown)
-    : `<div class="md-body">${renderMarkdown(markdown)}</div>`;
+    : `<div class="md-body" dir="auto">${renderMarkdown(markdown)}</div>`;
   const dashLink = filename ? `<div class="open-dash-row"><button class="open-dash-btn" data-filename="${escapeHtml(filename)}">↗ View in Dashboard</button></div>` : "";
 
   appendCard(`

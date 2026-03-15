@@ -52,14 +52,6 @@ function detectType(text) {
 }
 
 function QuizViewer({ pairs }) {
-  const [revealed, setRevealed] = useState(new Set());
-  function toggle(i) {
-    setRevealed((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i); else next.add(i);
-      return next;
-    });
-  }
   return (
     <div className="flex flex-col gap-4">
       {pairs.map((p, i) => (
@@ -68,20 +60,10 @@ function QuizViewer({ pairs }) {
             <span className="text-muted text-xs font-bold uppercase mr-2">Q{i+1}</span>
             {p.q}
           </p>
-          {revealed.has(i) ? (
-            <div className="border-t border-border pt-3 mt-1">
-              <p className="text-xs font-bold uppercase text-muted mb-1">Answer</p>
-              <p className="text-sm text-text">{p.a}</p>
-              <button onClick={() => toggle(i)} className="mt-2 text-xs text-muted hover:text-text transition-colors">
-                Hide answer
-              </button>
-            </div>
-          ) : (
-            <button onClick={() => toggle(i)}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-border text-muted hover:border-accent hover:text-text transition-colors">
-              Show answer
-            </button>
-          )}
+          <div className="border-t border-border pt-3 mt-1">
+            <p className="text-xs font-bold uppercase text-muted mb-1">Answer</p>
+            <p className="text-sm text-text">{p.a}</p>
+          </div>
         </div>
       ))}
     </div>
