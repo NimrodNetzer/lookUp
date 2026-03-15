@@ -121,6 +121,14 @@ document.addEventListener("click", () => {
   renderSearchResults([]);
 });
 moreDropdown.addEventListener("click", (e) => e.stopPropagation());
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && moreDropdown.classList.contains("open")) {
+    moreDropdown.classList.remove("open");
+    moreBtn.classList.remove("open");
+    searchInput.value = "";
+    renderSearchResults([]);
+  }
+});
 
 moreDashboard.addEventListener("click", () => {
   moreDropdown.classList.remove("open"); moreBtn.classList.remove("open");
@@ -342,12 +350,18 @@ async function sendChatMessage() {
       effectiveMessage = (effectiveMessage ? effectiveMessage + fileBlocks : fileBlocks.trimStart());
     }
 
+    // Build history messages for multi-turn context
+    const historyMsgs = history.map(m => ({ role: m.role, content: m.content }));
+
     if (imageFiles.length > 0) {
-      // One or more images attached — pass all to vision model
+      // One or more images — vision model, include prior text history as system context
+      const question = effectiveMessage || "Describe and analyze these images.";
       reply = await analyzeWithQuestion(
         imageFiles.map(f => ({ base64: f.base64, mimeType: f.mimeType })),
         null,
-        effectiveMessage || "Describe and analyze these images."
+        historyMsgs.length > 0
+          ? `[Prior conversation context]\n${historyMsgs.map(m => `${m.role}: ${m.content}`).join("\n")}\n\n[User]\n${question}`
+          : question
       );
     } else if (effectiveMessage) {
       // Text files or plain message — text-only path (with optional tab screenshot)
@@ -355,7 +369,7 @@ async function sendChatMessage() {
         const { base64, mimeType } = await captureTab();
         reply = await analyzeWithQuestion(base64, mimeType, effectiveMessage);
       } catch {
-        const msgs = [...history.map(m => ({ role: m.role, content: m.content })), { role: "user", content: effectiveMessage }];
+        const msgs = [...historyMsgs, { role: "user", content: effectiveMessage }];
         reply = await chat(msgs);
       }
     } else {
@@ -364,11 +378,15 @@ async function sendChatMessage() {
       reply = await analyzeWithQuestion(base64, mimeType, "Describe and analyze this.");
     }
 
-    await Messages.append(activeConversationId, "user", message);
+    // Save effectiveMessage so file contents are preserved in history for follow-ups
+    await Messages.append(activeConversationId, "user", effectiveMessage || message);
     await Messages.append(activeConversationId, "assistant", reply);
 
     if (history.length === 0) {
-      await Conversations.rename(activeConversationId, message.slice(0, 60));
+      // Use typed message for title; fall back to attached filenames
+      const title = message.trim() ||
+        localFiles.map(f => f.name).join(", ");
+      await Conversations.rename(activeConversationId, title.slice(0, 60));
     }
 
     const isQuiz = reply.includes("**Answer:**");
@@ -470,6 +488,22 @@ async function extractPptxText(arrayBuffer) {
   return parts.join("\n\n");
 }
 
+function showParsingChip(name) {
+  const preview = document.getElementById("attachPreview");
+  if (!preview) return;
+  preview.style.display = "flex";
+  const chip = document.createElement("div");
+  chip.className = "attach-chip parsing-chip";
+  chip.innerHTML = `<span class="attach-chip-icon">⏳</span><span class="attach-chip-name">${escapeHtml(name)}</span>`;
+  preview.appendChild(chip);
+}
+
+function removeParsingChip() {
+  document.querySelector(".parsing-chip")?.remove();
+  const preview = document.getElementById("attachPreview");
+  if (preview && !preview.hasChildNodes()) preview.style.display = "none";
+}
+
 function handleFileAttach(file) {
   if (!file) return;
   const isImage = file.type.startsWith("image/");
@@ -490,7 +524,9 @@ function handleFileAttach(file) {
     reader.readAsDataURL(file);
 
   } else if (isPdf) {
+    showParsingChip(file.name);
     reader.onload = async (e) => {
+      removeParsingChip();
       try {
         const text = await extractPdfText(e.target.result);
         if (!text.trim()) { showError(`"${file.name}" appears to have no selectable text (scanned PDF).`); return; }
@@ -501,7 +537,9 @@ function handleFileAttach(file) {
     reader.readAsArrayBuffer(file);
 
   } else if (isPptx) {
+    showParsingChip(file.name);
     reader.onload = async (e) => {
+      removeParsingChip();
       try {
         const text = await extractPptxText(e.target.result);
         if (!text.trim()) { showError(`"${file.name}" has no text content.`); return; }
@@ -1418,6 +1456,21 @@ function appendCard(htmlStr, afterInsert) {
   resultArea.querySelector(".placeholder")?.remove();
   const wrap = document.createElement("div");
   wrap.innerHTML = htmlStr;
+  // Inject copy button into every result-card (not user bubbles or error cards)
+  wrap.querySelectorAll(".result-card").forEach(card => {
+    const btn = document.createElement("button");
+    btn.className = "card-copy-btn";
+    btn.title = "Copy to clipboard";
+    btn.textContent = "⎘";
+    btn.addEventListener("click", () => {
+      const text = card.innerText.replace(/^⎘\s*/m, "").trim();
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = "✓";
+        setTimeout(() => { btn.textContent = "⎘"; }, 1500);
+      });
+    });
+    card.appendChild(btn);
+  });
   while (wrap.firstChild) resultArea.appendChild(wrap.firstChild);
   if (afterInsert) afterInsert();
   resultArea.scrollTop = resultArea.scrollHeight;
