@@ -58,7 +58,7 @@
 .chat-toggle-btn:hover { background: rgba(124,106,245,0.18); border-color: rgba(124,106,245,0.45); color: #9d8cff; }
 .chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; position: relative; }
 .chat-messages {
-  flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 20px;
+  flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 20px;
   width: 100%; box-sizing: border-box;
   padding: 28px clamp(28px, calc((100% - 844px) / 2), 9999px) 12px;
 }
@@ -93,7 +93,9 @@
 }
 .msg-ai-wrap { flex: 1; min-width: 0; position: relative; }
 .msg-ai-wrap:hover .msg-ai-copy { opacity: 1; }
-.msg-ai-body { font-size: 17px; line-height: 1.7; color: #e8e8f0; }
+.msg-ai-body { font-size: 17px; line-height: 1.7; color: #e8e8f0; unicode-bidi: plaintext; }
+.msg-ai-body .chat-p, .msg-ai-body li, .msg-ai-body h2,
+.msg-ai-body h3, .msg-ai-body h4 { unicode-bidi: plaintext; }
 .msg-ai-copy {
   opacity: 0; transition: opacity 0.15s;
   position: absolute; top: 0; right: 0;

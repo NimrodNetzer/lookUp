@@ -22,6 +22,17 @@ const GROQ_API = "https://api.groq.com/openai/v1";
 const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 const AUDIO_MODEL = "whisper-large-v3-turbo";
 
+// ─── Language setting ─────────────────────────────────────────────────────────
+let _responseLanguage = "en";
+export function setResponseLanguage(lang) { _responseLanguage = lang; }
+
+function buildSystemPrompt() {
+  if (_responseLanguage === "he") {
+    return SYSTEM_PROMPT + "\n\nIMPORTANT: Respond entirely in Hebrew (עברית). All explanations, headings, bullet points, and text must be in Hebrew only.";
+  }
+  return SYSTEM_PROMPT;
+}
+
 // ─── Auth helper ─────────────────────────────────────────────────────────────
 
 async function getKey() {
@@ -214,7 +225,8 @@ export async function analyzeScreenshot(base64Image, mimeType = "image/png", mod
 
     if (mode === "quiz") {
       const n = quizQuestionCount(visibleText);
-      prompt = `Create a ${n}-question quiz based on this screenshot to test real understanding — not just memorization.\n\nFormat each question exactly like this:\n\n**Q1.** [Question]\n**Answer:** [Complete answer]\n\nInclude these question types (proportionally to question count):\n- At least one "explain why…" question\n- At least one application question (how/when would you use this?)\n- If questions ≥ 4, include a comparison question (what's the difference between X and Y?)\n- Remaining questions can test definitions or recall`;
+      const langNote = _responseLanguage === "he" ? "\n\nכתוב את כל השאלות והתשובות בעברית." : "";
+      prompt = `Create a ${n}-question quiz based on this screenshot to test real understanding — not just memorization.\n\nFormat each question exactly like this:\n\n**Q1.** [Question]\n**Answer:** [Answer in 5–60 words — concise but complete]\n\nInclude these question types (proportionally to question count):\n- At least one "explain why…" question\n- At least one application question (how/when would you use this?)\n- If questions ≥ 4, include a comparison question (what's the difference between X and Y?)\n- Remaining questions can test definitions or recall\n\nIMPORTANT: Keep every answer between 5 and 60 words. No lengthy paragraphs.${langNote}`;
     } else {
       const n = flashcardCount(visibleText);
       prompt = `Generate exactly ${n} flashcards from this screenshot.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]`;
@@ -222,7 +234,7 @@ export async function analyzeScreenshot(base64Image, mimeType = "image/png", mod
   }
 
   return chatCompletion(key, [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: buildSystemPrompt() },
     {
       role: "user",
       content: [
@@ -246,24 +258,29 @@ export async function analyzeMulti(frames, mode = "session") {
   const prompt = modePrompts[mode] ?? modePrompts.session;
 
   return chatCompletion(key, [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: buildSystemPrompt() },
     { role: "user", content: [...imageContent, { type: "text", text: prompt }] },
   ]);
 }
 
 /**
- * Answer a specific user question about a screenshot.
+ * Answer a specific user question about one or more screenshots/images.
+ * Accepts a single image (legacy) or an array of { base64, mimeType } objects.
  */
 export async function analyzeWithQuestion(base64Image, mimeType = "image/png", question) {
   const key = await getKey();
+  const images = Array.isArray(base64Image)
+    ? base64Image
+    : [{ base64: base64Image, mimeType }];
+  const imageContent = images.map(img => ({
+    type: "image_url",
+    image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
+  }));
   return chatCompletion(key, [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: buildSystemPrompt() },
     {
       role: "user",
-      content: [
-        { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
-        { type: "text", text: question },
-      ],
+      content: [...imageContent, { type: "text", text: question }],
     },
   ]);
 }
@@ -273,16 +290,17 @@ export async function analyzeWithQuestion(base64Image, mimeType = "image/png", q
  */
 export async function analyzeText(selectedText, mode = "summary") {
   const key = await getKey();
+  const langNote = _responseLanguage === "he" ? " כתוב את כל השאלות והתשובות בעברית." : "";
   const instructions = {
     summary:   "Summarize and organize this text for a student, using your structured summary format:",
     explain:   "Explain this text in depth as a patient tutor — motivate the topic, walk through concepts, use analogies, close with the key insight:",
-    quiz:      `Generate a ${quizQuestionCount(selectedText)}-question quiz (with answers) based on this text, testing real understanding:`,
+    quiz:      `Generate a ${quizQuestionCount(selectedText)}-question quiz based on this text, testing real understanding. Format: **Q1.** [Question]\\n**Answer:** [5–60 words — concise but complete]. No lengthy paragraphs.${langNote}`,
     flashcard: `Generate exactly ${flashcardCount(selectedText)} flashcards from this text.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]`,
   };
   const instruction = instructions[mode] ?? instructions.summary;
 
   return chatCompletion(key, [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: buildSystemPrompt() },
     { role: "user", content: `${instruction}\n\n---\n\n${selectedText}` },
   ]);
 }
@@ -293,7 +311,7 @@ export async function analyzeText(selectedText, mode = "summary") {
  * mode: "summary" | "explain" | "quiz" | "flashcard"
  * Returns { transcript: string, markdown: string }
  */
-export async function transcribeAndSummarize(audioBlob, mode = "summary") {
+export async function transcribeAndSummarize(audioBlob, mode = "summary", userNote = "") {
   const key = await getKey();
 
   // Whisper via multipart/form-data — no temp file needed in the browser
@@ -320,15 +338,17 @@ export async function transcribeAndSummarize(audioBlob, mode = "summary") {
   }
 
   const n = quizQuestionCount(transcript);
+  const noteCtx = userNote ? `\n\nUser's instruction: "${userNote}"` : "";
+  const langNote = _responseLanguage === "he" ? "\n\nכתוב את כל השאלות והתשובות בעברית." : "";
   const audioPrompts = {
-    summary:   `${modePrompts.summary}\n\nTranscript to analyze:\n${transcript}`,
-    explain:   `${modePrompts.explain}\n\nTranscript to analyze:\n${transcript}`,
-    quiz:      `Generate a ${n}-question quiz (with answers) based on this transcript, testing real understanding.\n\nFormat each question exactly like this:\n\n**Q1.** [Question]\n**Answer:** [Complete answer]\n\nTranscript to analyze:\n${transcript}`,
-    flashcard: `Generate exactly ${flashcardCount(transcript)} flashcards from this transcript.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]\n\nTranscript to analyze:\n${transcript}`,
+    summary:   `${modePrompts.summary}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
+    explain:   `${modePrompts.explain}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
+    quiz:      `Generate a ${n}-question quiz based on this transcript, testing real understanding.\n\nFormat each question exactly like this:\n\n**Q1.** [Question]\n**Answer:** [5–60 words — concise but complete]\n\nIMPORTANT: Keep every answer between 5 and 60 words.${langNote}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
+    flashcard: `Generate exactly ${flashcardCount(transcript)} flashcards from this transcript.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
   };
 
   const markdown = await chatCompletion(key, [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: buildSystemPrompt() },
     { role: "user", content: audioPrompts[mode] ?? audioPrompts.summary },
   ]);
 
@@ -342,7 +362,7 @@ export async function transcribeAndSummarize(audioBlob, mode = "summary") {
 export async function chat(messages) {
   const key = await getKey();
   return chatCompletion(key, [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: buildSystemPrompt() },
     ...messages,
   ], 0.6);
 }
@@ -359,7 +379,7 @@ export async function chat(messages) {
 export async function* chatStream(messages) {
   const key = await getKey();
   yield* chatCompletionStream(key, [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: buildSystemPrompt() },
     ...messages,
   ]);
 }

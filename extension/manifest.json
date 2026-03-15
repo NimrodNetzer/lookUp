@@ -9,7 +9,8 @@
     "tabs",
     "sidePanel",
     "tabCapture",
-    "storage"
+    "storage",
+    "microphone"
   ],
 
   "host_permissions": [
@@ -41,7 +42,9 @@
       "resources": [
         "built/dashboard.html",
         "built/chat.html",
-        "built/assets/*"
+        "built/assets/*",
+        "mic-permission.html",
+        "mic-permission.js"
       ],
       "matches": ["<all_urls>"]
     }

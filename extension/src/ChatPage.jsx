@@ -7,19 +7,19 @@ import { chatStream } from "../groq-client.js";
 function renderMd(raw) {
   let h = raw
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/^#### (.+)$/gm, '<h4 class="chat-h4">$1</h4>')
-    .replace(/^### (.+)$/gm,  '<h3 class="chat-h3">$1</h3>')
-    .replace(/^## (.+)$/gm,   '<h2 class="chat-h2">$1</h2>')
-    .replace(/^# (.+)$/gm,    '<h2 class="chat-h2">$1</h2>')
+    .replace(/^#### (.+)$/gm, '<h4 class="chat-h4" dir="auto">$1</h4>')
+    .replace(/^### (.+)$/gm,  '<h3 class="chat-h3" dir="auto">$1</h3>')
+    .replace(/^## (.+)$/gm,   '<h2 class="chat-h2" dir="auto">$1</h2>')
+    .replace(/^# (.+)$/gm,    '<h2 class="chat-h2" dir="auto">$1</h2>')
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.+?)\*/g,     "<em>$1</em>")
     .replace(/`([^`\n]+)`/g,   '<code class="chat-code">$1</code>')
     .replace(/^---+$/gm,       '<hr class="chat-hr">')
-    .replace(/^[*-] (.+)$/gm,  "<li>$1</li>");
-  h = h.replace(/(<li>[\s\S]*?<\/li>)(\n<li>[\s\S]*?<\/li>)*/g,
+    .replace(/^[*-] (.+)$/gm,  '<li dir="auto">$1</li>');
+  h = h.replace(/(<li[\s\S]*?<\/li>)(\n<li[\s\S]*?<\/li>)*/g,
     (m) => `<ul class="chat-ul">${m}</ul>`);
-  h = h.replace(/\n\n+/g, '</p><p class="chat-p">').replace(/\n/g, "<br>");
-  return `<p class="chat-p">${h}</p>`;
+  h = h.replace(/\n\n+/g, '</p><p class="chat-p" dir="auto">').replace(/\n/g, "<br>");
+  return `<p class="chat-p" dir="auto">${h}</p>`;
 }
 
 function parseFlashcards(content) {

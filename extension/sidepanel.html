@@ -41,12 +41,13 @@
       z-index: 0;
     }
 
-    /* Stacking contexts — toolbar must be above result-area for dropdown */
-    header, .conv-tabs-wrap, .selection-bar, .session-bar,
+    /* Stacking contexts — header dropdown must be above everything */
+    .conv-tabs-wrap, .selection-bar, .session-bar,
     .audio-bar, .result-area, .chat-input-bar {
       position: relative; z-index: 1;
     }
     .toolbar { position: relative; z-index: 10; }
+    header { position: relative; z-index: 20; }
 
     /* Scrollbar */
     ::-webkit-scrollbar { width: 4px; }
@@ -67,21 +68,85 @@
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     }
     .header-sub { font-size: 10px; color: #333; }
-    .btn-search, .btn-dashboard, .btn-chat {
-      width: 26px; height: 26px;
+    .header-actions { display: flex; align-items: center; gap: 5px; margin-left: auto; }
+
+    /* More-options dropdown */
+    .btn-more {
+      width: 28px; height: 28px;
       background: rgba(124,106,245,0.06);
       border: 1px solid rgba(124,106,245,0.18);
       border-radius: 7px;
-      color: #555; cursor: pointer;
-      font-size: 12px; line-height: 1;
+      color: #777; cursor: pointer;
+      font-size: 16px; line-height: 1;
       display: flex; align-items: center; justify-content: center;
       transition: background 0.15s, border-color 0.15s, color 0.15s;
     }
-    .btn-dashboard { margin-left: auto; }
-    .btn-search:hover, .btn-dashboard:hover, .btn-chat:hover {
-      background: rgba(124,106,245,0.15);
-      border-color: rgba(124,106,245,0.45);
-      color: #c0b8ff;
+    .btn-more:hover, .btn-more.open {
+      background: rgba(124,106,245,0.15); border-color: rgba(124,106,245,0.45); color: #c0b8ff;
+    }
+    .more-dropdown {
+      display: none; position: absolute;
+      top: calc(100% + 6px); right: 0; width: 210px;
+      background: #16162a; border: 1px solid rgba(124,106,245,0.25);
+      border-radius: 14px; padding: 8px; z-index: 1000;
+      box-shadow: 0 10px 36px rgba(0,0,0,0.6);
+      animation: dropIn 0.15s ease;
+    }
+    .more-dropdown.open { display: block; }
+    /* Primary actions — side-by-side big buttons */
+    .more-primary {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;
+    }
+    .more-primary-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      padding: 9px 6px; border-radius: 10px;
+      background: rgba(124,106,245,0.08); border: 1px solid rgba(124,106,245,0.18);
+      cursor: pointer; transition: background 0.12s, border-color 0.12s;
+      font-size: 11px; font-weight: 700; color: #c0b8ff;
+    }
+    .more-primary-btn:hover { background: rgba(124,106,245,0.18); border-color: rgba(124,106,245,0.4); }
+    .more-primary-btn .mpb-icon { font-size: 18px; line-height: 1; }
+    /* Secondary items */
+    .more-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 7px 8px; border-radius: 8px;
+      cursor: pointer; transition: background 0.12s;
+      font-size: 11.5px; font-weight: 600; color: #999;
+    }
+    .more-item:hover { background: rgba(124,106,245,0.1); color: #ddd; }
+    .more-item .more-icon { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
+    /* Language toggle */
+    .lang-toggle {
+      margin-left: auto; display: flex; background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(124,106,245,0.25); border-radius: 20px; overflow: hidden;
+    }
+    .lang-toggle-opt {
+      padding: 2px 8px; font-size: 10px; font-weight: 700;
+      cursor: pointer; transition: background 0.15s, color 0.15s;
+      color: #666; user-select: none;
+    }
+    .lang-toggle-opt.active { background: rgba(124,106,245,0.4); color: #e0daff; }
+    .more-divider { height: 1px; background: rgba(124,106,245,0.12); margin: 4px 0; }
+
+    /* Inline mic permission banner */
+    .mic-perm-banner {
+      display: none; align-items: center; gap: 10px;
+      padding: 8px 12px;
+      background: rgba(167,139,250,0.07);
+      border-bottom: 1px solid rgba(167,139,250,0.2);
+      flex-shrink: 0;
+    }
+    .mic-perm-banner.active { display: flex; }
+    .mic-perm-banner p { font-size: 11px; color: #aaa; flex: 1; line-height: 1.4; }
+    .mic-perm-btn {
+      padding: 5px 12px; font-size: 11px; font-weight: 700;
+      border: none; border-radius: 7px;
+      background: linear-gradient(135deg, #7c6af5, #5b53d4);
+      color: #fff; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    }
+    .mic-perm-dismiss {
+      background: none; border: none; color: #444;
+      cursor: pointer; font-size: 14px; padding: 0 2px; flex-shrink: 0;
     }
     .status-dot {
       width: 7px; height: 7px; border-radius: 50%;
@@ -325,6 +390,30 @@
       cursor: pointer; font-size: 15px; padding: 0 2px;
     }
 
+    /* ── AUDIO VIDEO TOGGLE ─────────────────── */
+    .av-toggle-row {
+      display: none; align-items: center; gap: 7px;
+      padding: 5px 12px 4px;
+      border-bottom: 1px solid rgba(124,106,245,0.08);
+      flex-shrink: 0;
+    }
+    .av-toggle-row.active { display: flex; }
+    .av-toggle-label { font-size: 11px; color: #555; }
+    .av-toggle {
+      display: flex; align-items: center;
+      background: rgba(20,20,32,0.9);
+      border: 1px solid rgba(124,106,245,0.2);
+      border-radius: 20px; padding: 2px; gap: 1px;
+    }
+    .av-toggle-opt {
+      padding: 3px 10px; border-radius: 16px;
+      font-size: 11px; font-weight: 700; cursor: pointer;
+      color: #444; background: none; border: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .av-toggle-opt.active { background: rgba(236,72,153,0.2); color: #f472b6; }
+    .av-toggle-opt.mic.active { background: rgba(167,139,250,0.2); color: #c4b5fd; }
+
     /* ── AUDIO BAR ──────────────────────────── */
     .audio-bar {
       display: none; align-items: center; gap: 10px;
@@ -349,7 +438,7 @@
 
     /* ── RESULT AREA ────────────────────────── */
     .result-area {
-      flex: 1; overflow-y: auto;
+      flex: 1; overflow-y: auto; overflow-x: hidden;
       padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
     }
     .placeholder {
@@ -425,7 +514,13 @@
     }
 
     /* ── MARKDOWN BODY ──────────────────────── */
-    .md-body { font-size: 13.5px; line-height: 1.75; word-break: break-word; color: var(--text); }
+    .md-body {
+      font-size: 13.5px; line-height: 1.75; word-break: break-word; color: var(--text);
+      unicode-bidi: plaintext;
+    }
+    .md-body p, .md-body li, .md-body h2, .md-body h3, .md-body h4, .md-body blockquote {
+      unicode-bidi: plaintext;
+    }
     .md-body .md-h2 {
       font-size: 14px; font-weight: 700; color: #a89af5;
       margin: 16px 0 6px; padding-bottom: 4px;
@@ -539,23 +634,37 @@
       background: linear-gradient(to bottom, transparent, rgba(94,234,212,0.04) 60%);
     }
     .attach-preview {
-      display: none; align-items: center; gap: 6px; padding: 0 4px 6px;
+      display: none; align-items: center; gap: 6px;
+      padding: 0 4px 6px;
+      overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap;
     }
+    .attach-preview::-webkit-scrollbar { display: none; }
     .attach-chip {
-      display: inline-flex; align-items: center; gap: 6px;
+      display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
       background: rgba(124,106,245,0.08);
       border: 1px solid rgba(124,106,245,0.25);
-      border-radius: 8px; padding: 4px 8px;
-      font-size: 11px; color: #c0b8ff; max-width: 100%;
+      border-radius: 8px; padding: 3px 6px;
+      font-size: 11px; color: #c0b8ff;
+      cursor: context-menu;
+      transition: border-color 0.15s;
     }
-    .attach-chip-thumb { width: 28px; height: 28px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+    .attach-chip:hover { border-color: rgba(124,106,245,0.5); }
+    .attach-chip-thumb { width: 32px; height: 32px; border-radius: 5px; object-fit: cover; flex-shrink: 0; }
     .attach-chip-icon { font-size: 14px; flex-shrink: 0; }
-    .attach-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+    .attach-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 90px; }
     .attach-chip-remove {
-      background: none; border: none; color: #555; cursor: pointer;
-      font-size: 12px; padding: 0 2px; flex-shrink: 0; line-height: 1;
+      background: none; border: none; color: #444; cursor: pointer;
+      font-size: 11px; padding: 0 1px; flex-shrink: 0; line-height: 1;
+      transition: color 0.15s;
     }
     .attach-chip-remove:hover { color: #f87171; }
+    .msg-thumbs-row {
+      display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%;
+    }
+    .msg-thumbs-row .msg-attachment-thumb {
+      width: auto; max-width: 100%; max-height: 110px;
+      border-radius: 8px; object-fit: cover; flex-shrink: 0;
+    }
 
     .chat-input-wrap {
       display: flex; align-items: center; gap: 6px;
@@ -726,13 +835,36 @@
 <body>
 
   <!-- HEADER -->
-  <header>
+  <header style="position:relative">
     <h1>LookUp</h1>
     <span style="font-size:10px;color:#444">Study Sensei</span>
-    <button class="btn-search"    id="searchBtn"      title="Search notes">🔍</button>
-    <button class="btn-dashboard" id="dashboardBtn"   title="Open dashboard">📊</button>
-    <button class="btn-chat"      id="chatExpandBtn"  title="Open full chat">💬</button>
-    <div class="status-dot" id="statusDot"></div>
+    <div class="header-actions">
+      <button class="btn-more" id="moreBtn" title="More options">⋯</button>
+      <div class="more-dropdown" id="moreDropdown">
+        <!-- Primary actions -->
+        <div class="more-primary">
+          <div class="more-primary-btn" id="moreDashboard">
+            <span class="mpb-icon">📊</span>Dashboard
+          </div>
+          <div class="more-primary-btn" id="moreChatBtn">
+            <span class="mpb-icon">💬</span>Chat
+          </div>
+        </div>
+        <div class="more-divider"></div>
+        <!-- Secondary actions -->
+        <div class="more-item" id="moreSearch">
+          <span class="more-icon">🔍</span> Search Notes
+        </div>
+        <div class="more-item" id="moreLang">
+          <span class="more-icon">🌐</span> Language
+          <div class="lang-toggle" id="langToggle">
+            <span class="lang-toggle-opt active" id="langOptEN">EN</span>
+            <span class="lang-toggle-opt" id="langOptHE">עב</span>
+          </div>
+        </div>
+      </div>
+      <div class="status-dot" id="statusDot"></div>
+    </div>
   </header>
 
   <!-- CONVERSATION TABS -->
@@ -793,7 +925,15 @@
           <span class="d-icon">🎙️</span>
           <span class="d-text">
             <span class="d-name">Audio</span>
-            <span class="d-desc">Transcribe &amp; summarize lecture audio</span>
+            <span class="d-desc">Tab audio or microphone recording</span>
+          </span>
+          <span class="d-check">✓</span>
+        </div>
+        <div class="dropdown-item" data-mode="video" data-icon="🎥" data-color="#a78bfa">
+          <span class="d-icon">🎥</span>
+          <span class="d-text">
+            <span class="d-name">Video</span>
+            <span class="d-desc">Record screen video + audio</span>
           </span>
           <span class="d-check">✓</span>
         </div>
@@ -806,6 +946,22 @@
       <button class="btn-session" id="sessionBtn">+ Multi</button>
     </div>
 
+  </div>
+
+  <!-- AUDIO SOURCE TOGGLE — shown when Audio mode is active -->
+  <div class="av-toggle-row" id="avToggleRow">
+    <span class="av-toggle-label">Source:</span>
+    <div class="av-toggle">
+      <button class="av-toggle-opt active" id="avOptAudio">🎙️ Tab</button>
+      <button class="av-toggle-opt mic"    id="avOptMic">🎤 Mic</button>
+    </div>
+  </div>
+
+  <!-- INLINE MIC PERMISSION BANNER -->
+  <div class="mic-perm-banner" id="micPermBanner">
+    <p>🎤 Tap <strong>Allow</strong> so Chrome can show the microphone permission dialog.</p>
+    <button class="mic-perm-btn" id="micPermGrantBtn">Allow</button>
+    <button class="mic-perm-dismiss" id="micPermDismiss">✕</button>
   </div>
 
   <!-- SELECTION BAR — appears when user selects text on page -->
@@ -829,7 +985,7 @@
   <div class="audio-bar" id="audioBar">
     <div class="rec-dot"></div>
     <span class="rec-timer" id="recTimer">0:00</span>
-    <span style="font-size:11px;color:#888">Recording tab audio…</span>
+    <span id="audioBarLabel" style="font-size:11px;color:#888">Recording tab audio…</span>
     <button class="stop-btn" id="stopAudio">Stop &amp; Transcribe</button>
   </div>
 
@@ -846,7 +1002,7 @@
     <div class="attach-preview" id="attachPreview"></div>
     <div class="chat-input-wrap">
       <button class="attach-btn" id="attachBtn" title="Attach image or file">＋</button>
-      <input type="file" id="attachFileInput" accept="image/*,.pdf,.txt,.md" style="display:none" />
+      <input type="file" id="attachFileInput" accept="image/*,.pdf,.txt,.md" multiple style="display:none" />
       <input class="chat-input" id="titleInput" type="text" placeholder="Ask about this screen…" maxlength="200" />
       <button class="chat-send-btn" id="chatSendBtn">↑</button>
     </div>
@@ -895,6 +1051,31 @@
     <div class="search-results" id="searchResults">
       <p class="search-empty" id="searchEmpty">Type to search notes…</p>
     </div>
+  </div>
+
+  <!-- Full-panel drag-drop overlay -->
+  <div id="dragOverlay" style="
+    display:none; position:fixed; inset:0; z-index:500; pointer-events:none;
+    align-items:center; justify-content:center; flex-direction:column; gap:10px;
+    background: radial-gradient(ellipse at 50% 60%, rgba(124,106,245,0.13) 0%, rgba(1,1,8,0.7) 70%);
+  ">
+    <div style="
+      position:absolute; inset:8px; border-radius:14px;
+      border: 1.5px dashed rgba(124,106,245,0.55);
+      background: rgba(124,106,245,0.04);
+      box-shadow: inset 0 0 40px rgba(124,106,245,0.07), 0 0 30px rgba(124,106,245,0.1);
+    "></div>
+    <!-- corner accents -->
+    <div style="position:absolute;top:14px;left:14px;width:18px;height:18px;border-top:2px solid #7c6af5;border-left:2px solid #7c6af5;border-radius:3px 0 0 0;"></div>
+    <div style="position:absolute;top:14px;right:14px;width:18px;height:18px;border-top:2px solid #7c6af5;border-right:2px solid #7c6af5;border-radius:0 3px 0 0;"></div>
+    <div style="position:absolute;bottom:14px;left:14px;width:18px;height:18px;border-bottom:2px solid #7c6af5;border-left:2px solid #7c6af5;border-radius:0 0 0 3px;"></div>
+    <div style="position:absolute;bottom:14px;right:14px;width:18px;height:18px;border-bottom:2px solid #7c6af5;border-right:2px solid #7c6af5;border-radius:0 0 3px 0;"></div>
+    <span style="font-size:28px;position:relative;filter:drop-shadow(0 0 10px rgba(124,106,245,0.8))">📎</span>
+    <span style="position:relative;font-size:13px;font-weight:700;letter-spacing:0.06em;
+      background:linear-gradient(130deg,#9d8cff,#7c6af5 50%,#5eead4);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;">
+      DROP TO ATTACH
+    </span>
   </div>
 
   <script type="module" src="sidepanel.js"></script>
