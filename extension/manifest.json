@@ -54,7 +54,10 @@
         "built/assets/*",
         "mic-permission.html",
         "mic-permission.js",
-        "vendor/pdf.worker.min.js"
+        "vendor/pdf.worker.min.js",
+        "vendor/pdf.min.js",
+        "pdf-viewer.html",
+        "pdf-viewer.js"
       ],
       "matches": ["<all_urls>"]
     }

@@ -25,13 +25,34 @@ chrome.commands.onCommand.addListener((command) => {
   }
 });
 
+// ── PDF interception ───────────────────────────────────────────────────────
+// Chrome's built-in PDF viewer is a privileged page — content scripts can't
+// inject there and getSelection() is unavailable. When we detect a tab
+// navigating to a .pdf URL (or a response with Content-Type application/pdf),
+// we redirect it to our custom pdf-viewer.html which uses PDF.js + a text
+// layer, so normal DOM selection works and content.js can relay it.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "loading") return;
+  const url = tab.url || changeInfo.url;
+  if (!url) return;
+  // Ignore our own viewer to avoid redirect loop
+  const viewerBase = chrome.runtime.getURL("pdf-viewer.html");
+  if (url.startsWith(viewerBase)) return;
+  // Only intercept plain http/https PDF links (file:// won't have host_permissions)
+  if (!/^https?:\/\//i.test(url)) return;
+  if (!url.toLowerCase().includes(".pdf")) return;
+
+  const viewerUrl = viewerBase + "?url=" + encodeURIComponent(url);
+  chrome.tabs.update(tabId, { url: viewerUrl }).catch(() => {});
+});
+
 // Keep service worker alive so sidepanel messages don't hang.
 // MV3 SWs sleep after ~30s of inactivity; sidepanel pings every 25s.
 // Also relay mic permission results from the helper tab back to the sidepanel.
 let _micPermissionResolvers = [];
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "keepAlive") return;
-  if (msg.type === "micPermissionResult") {
+if (msg.type === "micPermissionResult") {
     _micPermissionResolvers.forEach(fn => fn(msg));
     _micPermissionResolvers = [];
     return;

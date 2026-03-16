@@ -621,7 +621,7 @@ app.delete("/notes/:filename", async (req, res) => {
 
 // --- POST /command — AI natural-language organisation command ---
 app.post("/command", async (req, res) => {
-  const { command } = req.body;
+  const { command, history } = req.body;
   if (!command) return res.status(400).json({ error: "command is required" });
 
   try {
@@ -641,14 +641,31 @@ app.post("/command", async (req, res) => {
     notes.sort((a, b) => b.date.localeCompare(a.date));
 
     const preferences = getSetting("preferences", "");
-    const raw = await processCommand(command, notes, preferences);
+    const raw = await processCommand(command, notes, preferences, history ?? []);
 
     let actions;
     try {
-      const jsonStr = raw.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+      const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
       actions = JSON.parse(jsonStr);
     } catch {
-      return res.json({ success: true, actions: [], message: raw });
+      appendCommandLog("command", command);
+      appendCommandLog("error", `Could not parse AI response: ${raw.slice(0, 200)}`);
+      return res.status(500).json({ error: `AI returned an unreadable response. Try rephrasing your command.` });
+    }
+
+    // If AI needs clarification, return the question immediately without executing anything
+    const clarify = actions.find(a => a.action === "clarify");
+    if (clarify) {
+      appendCommandLog("command", command);
+      appendCommandLog("result", `? ${clarify.question}`);
+      return res.json({ success: true, actions, clarify: clarify.question });
+    }
+
+    const { preview } = req.body;
+
+    // In preview mode, return actions without executing merges — let the UI confirm first
+    if (preview) {
+      return res.json({ success: true, actions, preview: true });
     }
 
     const results = [];
@@ -668,7 +685,7 @@ app.post("/command", async (req, res) => {
           results.push(act.text);
         }
       } catch (e) {
-        results.push(`✗ Failed on ${act.filename}: ${e.message}`);
+        results.push(`✗ Failed on ${act.filename ?? act.filenames?.[0]}: ${e.message}`);
       }
     }
 

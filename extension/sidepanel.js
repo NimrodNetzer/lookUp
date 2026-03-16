@@ -1447,7 +1447,7 @@ async function finishAudio() {
       // Extract frames for visual context, transcribe audio for text context
       const [frames, transcribeResult] = await Promise.all([
         extractVideoFrames(blob),
-        transcribeAndSummarize(blob, selectedMode, userNote),
+        transcribeAndSummarize(blob, selectedMode, userNote, audioChunks),
       ]);
       transcript = transcribeResult.transcript;
       // If we got frames, enrich the result with visual analysis
@@ -1464,7 +1464,7 @@ async function finishAudio() {
         markdown = transcribeResult.markdown;
       }
     } else {
-      ({ transcript, markdown } = await transcribeAndSummarize(blob, selectedMode, userNote));
+      ({ transcript, markdown } = await transcribeAndSummarize(blob, selectedMode, userNote, audioChunks));
     }
 
     const noteTitle = userNote || "Recording";
@@ -1600,8 +1600,8 @@ function showFlashcards(cards, title, mode = "flashcard", filename) {
   const prefix = `fc${++_uid}_`;
   const grid = cards.map((card, i) => `
     <div class="flashcard" id="${prefix}${i}">
-      <div class="flashcard-front">${renderMarkdown(card.front)}</div>
-      <div class="flashcard-back">${renderMarkdown(card.back)}</div>
+      <div class="flashcard-front"><span class="fc-label">Q</span>${renderMarkdown(card.front)}</div>
+      <div class="flashcard-back"><span class="fc-label">A</span>${renderMarkdown(card.back)}</div>
     </div>
   `).join("");
   const dashLink = filename ? `<div class="open-dash-row"><button class="open-dash-btn" data-filename="${escapeHtml(filename)}">↗ View in Dashboard</button></div>` : "";

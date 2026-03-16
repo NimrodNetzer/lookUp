@@ -11,10 +11,33 @@ interface LogEntry {
   text: string;
 }
 
+interface Action {
+  action: string;
+  filename?: string;
+  filenames?: string[];
+  title?: string;
+  course?: string;
+  text?: string;
+}
+
+interface HistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface PendingMerge {
+  command: string;
+  actions: Action[];
+  summary: string;
+}
+
 export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
-  const [input,   setInput]   = useState("");
-  const [log,     setLog]     = useState<LogEntry[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [input,        setInput]        = useState("");
+  const [log,          setLog]          = useState<LogEntry[]>([]);
+  const [loading,      setLoading]      = useState(false);
+  const [pendingMerge, setPendingMerge] = useState<PendingMerge | null>(null);
+  // Conversation history kept in memory for the current clarification thread; cleared after execution
+  const [history,      setHistory]      = useState<HistoryMessage[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -33,6 +56,57 @@ export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
     setLoading(true);
     setLog((prev) => [...prev, { type: "command", text: cmd }]);
 
+    // Build updated history including this message
+    const nextHistory: HistoryMessage[] = [...history, { role: "user", content: cmd }];
+
+    try {
+      // Step 1: preview — parse AI response, don't execute yet
+      const res = await fetch(`${GATEWAY}/command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: cmd, history, preview: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Gateway error");
+
+      // AI needs more info — show question and keep history for follow-up
+      if (data.clarify) {
+        setLog((prev) => [...prev, { type: "result", text: `? ${data.clarify}` }]);
+        setHistory([...nextHistory, { role: "assistant", content: JSON.stringify(data.actions) }]);
+        setLoading(false);
+        return;
+      }
+
+      // Got actionable response — clear clarification thread
+      setHistory([]);
+
+      const actions: Action[] = data.actions ?? [];
+      const merges = actions.filter(a => a.action === "merge");
+      const nonDestructive = actions.filter(a => a.action !== "merge");
+
+      if (merges.length > 0) {
+        // Build a human-readable summary of what will be merged
+        const lines = merges.map(m =>
+          `Merge [${(m.filenames ?? []).join(", ")}] → "${m.title}"`
+        );
+        if (nonDestructive.length > 0) {
+          lines.push(`Also: ${nonDestructive.length} rename/course update(s)`);
+        }
+        setPendingMerge({ command: cmd, actions, summary: lines.join("\n") });
+        setLoading(false);
+        return;
+      }
+
+      // No merges — execute immediately
+      await execute(cmd, actions);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setLog((prev) => [...prev, { type: "error", text: msg }]);
+      setLoading(false);
+    }
+  }
+
+  async function execute(cmd: string, _actions: Action[]) {
     try {
       const res = await fetch(`${GATEWAY}/command`, {
         method: "POST",
@@ -48,7 +122,7 @@ export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
 
       setLog((prev) => [...prev, { type: "result", text: lines.join("\n") }]);
 
-      if (data.actions?.some((a: { action: string }) => a.action !== "message")) {
+      if (data.actions?.some((a: Action) => a.action !== "message")) {
         onRefresh();
       }
     } catch (err: unknown) {
@@ -56,6 +130,20 @@ export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
       setLog((prev) => [...prev, { type: "error", text: msg }]);
     }
     setLoading(false);
+  }
+
+  function confirmMerge() {
+    if (!pendingMerge) return;
+    const { command, actions } = pendingMerge;
+    setPendingMerge(null);
+    setLoading(true);
+    execute(command, actions);
+  }
+
+  function cancelMerge() {
+    setPendingMerge(null);
+    setHistory([]);
+    setLog((prev) => [...prev, { type: "error", text: "Cancelled." }]);
   }
 
   return (
@@ -90,6 +178,28 @@ export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
         </div>
       )}
 
+      {/* Merge confirmation */}
+      {pendingMerge && (
+        <div className="mx-3 my-2 rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-xs">
+          <p className="text-yellow-400 font-semibold mb-1">Confirm merge (cannot be undone)</p>
+          <p className="text-muted/80 whitespace-pre-wrap mb-2">{pendingMerge.summary}</p>
+          <div className="flex gap-2">
+            <button
+              onClick={confirmMerge}
+              className="px-3 py-1 rounded bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30 transition-colors"
+            >
+              Confirm
+            </button>
+            <button
+              onClick={cancelMerge}
+              className="px-3 py-1 rounded bg-border/40 text-muted hover:bg-border/60 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Input */}
       <div className="px-3 py-2">
         <div className="flex items-center gap-1.5 bg-bg border border-border rounded-lg px-3 py-1.5 focus-within:border-accent transition-colors">
@@ -99,13 +209,13 @@ export default function CommandChat({ onRefresh }: { onRefresh: () => void }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-            placeholder='e.g. "merge last 3 notes into Lecture 5"'
-            disabled={loading}
+            placeholder={history.length > 0 ? "Type your answer…" : 'e.g. "merge last 3 notes into Lecture 5"'}
+            disabled={loading || !!pendingMerge}
             className="flex-1 bg-transparent text-xs text-text placeholder:text-muted/50 outline-none min-w-0"
           />
           <button
             onClick={send}
-            disabled={loading || !input.trim()}
+            disabled={loading || !input.trim() || !!pendingMerge}
             className="text-accent hover:text-accent/70 disabled:opacity-30 transition-opacity"
           >
             <Sparkles className="w-3.5 h-3.5" />

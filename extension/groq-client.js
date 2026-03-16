@@ -320,27 +320,62 @@ export async function analyzeText(selectedText, mode = "summary") {
  * mode: "summary" | "explain" | "quiz" | "flashcard"
  * Returns { transcript: string, markdown: string }
  */
-export async function transcribeAndSummarize(audioBlob, mode = "summary", userNote = "") {
-  const key = await getKey();
+// Groq Whisper hard limit is 25 MB — stay safely under it.
+const MAX_WHISPER_BYTES = 20 * 1024 * 1024; // 20 MB
 
-  // Whisper via multipart/form-data — no temp file needed in the browser
+async function transcribeBlob(key, blob, filename = "audio.webm") {
   const form = new FormData();
-  form.append("file", audioBlob, "audio.webm");
+  form.append("file", blob, filename);
   form.append("model", AUDIO_MODEL);
   form.append("response_format", "text");
-
-  const transcribeRes = await fetch(`${GROQ_API}/audio/transcriptions`, {
+  const res = await fetch(`${GROQ_API}/audio/transcriptions`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}` }, // no Content-Type — browser sets boundary automatically
+    headers: { Authorization: `Bearer ${key}` },
     body: form,
   });
-
-  if (!transcribeRes.ok) {
-    const err = await transcribeRes.json().catch(() => ({}));
-    throw new Error(err.error?.message ?? `Transcription error ${transcribeRes.status}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message ?? `Transcription error ${res.status}`);
   }
+  return (await res.text()).trim();
+}
 
-  const transcript = (await transcribeRes.text()).trim();
+// Build valid WebM segment blobs from raw MediaRecorder chunks.
+// The first chunk always contains the WebM init header (EBML + Tracks).
+// Every segment must start with it so ffmpeg/Whisper can decode it.
+function buildSegmentBlobs(chunks, blobType) {
+  if (!chunks || chunks.length === 0) return [];
+  const totalSize = chunks.reduce((s, c) => s + c.size, 0);
+  const numSegments = Math.ceil(totalSize / MAX_WHISPER_BYTES);
+  if (numSegments <= 1) return [new Blob(chunks, { type: blobType })];
+
+  const initChunk = chunks[0];
+  const dataChunks = chunks.slice(1);
+  const perSegment = Math.ceil(dataChunks.length / numSegments);
+  const blobs = [];
+  for (let i = 0; i < dataChunks.length; i += perSegment) {
+    blobs.push(new Blob([initChunk, ...dataChunks.slice(i, i + perSegment)], { type: blobType }));
+  }
+  return blobs;
+}
+
+export async function transcribeAndSummarize(audioBlob, mode = "summary", userNote = "", chunks = null) {
+  const key = await getKey();
+
+  // If the recording is large, split into valid WebM segments and transcribe each.
+  // Otherwise fall back to a single transcription call.
+  let transcript;
+  if (chunks && audioBlob.size > MAX_WHISPER_BYTES) {
+    const blobType = audioBlob.type || "audio/webm";
+    const segments = buildSegmentBlobs(chunks, blobType);
+    const parts = [];
+    for (const seg of segments) {
+      parts.push(await transcribeBlob(key, seg));
+    }
+    transcript = parts.filter(Boolean).join(" ");
+  } else {
+    transcript = await transcribeBlob(key, audioBlob);
+  }
 
   if (!transcript) {
     return { transcript: "", markdown: "No speech detected in the recording." };
@@ -397,7 +432,7 @@ export async function* chatStream(messages) {
  * Process a natural-language organisation command.
  * Returns a JSON string (array of action objects) — same format as gateway.
  */
-export async function processCommand(command, notes, preferences) {
+export async function processCommand(command, notes, preferences, history = []) {
   const key = await getKey();
 
   const list = notes
@@ -405,7 +440,7 @@ export async function processCommand(command, notes, preferences) {
     .map(n => `{"f":"${n.filename}","t":"${n.title}","m":"${n.type ?? n.mode}","c":"${n.course || ""}","d":"${new Date(n.createdAt).toISOString().slice(0, 10)}"}`)
     .join("\n");
 
-  const prompt = `You manage a student's LookUp study notes. Execute the command below by returning a JSON array of actions.
+  const systemPrompt = `You manage a student's LookUp study notes. Execute commands by returning a JSON array of actions.
 
 NOTES (newest first):
 ${list}
@@ -413,13 +448,12 @@ ${list}
 USER PREFERENCES:
 ${preferences || "none"}
 
-COMMAND: "${command}"
-
 ACTION TYPES (return as JSON array, pick what applies):
 {"action":"set_course","filename":"exact_filename.md","course":"Course Name"}
 {"action":"rename","filename":"exact_filename.md","title":"New Title"}
 {"action":"merge","filenames":["file1.md","file2.md"],"title":"Combined Note Title"}
-{"action":"message","text":"plain-English explanation if nothing to do or command is unclear"}
+{"action":"clarify","question":"Ask the user a specific question to resolve ambiguity"}
+{"action":"message","text":"plain-English explanation if nothing to do"}
 
 RULES:
 - Use ONLY exact filenames from the list above
@@ -427,9 +461,14 @@ RULES:
 - For "last N captures" use the N most recent filenames
 - Apply user preferences (e.g. prefix rules) when renaming
 - For merge: include at least 2 filenames; pick a meaningful combined title
-- Return ONLY a valid JSON array, no markdown fences, no extra text
+- If the command is ambiguous (e.g. "merge 2 files" with no names, or a title that matches multiple notes), return a single clarify action with a focused question — do NOT guess
+- Return ONLY a valid JSON array, no markdown fences, no extra text`;
 
-JSON array:`;
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...history,
+    { role: "user", content: command },
+  ];
 
-  return chatCompletion(key, [{ role: "user", content: prompt }], 0.1);
+  return chatCompletion(key, messages, 0.1);
 }
