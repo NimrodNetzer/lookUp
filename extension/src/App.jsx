@@ -70,8 +70,8 @@ function SetupScreen({ onDone }) {
     setLoading(true);
     setError("");
     try {
-      const ok = await verifyApiKey(key.trim());
-      if (!ok) throw new Error("Key verification failed");
+      const result = await verifyApiKey(key.trim());
+      if (!result.ok) throw new Error("Key verification failed");
       await Settings.setApiKey(key.trim());
       onDone();
     } catch {

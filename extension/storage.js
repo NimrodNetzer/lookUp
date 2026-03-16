@@ -126,6 +126,32 @@ export const Settings = {
   },
 };
 
+// ─── Token usage tracking ────────────────────────────────────────────────────
+// Tracks estimated daily token consumption with a midnight reset.
+// Stored as { date: "Mon Jan 01 2024", tokens: 12345 } in chrome.storage.local.
+
+export const TokenUsage = {
+  async get() {
+    const result = await chrome.storage.local.get("tokenUsage");
+    const stored = result.tokenUsage ?? { date: "", tokens: 0 };
+    const today = new Date().toDateString();
+    if (stored.date !== today) return { date: today, tokens: 0 };
+    return stored;
+  },
+
+  async add(count) {
+    const current = await TokenUsage.get();
+    const today = new Date().toDateString();
+    await chrome.storage.local.set({
+      tokenUsage: { date: today, tokens: current.tokens + Math.round(count) },
+    });
+  },
+
+  async reset() {
+    await chrome.storage.local.set({ tokenUsage: { date: new Date().toDateString(), tokens: 0 } });
+  },
+};
+
 // ─── Conversations ───────────────────────────────────────────────────────────
 
 function newId() {
@@ -226,6 +252,7 @@ export const Conversations = {
   async setActive(id) {
     await chrome.storage.local.set({ activeConversationId: id });
   },
+
 };
 
 // ─── Messages ────────────────────────────────────────────────────────────────

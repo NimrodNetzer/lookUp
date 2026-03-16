@@ -10,9 +10,9 @@ const BASE_DIR = process.pkg
   ? path.dirname(process.execPath)
   : path.join(__dirname, "..");
 const DATA_DIR = path.join(BASE_DIR, "data");
-const DB_PATH = path.join(DATA_DIR, "lookup.db");
+const DB_PATH = process.env.TEST_DB_PATH || path.join(DATA_DIR, "lookup.db");
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
+if (DB_PATH !== ":memory:") fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const db = new Database(DB_PATH);
 

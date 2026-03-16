@@ -17,7 +17,7 @@ import { logActivity, getActivity, getStreak, getSetting, setSetting,
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // When running as a pkg exe, paths are relative to the exe; in dev, to the project root.
 const BASE_DIR = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, "..");
-const NOTES_DIR = path.join(BASE_DIR, "notes");
+const NOTES_DIR = process.env.TEST_NOTES_DIR || path.join(BASE_DIR, "notes");
 // When packaged: serve from a real "www" folder next to the exe.
 // pkg's virtual filesystem doesn't work reliably with express.static.
 const STATIC_DIR = process.pkg
@@ -318,6 +318,37 @@ app.get("/notes", async (_req, res) => {
   }
 });
 
+// --- GET /notes/search?q= — full-text search across note content ---
+// MUST be defined before GET /notes/:filename so "search" isn't captured as a filename.
+app.get("/notes/search", async (req, res) => {
+  const q = (req.query.q ?? "").trim().toLowerCase();
+  if (!q) return res.json([]);
+  try {
+    const files = await fs.readdir(NOTES_DIR);
+    const results = [];
+    for (const filename of files.filter((f) => f.endsWith(".md"))) {
+      const content = await fs.readFile(path.join(NOTES_DIR, filename), "utf-8");
+      if (!content.toLowerCase().includes(q)) continue;
+      const title = content.match(/^title:\s*"(.+)"/m)?.[1] ?? filename;
+      const mode  = content.match(/^mode:\s*"(.+)"/m)?.[1]  ?? "summary";
+      const date  = content.match(/^date:\s*"(.+)"/m)?.[1]  ?? "";
+      // Extract a short snippet around the match (from body, not frontmatter)
+      const bodyStart = content.indexOf("---\n\n");
+      const body = bodyStart !== -1 ? content.slice(bodyStart + 5) : content;
+      const lower = body.toLowerCase();
+      const idx = lower.indexOf(q);
+      const snippet = idx !== -1
+        ? body.slice(Math.max(0, idx - 60), idx + 120).replace(/\n/g, " ").trim()
+        : "";
+      results.push({ filename, title, mode, date, snippet });
+    }
+    results.sort((a, b) => b.date.localeCompare(a.date));
+    res.json(results.slice(0, 30));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- GET /notes/:filename ---
 app.get("/notes/:filename", async (req, res) => {
   const { filename } = req.params;
@@ -535,36 +566,6 @@ app.post("/chat/clear", (_req, res) => {
   }
 });
 
-// --- GET /notes/search?q= — full-text search across note content ---
-app.get("/notes/search", async (req, res) => {
-  const q = (req.query.q ?? "").trim().toLowerCase();
-  if (!q) return res.json([]);
-  try {
-    const files = await fs.readdir(NOTES_DIR);
-    const results = [];
-    for (const filename of files.filter((f) => f.endsWith(".md"))) {
-      const content = await fs.readFile(path.join(NOTES_DIR, filename), "utf-8");
-      if (!content.toLowerCase().includes(q)) continue;
-      const title = content.match(/^title:\s*"(.+)"/m)?.[1] ?? filename;
-      const mode  = content.match(/^mode:\s*"(.+)"/m)?.[1]  ?? "summary";
-      const date  = content.match(/^date:\s*"(.+)"/m)?.[1]  ?? "";
-      // Extract a short snippet around the match (from body, not frontmatter)
-      const bodyStart = content.indexOf("---\n\n");
-      const body = bodyStart !== -1 ? content.slice(bodyStart + 5) : content;
-      const lower = body.toLowerCase();
-      const idx = lower.indexOf(q);
-      const snippet = idx !== -1
-        ? body.slice(Math.max(0, idx - 60), idx + 120).replace(/\n/g, " ").trim()
-        : "";
-      results.push({ filename, title, mode, date, snippet });
-    }
-    results.sort((a, b) => b.date.localeCompare(a.date));
-    res.json(results.slice(0, 30));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // --- POST /notes/merge — combine multiple notes into one ---
 app.post("/notes/merge", async (req, res) => {
   const { filenames, title } = req.body;
@@ -621,7 +622,7 @@ app.delete("/notes/:filename", async (req, res) => {
 
 // --- POST /command — AI natural-language organisation command ---
 app.post("/command", async (req, res) => {
-  const { command } = req.body;
+  const { command, history } = req.body;
   if (!command) return res.status(400).json({ error: "command is required" });
 
   try {
@@ -641,14 +642,31 @@ app.post("/command", async (req, res) => {
     notes.sort((a, b) => b.date.localeCompare(a.date));
 
     const preferences = getSetting("preferences", "");
-    const raw = await processCommand(command, notes, preferences);
+    const raw = await processCommand(command, notes, preferences, history ?? []);
 
     let actions;
     try {
-      const jsonStr = raw.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+      const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
       actions = JSON.parse(jsonStr);
     } catch {
-      return res.json({ success: true, actions: [], message: raw });
+      appendCommandLog("command", command);
+      appendCommandLog("error", `Could not parse AI response: ${raw.slice(0, 200)}`);
+      return res.status(500).json({ error: `AI returned an unreadable response. Try rephrasing your command.` });
+    }
+
+    // If AI needs clarification, return the question immediately without executing anything
+    const clarify = actions.find(a => a.action === "clarify");
+    if (clarify) {
+      appendCommandLog("command", command);
+      appendCommandLog("result", `? ${clarify.question}`);
+      return res.json({ success: true, actions, clarify: clarify.question });
+    }
+
+    const { preview } = req.body;
+
+    // In preview mode, return actions without executing merges — let the UI confirm first
+    if (preview) {
+      return res.json({ success: true, actions, preview: true });
     }
 
     const results = [];
@@ -668,7 +686,7 @@ app.post("/command", async (req, res) => {
           results.push(act.text);
         }
       } catch (e) {
-        results.push(`✗ Failed on ${act.filename}: ${e.message}`);
+        results.push(`✗ Failed on ${act.filename ?? act.filenames?.[0]}: ${e.message}`);
       }
     }
 
@@ -794,11 +812,15 @@ app.get("/note/*", (_req, res) => {
   res.sendFile(path.join(STATIC_DIR, "note/_placeholder.html"));
 });
 
-app.listen(PORT, "127.0.0.1", () => {
-  const url = `http://localhost:${PORT}`;
-  console.log(`LookUp Gateway running at ${url}`);
-  // Auto-open the dashboard in the default browser.
-  if (process.platform === "win32") exec(`start ${url}`);
-  else if (process.platform === "darwin") exec(`open ${url}`);
-  else exec(`xdg-open ${url}`);
-});
+export { app };
+
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, "127.0.0.1", () => {
+    const url = `http://localhost:${PORT}`;
+    console.log(`LookUp Gateway running at ${url}`);
+    // Auto-open the dashboard in the default browser.
+    if (process.platform === "win32") exec(`start ${url}`);
+    else if (process.platform === "darwin") exec(`open ${url}`);
+    else exec(`xdg-open ${url}`);
+  });
+}

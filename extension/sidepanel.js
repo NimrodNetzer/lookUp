@@ -1,11 +1,10 @@
-import { Settings, Conversations, Messages, Notes } from "./storage.js";
-import { analyzeScreenshot, analyzeMulti, analyzeText, transcribeAndSummarize, chat, verifyApiKey, analyzeWithQuestion, setResponseLanguage } from "./groq-client.js";
+import { Settings, Conversations, Messages, Notes, TokenUsage } from "./storage.js";
+import { analyzeScreenshot, analyzeMulti, analyzeText, transcribeAndSummarize, chatStream, verifyApiKey, analyzeWithQuestionStream, setResponseLanguage } from "./groq-client.js";
 
 // --- DOM refs ---
 const convTabs         = document.getElementById("convTabs");
 const newConvBtn       = document.getElementById("newConvBtn");
 const captureBtn       = document.getElementById("captureBtn");
-const sessionBtn       = document.getElementById("sessionBtn");
 const sessionBar       = document.getElementById("sessionBar");
 const sessionCount     = document.getElementById("sessionCount");
 const sessionFinish    = document.getElementById("sessionFinish");
@@ -23,7 +22,6 @@ const dropdownItems    = document.querySelectorAll(".dropdown-item");
 // (dashboardBtn and searchBtn now live inside the more-dropdown — handled below)
 const searchInput      = document.getElementById("searchInput");
 const searchResults    = document.getElementById("searchResults");
-const searchEmpty      = document.getElementById("searchEmpty");
 const selectionBar     = document.getElementById("selectionBar");
 const selectionPreview = document.getElementById("selectionPreview");
 const askBtn           = document.getElementById("askBtn");
@@ -35,9 +33,18 @@ const avOptAudio       = document.getElementById("avOptAudio");
 const avOptMic         = document.getElementById("avOptMic");
 const moreBtn          = document.getElementById("moreBtn");
 const moreDropdown     = document.getElementById("moreDropdown");
+const winSubMenu       = document.getElementById("winSubMenu");
+const winCurrentLabel  = document.getElementById("winCurrentLabel");
+const moreWinItem      = document.getElementById("moreWinItem");
+const noteCtxMenu      = document.getElementById("noteCtxMenu");
+const ctxOpenSide      = document.getElementById("ctxOpenSide");
+const ctxOpenChat      = document.getElementById("ctxOpenChat");
+const ctxRename        = document.getElementById("ctxRename");
+const ctxDelete        = document.getElementById("ctxDelete");
 
 const moreDashboard    = document.getElementById("moreDashboard");
 const moreChatBtn      = document.getElementById("moreChatBtn");
+const moreMultiBtn     = document.getElementById("moreMultiBtn");
 const langOptEN        = document.getElementById("langOptEN");
 const langOptHE        = document.getElementById("langOptHE");
 const micPermBanner    = document.getElementById("micPermBanner");
@@ -50,6 +57,7 @@ let selectedMode        = "summary";
 let selectedText        = "";
 let sessionFrames       = [];
 let inSession           = false;
+let targetWindowId      = null; // null = sidepanel's own window (default)
 let mediaRecorder       = null;
 let audioChunks         = [];
 let timerInterval       = null;
@@ -62,10 +70,14 @@ const SPINNER_ID = "inlineSpinner";
 // Attached files state — supports multiple images / files
 let attachedFiles = []; // [{ base64, mimeType, name, isImage }, ...]
 
+// Screenshot cache — reuse within 20s for follow-up screen references to save image tokens
+let _cachedScreenshot = null;
+let _cacheTs = 0;
+const SCREENSHOT_CACHE_TTL = 20_000;
+
 // ── Tab drag state ────────────────────────────────────────────────────────────
 let dragConvId     = null;
 let mergeTimer     = null;
-let mergeTargetId  = null;
 
 function clearDropIndicators() {
   convTabs.querySelectorAll(".tab-drop-before,.tab-drop-after,.tab-drop-merge")
@@ -73,7 +85,6 @@ function clearDropIndicators() {
 }
 function clearMergeTimer() {
   if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = null; }
-  mergeTargetId = null;
 }
 
 // ── Tab bar scroll arrows ─────────────────────────────────────────────────────
@@ -108,20 +119,59 @@ function applyLang() {
 }
 
 // ── More-options dropdown ─────────────────────────────────────────────────────
+const DAILY_TOKEN_LIMIT = 500_000;
+
+async function refreshUsageDisplay() {
+  const usageCount   = document.getElementById("usageCount");
+  const usageBarFill = document.getElementById("usageBarFill");
+  const usageUpgrade = document.getElementById("usageUpgrade");
+  const usageResetHint = document.getElementById("usageResetHint");
+  if (!usageCount) return;
+
+  const { tokens } = await TokenUsage.get();
+  const pct = Math.min(tokens / DAILY_TOKEN_LIMIT, 1);
+
+  usageCount.textContent = tokens >= 1000
+    ? `${(tokens / 1000).toFixed(1)}k / 500k`
+    : `${tokens} / 500,000`;
+
+  usageBarFill.style.width = (pct * 100).toFixed(1) + "%";
+  usageBarFill.classList.toggle("warn", pct >= 0.7 && pct < 0.9);
+  usageBarFill.classList.toggle("crit", pct >= 0.9);
+
+  usageUpgrade.style.display = pct >= 0.85 ? "block" : "none";
+
+  // Show when the counter resets (midnight local time)
+  const now = new Date();
+  const msUntilMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
+  const hh = Math.floor(msUntilMidnight / 3600000);
+  const mm = Math.floor((msUntilMidnight % 3600000) / 60000);
+  usageResetHint.textContent = `Resets in ${hh}h ${mm}m`;
+}
+
 moreBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   const open = moreDropdown.classList.toggle("open");
   moreBtn.classList.toggle("open", open);
+  if (open) { refreshWindowPicker(); refreshUsageDisplay(); }
 });
 document.addEventListener("click", () => {
   moreDropdown.classList.remove("open");
   moreBtn.classList.remove("open");
+  winSubMenu.classList.remove("open");
+  moreWinItem.classList.remove("expanded");
   // Clear inline search when dropdown closes
   searchInput.value = "";
   renderSearchResults([]);
 });
 moreDropdown.addEventListener("click", (e) => e.stopPropagation());
 document.addEventListener("keydown", (e) => {
+  // Shift+S — trigger capture (only when input is not focused)
+  if (e.shiftKey && e.key === "S" && !captureBtn.disabled && !mediaRecorder &&
+      document.activeElement !== titleInput) {
+    e.preventDefault();
+    captureBtn.click();
+  }
   if (e.key === "Escape" && moreDropdown.classList.contains("open")) {
     moreDropdown.classList.remove("open");
     moreBtn.classList.remove("open");
@@ -192,13 +242,28 @@ function renderSearchResults(notes, q = "") {
         <div class="search-result-title">${escapeHtml(note.title ?? note.filename)}</div>
         <div class="search-result-meta">${date ? new Date(date).toLocaleDateString() : ""}</div>
       </div>
-      <button class="search-result-open" data-filename="${escapeHtml(note.filename)}">↗ Open</button>
     `;
-    item.querySelector(".search-result-open").addEventListener("click", (e) => {
-      e.stopPropagation();
-      openNoteInDashboard(note.filename);
+    // Left-click: open in sidepanel
+    item.addEventListener("click", () => openNoteInSidepanel(note));
+    // Right-click: context menu
+    item.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      showNoteCtxMenu(e.clientX, e.clientY, note);
     });
     searchResults.appendChild(item);
+  }
+}
+
+async function openNoteInSidepanel(note) {
+  const full = await Notes.get(note.filename);
+  if (!full) return;
+  moreDropdown.classList.remove("open");
+  moreBtn.classList.remove("open");
+  const cards = full.cards ?? (() => { try { return JSON.parse(full.content); } catch { return null; } })();
+  if (Array.isArray(cards) && cards[0]?.front !== undefined) {
+    showFlashcards(cards, full.title, full.mode);
+  } else {
+    showResult(full.content, full.title, full.mode);
   }
 }
 
@@ -210,6 +275,49 @@ async function openNoteInDashboard(filename) {
   searchInput.value = "";
   renderSearchResults([]);
 }
+
+// ── Note context menu ────────────────────────────────────────────────────────
+let _ctxNote = null;
+
+function showNoteCtxMenu(x, y, note) {
+  _ctxNote = note;
+  noteCtxMenu.style.display = "block";
+  // Keep within viewport
+  const menuW = 170, menuH = 130;
+  noteCtxMenu.style.left = Math.min(x, window.innerWidth  - menuW) + "px";
+  noteCtxMenu.style.top  = Math.min(y, window.innerHeight - menuH) + "px";
+}
+
+function hideNoteCtxMenu() {
+  noteCtxMenu.style.display = "none";
+  _ctxNote = null;
+}
+
+ctxOpenSide.addEventListener("click", () => { if (_ctxNote) openNoteInSidepanel(_ctxNote); hideNoteCtxMenu(); });
+ctxOpenChat.addEventListener("click", () => { if (_ctxNote) openNoteInDashboard(_ctxNote.filename); hideNoteCtxMenu(); });
+
+ctxRename.addEventListener("click", async () => {
+  if (!_ctxNote) return;
+  const note = _ctxNote;
+  hideNoteCtxMenu();
+  const newTitle = prompt("Rename note:", note.title ?? note.filename);
+  if (!newTitle || newTitle === note.title) return;
+  await Notes.updateMeta(note.filename, { title: newTitle });
+  // Refresh results
+  searchInput.dispatchEvent(new Event("input"));
+});
+
+ctxDelete.addEventListener("click", async () => {
+  if (!_ctxNote) return;
+  const note = _ctxNote;
+  hideNoteCtxMenu();
+  if (!confirm(`Delete "${note.title ?? note.filename}"?`)) return;
+  await Notes.delete(note.filename);
+  searchInput.dispatchEvent(new Event("input"));
+});
+
+document.addEventListener("click",       hideNoteCtxMenu);
+document.addEventListener("contextmenu", (e) => { if (!e.target.closest(".search-result-item")) hideNoteCtxMenu(); });
 
 // ── Mode dropdown ────────────────────────────────────────────────────────────
 modeTrigger.addEventListener("click", (e) => {
@@ -230,6 +338,7 @@ dropdownItems.forEach((item) => {
     if (mediaRecorder) return;
 
     selectedMode = item.dataset.mode;
+    chrome.storage.local.set({ savedMode: selectedMode });
 
     modeTrigger.querySelector(".mode-icon").textContent = item.dataset.icon;
     modeLabel.textContent = item.querySelector(".d-name").textContent;
@@ -242,7 +351,6 @@ dropdownItems.forEach((item) => {
     modeTrigger.classList.remove("open");
 
     resetCaptureBtn();
-    sessionBtn.classList.toggle("hidden", selectedMode === "audio" || selectedMode === "video");
     avToggleRow.classList.toggle("active", selectedMode === "audio");
     updateInputPlaceholder();
   });
@@ -306,10 +414,46 @@ async function saveNote({ title, mode, markdown, cards = null }) {
   return { filename, title: title ?? mode };
 }
 
+// ── Screen-reference detection ───────────────────────────────────────────────
+// Returns true if the message is likely asking about the current screen.
+function isScreenReference(msg) {
+  if (!msg) return false;
+  const m = msg.toLowerCase();
+  // Explicit screen references
+  if (/\b(screen|screenshot|page|slide|diagram|image|picture|photo|chart|graph|formula|equation|table|figure|shown|display|visible|here|this)\b/.test(m)) return true;
+  // Short vague questions with no named subject likely refer to what's on screen
+  // e.g. "what is this?", "explain this", "what does it mean?"
+  if (/\bthis\b/.test(m)) return true;
+  // Hebrew equivalents
+  if (/\b(מסך|תמונה|שקף|דיאגרמה|נוסחה|טבלה|כאן|זה|הנוכחי)\b/.test(m)) return true;
+  return false;
+}
+
 // ── Shared chat send logic ────────────────────────────────────────────────────
 async function sendChatMessage() {
   const message = titleInput.value.trim();
   if (!message && attachedFiles.length === 0) { captureBtn.click(); return; }
+
+  const hasUserImages = attachedFiles.some(f => f.isImage);
+  const hasHistory    = (await Messages.listByConversation(activeConversationId)).length > 0;
+  const needsScreen   = !hasUserImages && (
+    !hasHistory ||                      // first message → always capture
+    !message ||                         // no text → capture
+    isScreenReference(message)          // follow-up but references the screen
+  );
+
+  // Capture screenshot NOW — must happen before any other await to preserve
+  // the user-gesture context that authorises captureVisibleTab.
+  let earlyScreenshot = null;
+  if (needsScreen) {
+    const cacheAge = Date.now() - _cacheTs;
+    if (hasHistory && message && isScreenReference(message) && _cachedScreenshot && cacheAge < SCREENSHOT_CACHE_TTL) {
+      earlyScreenshot = _cachedScreenshot; // screen likely unchanged — reuse to save tokens
+    } else {
+      showSpinner("Capturing screen…");
+      try { earlyScreenshot = await captureTab(); } catch { /* permission denied or chrome:// page — handled below */ }
+    }
+  }
 
   titleInput.disabled = true;
   chatSendBtn.disabled = true;
@@ -350,32 +494,39 @@ async function sendChatMessage() {
       effectiveMessage = (effectiveMessage ? effectiveMessage + fileBlocks : fileBlocks.trimStart());
     }
 
-    // Build history messages for multi-turn context
-    const historyMsgs = history.map(m => ({ role: m.role, content: m.content }));
+    // If the user had text selected on the page and typed a question, inject the
+    // selection as context so the AI answers in relation to that specific text.
+    const selectionContext = selectedText;
+    if (selectionContext && effectiveMessage) {
+      effectiveMessage = `[Selected text]\n${selectionContext}\n\n[Question]\n${effectiveMessage}`;
+      clearSelection();
+    }
+
+    // Build history messages for multi-turn context — cap at last 6 to avoid runaway token growth
+    const HISTORY_LIMIT = 6;
+    const historyMsgs = history
+      .slice(-HISTORY_LIMIT)
+      .map(m => ({ role: m.role, content: m.content }));
 
     if (imageFiles.length > 0) {
       // One or more images — vision model, include prior text history as system context
       const question = effectiveMessage || "Describe and analyze these images.";
-      reply = await analyzeWithQuestion(
-        imageFiles.map(f => ({ base64: f.base64, mimeType: f.mimeType })),
-        null,
-        historyMsgs.length > 0
-          ? `[Prior conversation context]\n${historyMsgs.map(m => `${m.role}: ${m.content}`).join("\n")}\n\n[User]\n${question}`
-          : question
-      );
+      const fullQuestion = historyMsgs.length > 0
+        ? `[Prior conversation context]\n${historyMsgs.map(m => `${m.role}: ${m.content}`).join("\n")}\n\n[User]\n${question}`
+        : question;
+      reply = await streamIntoCard(analyzeWithQuestionStream(
+        imageFiles.map(f => ({ base64: f.base64, mimeType: f.mimeType })), null, fullQuestion
+      ));
     } else if (effectiveMessage) {
-      // Text files or plain message — text-only path (with optional tab screenshot)
-      try {
-        const { base64, mimeType } = await captureTab();
-        reply = await analyzeWithQuestion(base64, mimeType, effectiveMessage);
-      } catch {
-        const msgs = [...historyMsgs, { role: "user", content: effectiveMessage }];
-        reply = await chat(msgs);
+      if (earlyScreenshot) {
+        reply = await streamIntoCard(analyzeWithQuestionStream(earlyScreenshot.base64, earlyScreenshot.mimeType, effectiveMessage));
+      } else {
+        reply = await streamIntoCard(chatStream([...historyMsgs, { role: "user", content: effectiveMessage }]));
       }
     } else {
       // No message and no files — fall back to screenshot
-      const { base64, mimeType } = await captureTab();
-      reply = await analyzeWithQuestion(base64, mimeType, "Describe and analyze this.");
+      if (!earlyScreenshot) throw new Error("Could not capture screen. Try navigating to a regular web page first.");
+      reply = await streamIntoCard(analyzeWithQuestionStream(earlyScreenshot.base64, earlyScreenshot.mimeType, "Describe and analyze this."));
     }
 
     // Save effectiveMessage so file contents are preserved in history for follow-ups
@@ -384,18 +535,18 @@ async function sendChatMessage() {
 
     if (history.length === 0) {
       // Use typed message for title; fall back to attached filenames
-      const title = message.trim() ||
-        localFiles.map(f => f.name).join(", ");
+      const title = message.trim() || localFiles.map(f => f.name).join(", ");
       await Conversations.rename(activeConversationId, title.slice(0, 60));
     }
 
-    const isQuiz = reply.includes("**Answer:**");
-    appendCard(`
-      <div class="result-card">
-        ${isQuiz ? renderQuiz(reply) : `<div class="md-body" dir="auto">${renderMarkdown(reply)}</div>`}
-      </div>`,
-      isQuiz ? () => {
-        resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
+    // If the streamed response is quiz-formatted, re-render it properly
+    if (reply.includes("**Answer:**")) {
+      const cards = resultArea.querySelectorAll(".result-card");
+      const lastCard = cards[cards.length - 1];
+      const mdBody = lastCard?.querySelector(".md-body");
+      if (mdBody) {
+        mdBody.outerHTML = renderQuiz(reply);
+        lastCard.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
           btn.dataset.bound = "1";
           btn.addEventListener("click", () => {
             const el = document.getElementById(btn.dataset.answerId);
@@ -405,8 +556,9 @@ async function sendChatMessage() {
             btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
           });
         });
-      } : null
-    );
+      }
+    }
+
     loadConversations();
   } catch (err) { showError(err.message); }
   titleInput.disabled = false;
@@ -645,9 +797,35 @@ setupSaveBtn.addEventListener("click", async () => {
   await loadActiveConversation();
 });
 
+// ── Mode persistence ─────────────────────────────────────────────────────────
+function applyModeUI(mode) {
+  const item = [...dropdownItems].find(d => d.dataset.mode === mode);
+  if (!item) return;
+  selectedMode = mode;
+  modeTrigger.querySelector(".mode-icon").textContent = item.dataset.icon;
+  modeLabel.textContent = item.querySelector(".d-name").textContent;
+  modeTrigger.style.setProperty("--mode-color", item.dataset.color);
+  dropdownItems.forEach(d => d.classList.remove("active"));
+  item.classList.add("active");
+  avToggleRow.classList.toggle("active", selectedMode === "audio");
+  updateInputPlaceholder();
+}
+
+async function initMode() {
+  const data = await chrome.storage.local.get(["savedMode", "savedAudioSrc"]).catch(() => ({}));
+  if (data.savedMode) applyModeUI(data.savedMode);
+  if (data.savedAudioSrc === "mic") {
+    avOptMic.classList.add("active");
+    avOptAudio.classList.remove("active");
+    resetCaptureBtn();
+  }
+}
+
+
 // Show overlay if not configured, otherwise boot normally
 async function initSetup() {
   await initLang();
+  await initMode();
   const configured = await Settings.isConfigured();
   if (configured) {
     setupOverlay.classList.add("hidden");
@@ -712,7 +890,6 @@ function renderConvTabs() {
       } else if (rel > 0.7) {
         tab.classList.add("tab-drop-after");
       } else {
-        mergeTargetId = conv.id;
         mergeTimer = setTimeout(() => {
           clearDropIndicators();
           convTabs.querySelector(`.conv-tab[data-id="${conv.id}"]`)?.classList.add("tab-drop-merge");
@@ -927,7 +1104,7 @@ function renderAllMessages(messages) {
     if (msg.role === "user") {
       const el = document.createElement("div");
       el.className = "msg-user";
-      el.textContent = msg.content;
+      el.innerHTML = `<div>${escapeHtml(msg.content)}</div>`;
       resultArea.appendChild(el);
     } else if (msg.role === "assistant") {
       let cards = null;
@@ -975,7 +1152,10 @@ async function loadActiveConversation() {
     activeConversationId = conv.id;
     await loadConversations();
     const messages = await Messages.listByConversation(conv.id);
-    if (messages.length > 0) renderAllMessages(messages);
+    if (messages.length > 0) {
+      renderAllMessages(messages);
+      resultArea.scrollTop = resultArea.scrollHeight;
+    }
   } catch (err) { console.error(err); }
 }
 
@@ -998,12 +1178,97 @@ function sendMessageSafe(msg) {
 }
 
 // ── Tab capture helper ──────────────────────────────────────────────────────
+// Uses null windowId (= current window) to avoid a tabs.query round-trip,
+// which would burn the user-gesture context before captureVisibleTab is called.
 async function captureTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.windowId) throw new Error("No active tab found.");
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
-  return { base64: dataUrl.replace(/^data:image\/png;base64,/, ""), mimeType: "image/png" };
+  const dataUrl = await chrome.tabs.captureVisibleTab(targetWindowId, { format: "jpeg", quality: 85 });
+  // Downscale to max 960px wide — cuts image tokens ~75% with no visible quality loss for AI
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX_W = 960;
+      const scale = img.width > MAX_W ? MAX_W / img.width : 1;
+      const w = Math.round(img.width  * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const resized = canvas.toDataURL("image/jpeg", 0.85);
+      const result = { base64: resized.replace(/^data:image\/jpeg;base64,/, ""), mimeType: "image/jpeg" };
+      _cachedScreenshot = result;
+      _cacheTs = Date.now();
+      resolve(result);
+    };
+    img.src = dataUrl;
+  });
 }
+
+// ── Window picker ────────────────────────────────────────────────────────────
+// Shows a pill per Chrome window when 2+ are open; lets the user pick which
+// window captureTab() should capture.
+
+let _ownWindowId = null;
+chrome.windows.getCurrent({}, w => { _ownWindowId = w.id; targetWindowId = w.id; });
+
+async function refreshWindowPicker() {
+  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
+  if (windows.length < 2) {
+    moreWinItem.classList.add("hidden");
+    winSubMenu.classList.remove("open");
+    targetWindowId = _ownWindowId;
+    return;
+  }
+  moreWinItem.classList.remove("hidden");
+
+  // Update sub-menu entries
+  winSubMenu.innerHTML = "";
+  windows.forEach((win, idx) => {
+    const activeTab = win.tabs?.find(t => t.active);
+    const label = activeTab?.title?.replace(/\s*[-|–]\s*(Google Chrome|Chrome).*$/, "").trim()
+      || `Window ${idx + 1}`;
+    const isOwn = win.id === _ownWindowId;
+    const isSelected = win.id === targetWindowId;
+
+    const entry = document.createElement("div");
+    entry.className = "win-entry" + (isSelected ? " selected" : "");
+    entry.title = activeTab?.title || label;
+    entry.innerHTML = `<span class="win-entry-icon">${isOwn ? "📌" : "🖥️"}</span><span style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(label)}</span>${isSelected ? '<span class="win-entry-check">✓</span>' : ""}`;
+    entry.addEventListener("click", (e) => {
+      e.stopPropagation();
+      targetWindowId = win.id;
+      winCurrentLabel.textContent = label.length > 22 ? label.slice(0, 20) + "…" : label;
+      winSubMenu.querySelectorAll(".win-entry").forEach(el => {
+        el.classList.remove("selected");
+        el.querySelector(".win-entry-check")?.remove();
+      });
+      entry.classList.add("selected");
+      const check = document.createElement("span");
+      check.className = "win-entry-check"; check.textContent = "✓";
+      entry.appendChild(check);
+      // Close sub-menu after selection
+      winSubMenu.classList.remove("open");
+      moreWinItem.classList.remove("expanded");
+    });
+    winSubMenu.appendChild(entry);
+
+    // Sync the header label with current selection
+    if (isSelected) {
+      winCurrentLabel.textContent = label.length > 22 ? label.slice(0, 20) + "…" : label;
+    }
+  });
+}
+
+// Toggle sub-menu on click
+moreWinItem.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = winSubMenu.classList.toggle("open");
+  moreWinItem.classList.toggle("expanded", open);
+});
+
+// Refresh on open and whenever windows change
+refreshWindowPicker();
+chrome.windows.onCreated.addListener(refreshWindowPicker);
+chrome.windows.onRemoved.addListener(refreshWindowPicker);
 
 // ── Main capture button ─────────────────────────────────────────────────────
 addPageBtn.addEventListener("click", async () => {
@@ -1019,21 +1284,24 @@ addPageBtn.addEventListener("click", async () => {
 });
 
 captureBtn.addEventListener("click", async () => {
-  if (selectedMode === "video") { startAudioCapture(true); return; }
   if (selectedMode === "audio") {
     const useMic = avOptMic.classList.contains("active");
     if (useMic) { startMicCapture(); return; }
-    startAudioCapture(false); return;
+    startAudioCapture(); return;
   }
+
+  // In multi-page session, Capture adds a frame instead of analyzing immediately
+  if (inSession) { addPageBtn.click(); return; }
 
   captureBtn.disabled = true;
   showSpinner("Capturing screen…");
 
   try {
     const { base64, mimeType } = await captureTab();
-    showSpinner("Analyzing…");
+    showSpinner();
 
     const raw = await analyzeScreenshot(base64, mimeType, selectedMode);
+    refreshUsageDisplay();
     const noteTitle = titleInput.value.trim() || selectedMode;
 
     let markdown = raw;
@@ -1055,32 +1323,49 @@ captureBtn.addEventListener("click", async () => {
     await Messages.append(activeConversationId, "user", `📸 Screenshot (${selectedMode})`);
     await Messages.append(activeConversationId, "assistant", selectedMode === "flashcard" ? JSON.stringify(cards) : markdown);
 
+    // Auto-rename tab on first capture — use AI topic if found, else mode name
+    const history = await Messages.listByConversation(activeConversationId);
+    if (history.length <= 2) {
+      const tabTitle = extractTopic(markdown, noteTitle);
+      await Conversations.rename(activeConversationId, tabTitle.slice(0, 60));
+      loadConversations();
+    }
+
     if (cards) {
-      showFlashcards(cards, saved.title, selectedMode, saved.filename);
+      showFlashcards(cards, saved.title, selectedMode);
     } else {
-      showResult(markdown, saved.title, selectedMode, saved.filename);
+      showResult(markdown, saved.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
   captureBtn.disabled = false;
 });
 
 // ── Text selection (from content script) ───────────────────────────────────
+const DEFAULT_PLACEHOLDER = "Ask about this screen…";
+
+function setSelectionActive(text) {
+  selectedText = text;
+  selectionPreview.textContent = text.length > 140 ? text.slice(0, 140) + "…" : text;
+  selectionBar.classList.add("active");
+  titleInput.placeholder = "Ask a question about the selection…";
+}
+
+function clearSelection() {
+  selectedText = "";
+  selectionBar.classList.remove("active");
+  titleInput.placeholder = DEFAULT_PLACEHOLDER;
+}
+
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type !== "textSelection") return;
   if (msg.text && msg.text.length >= 3) {
-    selectedText = msg.text;
-    selectionPreview.textContent = msg.text.length > 140 ? msg.text.slice(0, 140) + "…" : msg.text;
-    selectionBar.classList.add("active");
+    setSelectionActive(msg.text);
   } else {
-    selectedText = "";
-    selectionBar.classList.remove("active");
+    clearSelection();
   }
 });
 
-selectionDismiss.addEventListener("click", () => {
-  selectedText = "";
-  selectionBar.classList.remove("active");
-});
+selectionDismiss.addEventListener("click", clearSelection);
 
 askBtn.addEventListener("click", async () => {
   if (!selectedText) return;
@@ -1088,7 +1373,10 @@ askBtn.addEventListener("click", async () => {
   showSpinner("Analyzing selected text…");
 
   try {
-    const raw = await analyzeText(selectedText, selectedMode);
+    const capturedText = selectedText;
+    clearSelection();
+    const raw = await analyzeText(capturedText, selectedMode);
+    refreshUsageDisplay();
     const noteTitle = titleInput.value.trim() || "Selected text";
 
     let markdown = raw;
@@ -1110,16 +1398,18 @@ askBtn.addEventListener("click", async () => {
     await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : markdown);
 
     if (cards) {
-      showFlashcards(cards, saved.title, selectedMode, saved.filename);
+      showFlashcards(cards, saved.title, selectedMode);
     } else {
-      showResult(markdown, saved.title, selectedMode, saved.filename);
+      showResult(markdown, saved.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
   askBtn.disabled = false;
 });
 
-// ── Session ─────────────────────────────────────────────────────────────────
-sessionBtn.addEventListener("click", () => {
+// ── Session (now triggered from more-dropdown) ───────────────────────────────
+moreMultiBtn.addEventListener("click", () => {
+  moreDropdown.classList.remove("open");
+  moreBtn.classList.remove("open");
   inSession = true;
   sessionFrames = [];
   sessionBar.classList.add("active");
@@ -1147,6 +1437,7 @@ sessionFinish.addEventListener("click", async () => {
 
   try {
     const raw = await analyzeMulti(sessionFrames, selectedMode);
+    refreshUsageDisplay();
     const noteTitle = titleInput.value.trim() || `Multi (${sessionFrames.length} pages)`;
 
     let markdown = raw;
@@ -1168,9 +1459,9 @@ sessionFinish.addEventListener("click", async () => {
     await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : markdown);
 
     if (cards) {
-      showFlashcards(cards, saved.title, selectedMode, saved.filename);
+      showFlashcards(cards, saved.title, selectedMode);
     } else {
-      showResult(markdown, saved.title, selectedMode, saved.filename);
+      showResult(markdown, saved.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
 
@@ -1181,7 +1472,7 @@ sessionFinish.addEventListener("click", async () => {
 });
 
 // ── Audio capture ───────────────────────────────────────────────────────────
-async function startAudioCapture(isVideo = false) {
+async function startAudioCapture() {
   captureBtn.disabled = true;
   try {
     const { streamId, error } = await sendMessageSafe({ type: "getTabCaptureStreamId" });
@@ -1189,36 +1480,22 @@ async function startAudioCapture(isVideo = false) {
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } },
-      video: isVideo
-        ? { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } }
-        : false,
+      video: false,
     });
 
-    if (!isVideo) {
-      // route audio to speakers so user can still hear the tab
-      const audioCtx = new AudioContext();
-      const source = audioCtx.createMediaStreamSource(stream);
-      source.connect(audioCtx.destination);
-      mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-      mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); audioCtx.close(); finishAudio(); };
-    } else {
-      // Route audio to speakers so user can still hear the tab while recording video
-      const audioCtxV = new AudioContext();
-      const sourceV = audioCtxV.createMediaStreamSource(stream);
-      sourceV.connect(audioCtxV.destination);
-      const mimeType = MediaRecorder.isTypeSupported("video/webm; codecs=vp9,opus")
-        ? "video/webm; codecs=vp9,opus"
-        : "video/webm";
-      mediaRecorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); audioCtxV.close(); finishAudio(); };
-    }
+    // route audio to speakers so user can still hear the tab
+    const audioCtx = new AudioContext();
+    const source = audioCtx.createMediaStreamSource(stream);
+    source.connect(audioCtx.destination);
+    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); audioCtx.close(); finishAudio(); };
 
     audioChunks = [];
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
     mediaRecorder.start(1000);
 
     recSeconds = 0;
-    document.getElementById("audioBarLabel").textContent = isVideo ? "Recording screen video…" : "Recording tab audio…";
+    document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
     audioBar.classList.add("active");
     timerInterval = setInterval(() => {
       recSeconds++;
@@ -1268,19 +1545,20 @@ micPermDismiss.addEventListener("click", () => micPermBanner.classList.remove("a
 
 // Called from the "Allow" button inside the sidepanel — this IS a user gesture,
 // so Chrome will show the permission dialog here without needing a new tab.
-micPermGrantBtn.addEventListener("click", async () => {
+micPermGrantBtn.addEventListener("click", () => {
   micPermGrantBtn.disabled = true;
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    stream.getTracks().forEach(t => t.stop()); // just granting; actual recording starts on next Record click
-    micPermBanner.classList.remove("active");
-  } catch (err) {
-    micPermGrantBtn.disabled = false;
-    if (err.name === "NotAllowedError") {
+  // getUserMedia is blocked in the sidepanel context; open the dedicated permission page instead
+  chrome.tabs.create({ url: chrome.runtime.getURL("mic-permission.html") });
+  micPermBanner.classList.remove("active");
+});
+
+// Listen for the result from mic-permission.html (sent via chrome.runtime.sendMessage)
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "micPermissionResult") {
+    if (!msg.granted) {
       showError("Microphone blocked. Enable it at: chrome://settings/content/microphone");
-    } else {
-      showError(err.message);
     }
+    micPermGrantBtn.disabled = false;
   }
 });
 
@@ -1333,74 +1611,23 @@ stopAudio.addEventListener("click", () => {
   clearInterval(timerInterval);
   audioBar.classList.remove("active");
   document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
-  showSpinner(selectedMode === "video" ? "Extracting frames & transcribing…" : "Transcribing audio with Whisper…");
+  showSpinner("Transcribing audio with Whisper…");
 });
 
-// Extract up to `count` evenly-spaced JPEG frames from a video blob as base64 strings.
-async function extractVideoFrames(videoBlob, count = 4) {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(videoBlob);
-    const video = document.createElement("video");
-    video.muted = true;
-    video.src = url;
-    video.addEventListener("loadedmetadata", async () => {
-      const duration = video.duration;
-      if (!duration || !isFinite(duration)) { URL.revokeObjectURL(url); resolve([]); return; }
-      const canvas = document.createElement("canvas");
-      canvas.width  = Math.min(video.videoWidth,  1280);
-      canvas.height = Math.round(canvas.width * (video.videoHeight / video.videoWidth));
-      const ctx = canvas.getContext("2d");
-      const frames = [];
-      for (let i = 0; i < count; i++) {
-        video.currentTime = (duration * (i + 0.5)) / count;
-        await new Promise(r => video.addEventListener("seeked", r, { once: true }));
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        frames.push(canvas.toDataURL("image/jpeg", 0.82).replace(/^data:image\/jpeg;base64,/, ""));
-      }
-      URL.revokeObjectURL(url);
-      resolve(frames);
-    });
-    video.addEventListener("error", () => { URL.revokeObjectURL(url); resolve([]); });
-  });
-}
 
 async function finishAudio() {
-  const wasVideo = selectedMode === "video";
   try {
-    const blobType = wasVideo ? "video/webm" : "audio/webm";
-    const blob = new Blob(audioChunks, { type: blobType });
+    const blob = new Blob(audioChunks, { type: "audio/webm" });
     const userNote = titleInput.value.trim();
     if (userNote) titleInput.value = "";
 
-    let markdown, transcript, finalMarkdown, cards;
-    const audioMode = wasVideo ? `video-summary` : `audio-${selectedMode}`;
-
-    if (wasVideo) {
-      // Extract frames for visual context, transcribe audio for text context
-      const [frames, transcribeResult] = await Promise.all([
-        extractVideoFrames(blob),
-        transcribeAndSummarize(blob, selectedMode, userNote),
-      ]);
-      transcript = transcribeResult.transcript;
-      // If we got frames, enrich the result with visual analysis
-      if (frames.length > 0) {
-        const modePrompt = selectedMode === "flashcard"
-          ? `Generate flashcards based on both the visual content of these frames and this transcript.\nReturn ONLY a valid JSON array: [{\"front\":\"...\",\"back\":\"...\"}]\nTranscript: ${transcript}`
-          : `${userNote ? `User instruction: "${userNote}"\n\n` : ""}Analyze these video frames together with the following transcript and produce a ${selectedMode} study note.\n\nTranscript:\n${transcript}`;
-        markdown = await analyzeWithQuestion(
-          frames.map(b => ({ base64: b, mimeType: "image/jpeg" })),
-          "image/jpeg",
-          modePrompt,
-        );
-      } else {
-        markdown = transcribeResult.markdown;
-      }
-    } else {
-      ({ transcript, markdown } = await transcribeAndSummarize(blob, selectedMode, userNote));
-    }
+    const audioMode = `audio-${selectedMode}`;
+    let { markdown } = await transcribeAndSummarize(blob, selectedMode, userNote, audioChunks);
+    refreshUsageDisplay(); // token count updated by chatCompletion inside transcribeAndSummarize
 
     const noteTitle = userNote || "Recording";
-    finalMarkdown = markdown;
+    let finalMarkdown = markdown;
+    let cards;
 
     if (selectedMode === "flashcard") {
       try { cards = JSON.parse(markdown); } catch { cards = [{ front: "Parse error", back: markdown }]; }
@@ -1409,14 +1636,13 @@ async function finishAudio() {
 
     const saved = await saveNote({ title: noteTitle, mode: audioMode, markdown: finalMarkdown, cards });
 
-    const msgIcon = wasVideo ? "🎥" : "🎙️";
-    await Messages.append(activeConversationId, "user", `${msgIcon} Recording (${selectedMode})`);
+    await Messages.append(activeConversationId, "user", `🎙️ Recording (${selectedMode})`);
     await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : finalMarkdown);
 
     if (cards) {
-      showFlashcards(cards, saved.title, audioMode, saved.filename);
+      showFlashcards(cards, saved.title, audioMode);
     } else {
-      showResult(finalMarkdown, saved.title, audioMode, saved.filename);
+      showResult(finalMarkdown, saved.title, audioMode);
     }
   } catch (err) { showError(err.message); }
   mediaRecorder = null;
@@ -1428,23 +1654,24 @@ async function finishAudio() {
 avOptAudio.addEventListener("click", () => {
   avOptAudio.classList.add("active");
   avOptMic.classList.remove("active");
+  chrome.storage.local.set({ savedAudioSrc: "tab" });
   resetCaptureBtn();
 });
 avOptMic.addEventListener("click", () => {
   avOptMic.classList.add("active");
   avOptAudio.classList.remove("active");
+  chrome.storage.local.set({ savedAudioSrc: "mic" });
   resetCaptureBtn();
 });
 
 function resetCaptureBtn() {
-  if (selectedMode === "video") captureBtn.textContent = "🎥 Record";
-  else if (selectedMode === "audio") {
+  if (selectedMode === "audio") {
     captureBtn.textContent = avOptMic.classList.contains("active") ? "🎤 Record" : "🎙️ Record";
   } else captureBtn.textContent = "⚡ Capture";
 }
 
 function updateInputPlaceholder() {
-  if (selectedMode === "audio" || selectedMode === "video") {
+  if (selectedMode === "audio") {
     titleInput.placeholder = "Instructions for AI, e.g. 'explain deeply' or 'just transcribe'…";
   } else {
     titleInput.placeholder = "Ask about this screen…";
@@ -1476,7 +1703,64 @@ function appendCard(htmlStr, afterInsert) {
   resultArea.scrollTop = resultArea.scrollHeight;
 }
 
-function showSpinner(msg) {
+// Stream an async generator into a live-updating result card.
+// Renders markdown incrementally; returns the full accumulated text.
+async function streamIntoCard(generator) {
+  document.getElementById(SPINNER_ID)?.remove();
+  resultArea.querySelector(".placeholder")?.remove();
+
+  const card = document.createElement("div");
+  card.className = "result-card";
+  const body = document.createElement("div");
+  body.className = "md-body";
+  body.setAttribute("dir", "auto");
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "card-copy-btn";
+  copyBtn.title = "Copy to clipboard";
+  copyBtn.textContent = "⎘";
+  card.appendChild(body);
+  card.appendChild(copyBtn);
+  resultArea.appendChild(card);
+  resultArea.scrollTop = resultArea.scrollHeight;
+
+  let full = "";
+  let rafId = null;
+  const scheduleRender = () => {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+      body.innerHTML = renderMarkdown(full);
+      resultArea.scrollTop = resultArea.scrollHeight;
+      rafId = null;
+    });
+  };
+
+  try {
+    for await (const delta of generator) {
+      full += delta;
+      scheduleRender();
+    }
+  } catch (e) {
+    if (rafId) cancelAnimationFrame(rafId);
+    card.remove();
+    throw e;
+  }
+
+  if (rafId) cancelAnimationFrame(rafId);
+  body.innerHTML = renderMarkdown(full);
+  resultArea.scrollTop = resultArea.scrollHeight;
+
+  copyBtn.addEventListener("click", () => {
+    const text = card.innerText.replace(/^⎘\s*/m, "").trim();
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.textContent = "✓";
+      setTimeout(() => { copyBtn.textContent = "⎘"; }, 1500);
+    });
+  });
+
+  return full;
+}
+
+function showSpinner() {
   document.getElementById(SPINNER_ID)?.remove();
   resultArea.querySelector(".placeholder")?.remove();
   const div = document.createElement("div");
@@ -1496,17 +1780,14 @@ function resultHeadline(mode, title) {
   return `<div class="result-headline">${display}${hasTitle ? `: ${escapeHtml(title)}` : ""}</div>`;
 }
 
-function showResult(markdown, title, mode, filename) {
+function showResult(markdown, title, mode) {
   const bodyHtml = (mode === "quiz")
     ? renderQuiz(markdown)
     : `<div class="md-body" dir="auto">${renderMarkdown(markdown)}</div>`;
-  const dashLink = filename ? `<div class="open-dash-row"><button class="open-dash-btn" data-filename="${escapeHtml(filename)}">↗ View in Dashboard</button></div>` : "";
-
   appendCard(`
     <div class="result-card">
       ${resultHeadline(mode, title)}
       ${bodyHtml}
-      ${dashLink}
     </div>`,
     () => {
       if (mode === "quiz") {
@@ -1521,45 +1802,70 @@ function showResult(markdown, title, mode, filename) {
           });
         });
       }
-      if (filename) bindDashBtn(filename);
     }
   );
 }
 
-function showFlashcards(cards, title, mode = "flashcard", filename) {
+function showFlashcards(cards, title, mode = "flashcard") {
   const prefix = `fc${++_uid}_`;
   const grid = cards.map((card, i) => `
     <div class="flashcard" id="${prefix}${i}">
-      <div class="flashcard-front">${renderMarkdown(card.front)}</div>
-      <div class="flashcard-back">${renderMarkdown(card.back)}</div>
+      <div class="flashcard-front"><span class="fc-label">Q</span>${renderMarkdown(card.front)}</div>
+      <div class="flashcard-back"><span class="fc-label">A</span>${renderMarkdown(card.back)}</div>
     </div>
   `).join("");
-  const dashLink = filename ? `<div class="open-dash-row"><button class="open-dash-btn" data-filename="${escapeHtml(filename)}">↗ View in Dashboard</button></div>` : "";
-
   appendCard(`
     <div class="result-card" style="background:transparent;border:none;padding:0">
       ${resultHeadline(mode, title)}
       <div class="flashcard-grid">${grid}</div>
-      ${dashLink}
-    </div>`,
-    () => {
-      if (filename) bindDashBtn(filename);
-    }
+    </div>`
   );
 }
 
 function showError(msg) {
   document.getElementById(SPINNER_ID)?.remove();
-  appendCard(`<div class="error-card"><strong>Error:</strong> ${escapeHtml(msg)}</div>`);
+  const existing = resultArea.querySelector(".error-card:last-child");
+
+  const isQuotaError = msg.toLowerCase().includes("daily token limit") || msg.toLowerCase().includes("quota");
+  const html = isQuotaError
+    ? `<div class="error-card error-card-quota">
+        <div class="quota-icon">🚫</div>
+        <strong>Daily quota reached</strong>
+        <p>Your free Groq quota resets every 24 hours.</p>
+        <a class="quota-upgrade-btn" href="https://console.groq.com" target="_blank">↗ Upgrade at console.groq.com</a>
+      </div>`
+    : `<div class="error-card"><strong>Error:</strong> ${escapeHtml(msg)}</div>`;
+
+  if (existing && !isQuotaError) {
+    existing.innerHTML = `<strong>Error:</strong> ${escapeHtml(msg)}`;
+    return;
+  }
+  appendCard(html);
 }
 
-function bindDashBtn(filename) {
-  resultArea.querySelectorAll(`.open-dash-btn[data-filename="${CSS.escape(filename)}"]:not([data-bound])`).forEach((btn) => {
-    btn.dataset.bound = "1";
-    btn.addEventListener("click", () => {
-      chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
-    });
-  });
+// Extract a meaningful topic title from AI markdown output.
+// Tries: first heading → first bold term → first content line → fallback.
+function extractTopic(markdown, fallback) {
+  const heading = markdown.match(/^#{1,4}\s+(.+)$/m);
+  if (heading) return heading[1].replace(/\*\*/g, "").trim().slice(0, 60);
+
+  const bold = markdown.match(/\*\*([^*\n]{4,50})\*\*/);
+  if (bold) return bold[1].trim();
+
+  const line = markdown.split("\n").find(l => l.replace(/^[*#\-\d.\s>]+/, "").trim().length > 8);
+  if (line) return line.replace(/^[*#\-\d.\s>]+/, "").replace(/\*\*/g, "").trim().slice(0, 60);
+
+  return fallback ?? null;
+}
+
+// Returns 'rtl' if the text (stripped of HTML tags) contains more Hebrew/Arabic
+// characters than Latin ones, otherwise 'auto'. Prevents dir="auto" from
+// wrongly choosing LTR just because a bold English term appears first.
+function bidiDir(html) {
+  const text = html.replace(/<[^>]+>/g, " ");
+  const rtlCount = (text.match(/[\u0590-\u05FF\u0600-\u06FF\uFB1D-\uFB4F]/g) ?? []).length;
+  const ltrCount = (text.match(/[A-Za-z]/g) ?? []).length;
+  return rtlCount > ltrCount ? "rtl" : "auto";
 }
 
 function escapeHtml(str = "") {
@@ -1569,11 +1875,23 @@ function escapeHtml(str = "") {
 }
 
 // ── Quiz renderer — shows questions with hidden answers ──────────────────────
-function renderQuiz(markdown) {
-  let blocks = markdown.split(/\n[ \t]*---[ \t]*\n/);
+// Answer marker: handles English "**Answer:**" and Hebrew "**תשובה:**" (model translates when lang=he)
+// Matches full bold answer label: **Answer:** / **Answer**: / **תשובה:** etc.
+// Consumes closing ** so they don't bleed into the answer text.
+const QUIZ_ANSWER_RE = /\*\*(?:Answer|תשובה)[^*\n]*\*\*[:\s]*/i;
 
-  if (blocks.length <= 1 && (markdown.match(/\*\*Answer:\*\*/g) ?? []).length > 1) {
-    blocks = markdown.split(/\n\n(?=\*\*Q\d)/);
+function renderQuiz(markdown) {
+  // Strategy 1: explicit --- separators
+  let blocks = markdown.split(/\n[ \t]*---[ \t]*\n/).map(b => b.trim()).filter(Boolean);
+
+  // Strategy 2: split before any **Q{n} marker (single or double newline)
+  if (blocks.length <= 1) {
+    blocks = markdown.split(/\n+(?=\*\*Q\d)/).map(b => b.trim()).filter(Boolean);
+  }
+
+  // Strategy 3: split on blank line before numbered question
+  if (blocks.length <= 1) {
+    blocks = markdown.split(/\n\n+(?=\d+\.)/).map(b => b.trim()).filter(Boolean);
   }
 
   let html = "";
@@ -1581,29 +1899,30 @@ function renderQuiz(markdown) {
   const quizPrefix = `qz${++_uid}`;
 
   for (const block of blocks) {
-    const trimmed = block.trim();
-    if (!trimmed) continue;
+    if (!block) continue;
 
-    const answerIdx = trimmed.indexOf("**Answer:**");
-    if (answerIdx === -1) {
-      html += `<div class="md-body">${renderMarkdown(trimmed)}</div>`;
+    const match = QUIZ_ANSWER_RE.exec(block);
+    if (!match) {
+      html += `<div class="md-body" dir="${bidiDir(block)}">${renderMarkdown(block)}</div>`;
       continue;
     }
 
     qNum++;
-    const questionPart = trimmed.slice(0, answerIdx).trim();
-    const answerPart   = trimmed.slice(answerIdx + "**Answer:**".length).trim();
+    // Strip leading **Q{n}.** / Q{n}. / **{n}.** label — we render our own numeric prefix
+    const rawQuestion  = block.slice(0, match.index).trim().replace(/^\*?\*?Q?\d+[.)]\*?\*?\s*/i, "");
+    const questionPart = rawQuestion;
+    const answerPart   = block.slice(match.index + match[0].length).trim();
     const id = `${quizPrefix}-ans-${qNum}`;
 
     html += `
       <div class="quiz-block">
-        <div class="quiz-question md-body">${renderMarkdown(questionPart)}</div>
+        <div class="quiz-question md-body" dir="${bidiDir(questionPart)}"><span class="quiz-num">${_lang === "he" ? `${qNum}.` : `Q${qNum}.`}</span> ${renderMarkdown(questionPart)}</div>
         <button class="quiz-reveal-btn" data-answer-id="${id}">▶ Show Answer</button>
-        <div class="quiz-answer md-body" id="${id}" style="display:none">${renderMarkdown(answerPart)}</div>
+        <div class="quiz-answer md-body" id="${id}" dir="${bidiDir(answerPart)}" style="display:none">${renderMarkdown(answerPart)}</div>
       </div>`;
   }
 
-  return html || `<div class="md-body">${renderMarkdown(markdown)}</div>`;
+  return html || `<div class="md-body" dir="${bidiDir(markdown)}">${renderMarkdown(markdown)}</div>`;
 }
 
 // ── Math renderer ────────────────────────────────────────────────────────────
@@ -1723,11 +2042,13 @@ function renderMarkdown(raw) {
     if (/^[*-] /.test(line)) {
       if (inOl) { out.push('</ol>'); inOl = false; }
       if (!inUl) { out.push('<ul class="md-ul">'); inUl = true; }
-      out.push(`<li dir="auto">${line.replace(/^[*-] /, '')}</li>`);
+      const liContent = line.replace(/^[*-] /, '');
+      out.push(`<li dir="${bidiDir(liContent)}">${liContent}</li>`);
     } else if (/^\d+\. /.test(line)) {
       if (inUl) { out.push('</ul>'); inUl = false; }
       if (!inOl) { out.push('<ol class="md-ol">'); inOl = true; }
-      out.push(`<li dir="auto">${line.replace(/^\d+\. /, '')}</li>`);
+      const liContent = line.replace(/^\d+\. /, '');
+      out.push(`<li dir="${bidiDir(liContent)}">${liContent}</li>`);
     } else {
       if (inUl) { out.push('</ul>'); inUl = false; }
       if (inOl) { out.push('</ol>'); inOl = false; }
@@ -1737,7 +2058,7 @@ function renderMarkdown(raw) {
       } else if (BLOCK_STARTS.some(b => t.startsWith(b))) {
         out.push(t);
       } else {
-        out.push(`<p class="md-p" dir="auto">${t}</p>`);
+        out.push(`<p class="md-p" dir="${bidiDir(t)}">${t}</p>`);
       }
     }
   }

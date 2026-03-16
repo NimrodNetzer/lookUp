@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect } from "react";
 import { Sparkles } from "lucide-react";
 import clsx from "clsx";
-import { Settings, Notes, Folders } from "../storage.js";
+import { Settings, Notes } from "../storage.js";
 import { processCommand } from "../groq-client.js";
 
 export default function CommandChat({ onRefresh }) {
-  const [input,   setInput]   = useState("");
-  const [log,     setLog]     = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [input,        setInput]        = useState("");
+  const [log,          setLog]          = useState([]);
+  const [loading,      setLoading]      = useState(false);
+  const [pendingMerge, setPendingMerge] = useState(null); // { command, actions, summary, history }
+  const [history,      setHistory]      = useState([]);   // clarification thread
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -23,14 +25,68 @@ export default function CommandChat({ onRefresh }) {
     setLoading(true);
     setLog((prev) => [...prev, { type: "command", text: cmd }]);
 
-    try {
-      const allNotes  = await Notes.list();
-      const prefs     = await Settings.getPreferences();
-      const rawJson   = await processCommand(cmd, allNotes, prefs?.aiOrganiserPreferences ?? "");
-      const actions   = JSON.parse(rawJson);
+    const nextHistory = [...history, { role: "user", content: cmd }];
 
-      const results = [];
-      for (const action of actions) {
+    try {
+      const allNotes = await Notes.list();
+      const prefs    = await Settings.getPreferences();
+      const raw      = await processCommand(cmd, allNotes, prefs?.aiOrganiserPreferences ?? "", history);
+
+      let actions;
+      try {
+        const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+        actions = JSON.parse(jsonStr);
+      } catch {
+        const msg = "AI returned an unreadable response. Try rephrasing your command.";
+        setLog((prev) => [...prev, { type: "error", text: msg }]);
+        await Settings.appendCommandLog({ type: "error", text: msg });
+        setLoading(false);
+        return;
+      }
+
+      // AI needs clarification — keep history alive for follow-up
+      const clarify = actions.find(a => a.action === "clarify");
+      if (clarify) {
+        const question = `? ${clarify.question}`;
+        setLog((prev) => [...prev, { type: "result", text: question }]);
+        await Settings.appendCommandLog({ type: "command", text: cmd });
+        await Settings.appendCommandLog({ type: "result", text: question });
+        setHistory([...nextHistory, { role: "assistant", content: raw }]);
+        setLoading(false);
+        return;
+      }
+
+      // Got actionable response — clear clarification thread
+      setHistory([]);
+
+      const merges = actions.filter(a => a.action === "merge");
+
+      if (merges.length > 0) {
+        const lines = merges.map(m =>
+          `Merge [${(m.filenames ?? []).join(", ")}] → "${m.title}"`
+        );
+        const nonDestructive = actions.filter(a => a.action !== "merge");
+        if (nonDestructive.length > 0) {
+          lines.push(`Also: ${nonDestructive.length} rename/course update(s)`);
+        }
+        setPendingMerge({ command: cmd, actions, summary: lines.join("\n") });
+        setLoading(false);
+        return;
+      }
+
+      await executeActions(cmd, actions);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setLog((prev) => [...prev, { type: "error", text: msg }]);
+      await Settings.appendCommandLog({ type: "error", text: msg });
+      setLoading(false);
+    }
+  }
+
+  async function executeActions(cmd, actions) {
+    const results = [];
+    for (const action of actions) {
+      try {
         if (action.action === "message") {
           results.push(action.text);
         } else if (action.action === "rename") {
@@ -46,22 +102,32 @@ export default function CommandChat({ onRefresh }) {
           await Notes.merge(action.filenames, newFilename, action.title ?? "Merged Note");
           results.push(`Merged ${action.filenames.length} notes → "${action.title}"`);
         }
+      } catch (e) {
+        results.push(`✗ Failed: ${e.message}`);
       }
-
-      const resultText = results.join("\n") || "Done.";
-      setLog((prev) => [...prev, { type: "result", text: resultText }]);
-      await Settings.appendCommandLog({ type: "command", text: cmd });
-      await Settings.appendCommandLog({ type: "result", text: resultText });
-
-      if (actions.some((a) => a.action !== "message")) {
-        onRefresh();
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setLog((prev) => [...prev, { type: "error", text: msg }]);
-      await Settings.appendCommandLog({ type: "error", text: msg });
     }
+
+    const resultText = results.join("\n") || "Done.";
+    setLog((prev) => [...prev, { type: "result", text: resultText }]);
+    await Settings.appendCommandLog({ type: "command", text: cmd });
+    await Settings.appendCommandLog({ type: "result", text: resultText });
+
+    if (actions.some((a) => a.action !== "message")) onRefresh();
     setLoading(false);
+  }
+
+  function confirmMerge() {
+    if (!pendingMerge) return;
+    const { command, actions } = pendingMerge;
+    setPendingMerge(null);
+    setLoading(true);
+    executeActions(command, actions);
+  }
+
+  function cancelMerge() {
+    setPendingMerge(null);
+    setHistory([]);
+    setLog((prev) => [...prev, { type: "error", text: "Cancelled." }]);
   }
 
   return (
@@ -94,6 +160,24 @@ export default function CommandChat({ onRefresh }) {
         </div>
       )}
 
+      {/* Merge confirmation */}
+      {pendingMerge && (
+        <div className="mx-3 my-2 rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-xs">
+          <p className="text-yellow-400 font-semibold mb-1">Confirm merge (cannot be undone)</p>
+          <p className="text-muted/80 whitespace-pre-wrap mb-2">{pendingMerge.summary}</p>
+          <div className="flex gap-2">
+            <button onClick={confirmMerge}
+              className="px-3 py-1 rounded bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30 transition-colors">
+              Confirm
+            </button>
+            <button onClick={cancelMerge}
+              className="px-3 py-1 rounded bg-border/40 text-muted hover:bg-border/60 transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="px-3 py-2">
         <div className="flex items-center gap-1.5 bg-bg border border-border rounded-lg px-3 py-1.5 focus-within:border-accent transition-colors">
           <input
@@ -102,13 +186,13 @@ export default function CommandChat({ onRefresh }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-            placeholder='e.g. "merge last 3 notes into Lecture 5"'
-            disabled={loading}
+            placeholder={history.length > 0 ? "Type your answer…" : 'e.g. "merge last 3 notes into Lecture 5"'}
+            disabled={loading || !!pendingMerge}
             className="flex-1 bg-transparent text-xs text-text placeholder:text-muted/50 outline-none min-w-0"
           />
           <button
             onClick={send}
-            disabled={loading || !input.trim()}
+            disabled={loading || !input.trim() || !!pendingMerge}
             className="text-accent hover:text-accent/70 disabled:opacity-30 transition-opacity"
           >
             <Sparkles className="w-3.5 h-3.5" />

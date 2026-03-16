@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Viewer — LookUp</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    #toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: #16213e;
+      border-bottom: 1px solid #0f3460;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+
+    #toolbar button {
+      background: #0f3460;
+      border: none;
+      color: #e0e0e0;
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    #toolbar button:hover { background: #533483; }
+    #toolbar button:disabled { opacity: 0.4; cursor: default; }
+
+    #pageInfo { font-size: 13px; min-width: 80px; text-align: center; }
+
+    #zoomSelect {
+      background: #0f3460;
+      border: none;
+      color: #e0e0e0;
+      padding: 4px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    #filename {
+      font-size: 12px;
+      color: #888;
+      margin-left: auto;
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #viewerContainer {
+      flex: 1;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+      gap: 12px;
+    }
+
+    .page-wrapper {
+      position: relative;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }
+
+    .page-wrapper canvas {
+      display: block;
+    }
+
+    /* PDF.js text layer */
+    .textLayer {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      opacity: 1;
+      line-height: 1;
+      pointer-events: auto;
+    }
+
+    .textLayer span,
+    .textLayer br {
+      color: transparent;
+      position: absolute;
+      white-space: pre;
+      cursor: text;
+      transform-origin: 0% 0%;
+    }
+
+    .textLayer ::selection {
+      background: rgba(100, 149, 237, 0.4);
+    }
+
+    #loadingMsg {
+      margin-top: 40px;
+      font-size: 15px;
+      color: #888;
+    }
+
+    #errorMsg {
+      margin-top: 40px;
+      color: #ff6b6b;
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <button id="prevBtn">&#8592; Prev</button>
+    <span id="pageInfo">— / —</span>
+    <button id="nextBtn">Next &#8594;</button>
+    <select id="zoomSelect">
+      <option value="0.5">50%</option>
+      <option value="0.75">75%</option>
+      <option value="1" selected>100%</option>
+      <option value="1.25">125%</option>
+      <option value="1.5">150%</option>
+      <option value="2">200%</option>
+    </select>
+    <span id="filename"></span>
+  </div>
+
+  <div id="viewerContainer">
+    <div id="loadingMsg">Loading PDF…</div>
+    <div id="errorMsg" style="display:none"></div>
+  </div>
+
+  <script src="vendor/pdf.min.js"></script>
+  <script src="pdf-viewer.js"></script>
+</body>
+</html>

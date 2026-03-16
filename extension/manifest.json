@@ -9,16 +9,25 @@
     "tabs",
     "sidePanel",
     "tabCapture",
-    "storage",
-    "microphone"
+    "storage"
   ],
 
   "host_permissions": [
-    "https://api.groq.com/*"
+    "https://api.groq.com/*",
+    "<all_urls>"
   ],
 
   "action": {
     "default_title": "Open LookUp"
+  },
+
+  "commands": {
+    "open-sidepanel": {
+      "suggested_key": {
+        "default": "Alt+S"
+      },
+      "description": "Open LookUp side panel"
+    }
   },
 
   "side_panel": {
@@ -45,7 +54,10 @@
         "built/assets/*",
         "mic-permission.html",
         "mic-permission.js",
-        "vendor/pdf.worker.min.js"
+        "vendor/pdf.worker.min.js",
+        "vendor/pdf.min.js",
+        "pdf-viewer.html",
+        "pdf-viewer.js"
       ],
       "matches": ["<all_urls>"]
     }

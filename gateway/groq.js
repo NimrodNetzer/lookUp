@@ -299,13 +299,13 @@ export async function chatStream(messages) {
  * Process a natural-language organisation command.
  * Returns a JSON string (array of action objects).
  */
-export async function processCommand(command, notes, preferences) {
+export async function processCommand(command, notes, preferences, history = []) {
   const list = notes
     .slice(0, 60)
     .map(n => `{"f":"${n.filename}","t":"${n.title}","m":"${n.mode}","c":"${n.course || ""}","d":"${(n.date || "").slice(0, 10)}"}`)
     .join("\n");
 
-  const prompt = `You manage a student's LookUp study notes. Execute the command below by returning a JSON array of actions.
+  const systemPrompt = `You manage a student's LookUp study notes. Execute commands by returning a JSON array of actions.
 
 NOTES (newest first):
 ${list}
@@ -313,13 +313,12 @@ ${list}
 USER PREFERENCES:
 ${preferences || "none"}
 
-COMMAND: "${command}"
-
 ACTION TYPES (return as JSON array, pick what applies):
 {"action":"set_course","filename":"exact_filename.md","course":"Course Name"}
 {"action":"rename","filename":"exact_filename.md","title":"New Title"}
 {"action":"merge","filenames":["file1.md","file2.md"],"title":"Combined Note Title"}
-{"action":"message","text":"plain-English explanation if nothing to do or command is unclear"}
+{"action":"clarify","question":"Ask the user a specific question to resolve ambiguity"}
+{"action":"message","text":"plain-English explanation if nothing to do"}
 
 RULES:
 - Use ONLY exact filenames from the list above
@@ -327,13 +326,18 @@ RULES:
 - For "last N captures" use the N most recent filenames
 - Apply user preferences (e.g. prefix rules) when renaming
 - For merge: include at least 2 filenames; pick a meaningful combined title
-- Return ONLY a valid JSON array, no markdown fences, no extra text
+- If the command is ambiguous (e.g. "merge 2 files" with no names, or a course/title that matches multiple notes), return a single clarify action with a focused question — do NOT guess
+- Return ONLY a valid JSON array, no markdown fences, no extra text`;
 
-JSON array:`;
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...history,
+    { role: "user", content: command },
+  ];
 
   const response = await groq.chat.completions.create({
     model: "meta-llama/llama-4-scout-17b-16e-instruct",
-    messages: [{ role: "user", content: prompt }],
+    messages,
     temperature: 0.1,
   });
 
