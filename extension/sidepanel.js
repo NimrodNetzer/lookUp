@@ -5,7 +5,6 @@ import { analyzeScreenshot, analyzeMulti, analyzeText, transcribeAndSummarize, c
 const convTabs         = document.getElementById("convTabs");
 const newConvBtn       = document.getElementById("newConvBtn");
 const captureBtn       = document.getElementById("captureBtn");
-const sessionBtn       = document.getElementById("sessionBtn");
 const sessionBar       = document.getElementById("sessionBar");
 const sessionCount     = document.getElementById("sessionCount");
 const sessionFinish    = document.getElementById("sessionFinish");
@@ -34,9 +33,19 @@ const avOptAudio       = document.getElementById("avOptAudio");
 const avOptMic         = document.getElementById("avOptMic");
 const moreBtn          = document.getElementById("moreBtn");
 const moreDropdown     = document.getElementById("moreDropdown");
+const windowPills      = document.getElementById("windowPills");
+const moreWinItem      = document.getElementById("moreWinItem");
+const noteCtxMenu      = document.getElementById("noteCtxMenu");
+const ctxOpenSide      = document.getElementById("ctxOpenSide");
+const ctxOpenChat      = document.getElementById("ctxOpenChat");
+const ctxRename        = document.getElementById("ctxRename");
+const ctxDelete        = document.getElementById("ctxDelete");
 
 const moreDashboard    = document.getElementById("moreDashboard");
 const moreChatBtn      = document.getElementById("moreChatBtn");
+const moreMultiBtn     = document.getElementById("moreMultiBtn");
+const moreExploreBtn   = document.getElementById("moreExploreBtn");
+const exploreHint      = document.getElementById("exploreHint");
 const langOptEN        = document.getElementById("langOptEN");
 const langOptHE        = document.getElementById("langOptHE");
 const micPermBanner    = document.getElementById("micPermBanner");
@@ -48,12 +57,15 @@ let selectedMode        = "summary";
 
 let selectedText        = "";
 let sessionFrames       = [];
+let inSession           = false;
+let targetWindowId      = null; // null = sidepanel's own window (default)
 let mediaRecorder       = null;
 let audioChunks         = [];
 let timerInterval       = null;
 let recSeconds          = 0;
 let activeConversationId = null;
 const tabResults        = new Map(); // conversationId → saved resultArea innerHTML
+const _convContextCache = {}; // conversationId → explored context string
 let _uid = 0; // unique ID counter for quiz/flashcard elements
 const SPINNER_ID = "inlineSpinner";
 
@@ -108,6 +120,7 @@ moreBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   const open = moreDropdown.classList.toggle("open");
   moreBtn.classList.toggle("open", open);
+  if (open) { updateExploreHint(); refreshWindowPicker(); }
 });
 document.addEventListener("click", () => {
   moreDropdown.classList.remove("open");
@@ -194,13 +207,28 @@ function renderSearchResults(notes, q = "") {
         <div class="search-result-title">${escapeHtml(note.title ?? note.filename)}</div>
         <div class="search-result-meta">${date ? new Date(date).toLocaleDateString() : ""}</div>
       </div>
-      <button class="search-result-open" data-filename="${escapeHtml(note.filename)}">↗ Open</button>
     `;
-    item.querySelector(".search-result-open").addEventListener("click", (e) => {
-      e.stopPropagation();
-      openNoteInDashboard(note.filename);
+    // Left-click: open in sidepanel
+    item.addEventListener("click", () => openNoteInSidepanel(note));
+    // Right-click: context menu
+    item.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      showNoteCtxMenu(e.clientX, e.clientY, note);
     });
     searchResults.appendChild(item);
+  }
+}
+
+async function openNoteInSidepanel(note) {
+  const full = await Notes.get(note.filename);
+  if (!full) return;
+  moreDropdown.classList.remove("open");
+  moreBtn.classList.remove("open");
+  const cards = full.cards ?? (() => { try { return JSON.parse(full.content); } catch { return null; } })();
+  if (Array.isArray(cards) && cards[0]?.front !== undefined) {
+    showFlashcards(cards, full.title, full.mode, full.filename);
+  } else {
+    showResult(full.content, full.title, full.mode, full.filename);
   }
 }
 
@@ -212,6 +240,49 @@ async function openNoteInDashboard(filename) {
   searchInput.value = "";
   renderSearchResults([]);
 }
+
+// ── Note context menu ────────────────────────────────────────────────────────
+let _ctxNote = null;
+
+function showNoteCtxMenu(x, y, note) {
+  _ctxNote = note;
+  noteCtxMenu.style.display = "block";
+  // Keep within viewport
+  const menuW = 170, menuH = 130;
+  noteCtxMenu.style.left = Math.min(x, window.innerWidth  - menuW) + "px";
+  noteCtxMenu.style.top  = Math.min(y, window.innerHeight - menuH) + "px";
+}
+
+function hideNoteCtxMenu() {
+  noteCtxMenu.style.display = "none";
+  _ctxNote = null;
+}
+
+ctxOpenSide.addEventListener("click", () => { if (_ctxNote) openNoteInSidepanel(_ctxNote); hideNoteCtxMenu(); });
+ctxOpenChat.addEventListener("click", () => { if (_ctxNote) openNoteInDashboard(_ctxNote.filename); hideNoteCtxMenu(); });
+
+ctxRename.addEventListener("click", async () => {
+  if (!_ctxNote) return;
+  const note = _ctxNote;
+  hideNoteCtxMenu();
+  const newTitle = prompt("Rename note:", note.title ?? note.filename);
+  if (!newTitle || newTitle === note.title) return;
+  await Notes.updateMeta(note.filename, { title: newTitle });
+  // Refresh results
+  searchInput.dispatchEvent(new Event("input"));
+});
+
+ctxDelete.addEventListener("click", async () => {
+  if (!_ctxNote) return;
+  const note = _ctxNote;
+  hideNoteCtxMenu();
+  if (!confirm(`Delete "${note.title ?? note.filename}"?`)) return;
+  await Notes.delete(note.filename);
+  searchInput.dispatchEvent(new Event("input"));
+});
+
+document.addEventListener("click",       hideNoteCtxMenu);
+document.addEventListener("contextmenu", (e) => { if (!e.target.closest(".search-result-item")) hideNoteCtxMenu(); });
 
 // ── Mode dropdown ────────────────────────────────────────────────────────────
 modeTrigger.addEventListener("click", (e) => {
@@ -245,7 +316,6 @@ dropdownItems.forEach((item) => {
     modeTrigger.classList.remove("open");
 
     resetCaptureBtn();
-    sessionBtn.classList.toggle("hidden", selectedMode === "audio" || selectedMode === "video");
     avToggleRow.classList.toggle("active", selectedMode === "audio");
     updateInputPlaceholder();
   });
@@ -371,7 +441,11 @@ async function sendChatMessage() {
     }
 
     // Build history messages for multi-turn context
-    const historyMsgs = history.map(m => ({ role: m.role, content: m.content }));
+    const exploredCtx = _convContextCache[activeConversationId] ?? await Conversations.getContext(activeConversationId);
+    const historyMsgs = [
+      ...(exploredCtx ? [{ role: "user", content: `[Document context — already explored]\n${exploredCtx}` }, { role: "assistant", content: "Understood, I have context about this document." }] : []),
+      ...history.map(m => ({ role: m.role, content: m.content })),
+    ];
 
     if (imageFiles.length > 0) {
       // One or more images — vision model, include prior text history as system context
@@ -674,7 +748,6 @@ function applyModeUI(mode) {
   modeTrigger.style.setProperty("--mode-color", item.dataset.color);
   dropdownItems.forEach(d => d.classList.remove("active"));
   item.classList.add("active");
-  sessionBtn.classList.toggle("hidden", selectedMode === "audio" || selectedMode === "video");
   avToggleRow.classList.toggle("active", selectedMode === "audio");
   updateInputPlaceholder();
 }
@@ -725,6 +798,14 @@ function renderConvTabs() {
     label.className = "tab-label";
     label.textContent = conv.title ?? "New conversation";
     tab.appendChild(label);
+
+    if (_convContextCache[conv.id]) {
+      const badge = document.createElement("span");
+      badge.className = "ctx-badge";
+      badge.title = "Explored context loaded";
+      badge.textContent = "ctx";
+      tab.appendChild(badge);
+    }
 
     tab.addEventListener("click", () => switchConversation(conv.id));
     tab.addEventListener("mousedown", (e) => { if (e.button === 1) { e.preventDefault(); deleteConvTab(conv.id); } });
@@ -806,6 +887,10 @@ async function loadConversations() {
 
 const PLACEHOLDER_HTML = `<p class="placeholder">Choose a mode, then hit <strong>⚡ Capture</strong>.<br>Or select text on any page to <strong>Ask</strong> about it.</p>`;
 
+function updateContextBadge() {
+  renderConvTabs(); // re-render to show/hide badge
+}
+
 async function switchConversation(id) {
   // Save current tab's content before leaving
   if (activeConversationId !== null) {
@@ -813,6 +898,13 @@ async function switchConversation(id) {
   }
   activeConversationId = id;
   await Conversations.setActive(id);
+
+  // Load explored context for this conversation into cache
+  if (_convContextCache[id] === undefined) {
+    const ctx = await Conversations.getContext(id);
+    _convContextCache[id] = ctx ?? null;
+  }
+  updateExploreHint();
 
   const cached = tabResults.get(id);
   if (cached !== undefined) {
@@ -1049,9 +1141,50 @@ function sendMessageSafe(msg) {
 // Uses null windowId (= current window) to avoid a tabs.query round-trip,
 // which would burn the user-gesture context before captureVisibleTab is called.
 async function captureTab() {
-  const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: "png" });
+  const dataUrl = await chrome.tabs.captureVisibleTab(targetWindowId, { format: "png" });
   return { base64: dataUrl.replace(/^data:image\/png;base64,/, ""), mimeType: "image/png" };
 }
+
+// ── Window picker ────────────────────────────────────────────────────────────
+// Shows a pill per Chrome window when 2+ are open; lets the user pick which
+// window captureTab() should capture.
+
+let _ownWindowId = null;
+chrome.windows.getCurrent({}, w => { _ownWindowId = w.id; targetWindowId = w.id; });
+
+async function refreshWindowPicker() {
+  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
+  if (windows.length < 2) {
+    moreWinItem.classList.add("hidden");
+    targetWindowId = _ownWindowId;
+    return;
+  }
+  moreWinItem.classList.remove("hidden");
+
+  windowPills.innerHTML = "";
+  windows.forEach((win, idx) => {
+    const activeTab = win.tabs?.find(t => t.active);
+    const label = activeTab?.title?.replace(/\s*[-|–]\s*(Google Chrome|Chrome).*$/, "").trim()
+      || `Window ${idx + 1}`;
+    const isOwn = win.id === _ownWindowId;
+    const pill = document.createElement("button");
+    pill.className = "win-pill" + (win.id === targetWindowId ? " selected" : "");
+    pill.title = activeTab?.title || label;
+    pill.innerHTML = `<span class="win-pill-icon">${isOwn ? "📌" : "🖥️"}</span>${label}`;
+    pill.addEventListener("click", (e) => {
+      e.stopPropagation(); // don't close dropdown
+      targetWindowId = win.id;
+      windowPills.querySelectorAll(".win-pill").forEach(p => p.classList.remove("selected"));
+      pill.classList.add("selected");
+    });
+    windowPills.appendChild(pill);
+  });
+}
+
+// Refresh on open and whenever windows change
+refreshWindowPicker();
+chrome.windows.onCreated.addListener(refreshWindowPicker);
+chrome.windows.onRemoved.addListener(refreshWindowPicker);
 
 // ── Main capture button ─────────────────────────────────────────────────────
 addPageBtn.addEventListener("click", async () => {
@@ -1073,6 +1206,9 @@ captureBtn.addEventListener("click", async () => {
     if (useMic) { startMicCapture(); return; }
     startAudioCapture(false); return;
   }
+
+  // In multi-page session, Capture adds a frame instead of analyzing immediately
+  if (inSession) { addPageBtn.click(); return; }
 
   captureBtn.disabled = true;
   showSpinner("Capturing screen…");
@@ -1185,12 +1321,66 @@ askBtn.addEventListener("click", async () => {
   askBtn.disabled = false;
 });
 
-// ── Session ─────────────────────────────────────────────────────────────────
-sessionBtn.addEventListener("click", () => {
+// ── Session (now triggered from more-dropdown) ───────────────────────────────
+moreMultiBtn.addEventListener("click", () => {
+  moreDropdown.classList.remove("open");
+  moreBtn.classList.remove("open");
   inSession = true;
   sessionFrames = [];
   sessionBar.classList.add("active");
   updateSessionBar();
+});
+
+// ── Explore File ─────────────────────────────────────────────────────────────
+// Silently analyzes attached files and stores a summary as persistent context
+// on the active conversation. Injected into all subsequent chat messages.
+
+function updateExploreHint() {
+  const ctx = _convContextCache[activeConversationId];
+  if (ctx) {
+    exploreHint.textContent = "✓ Context loaded";
+    exploreHint.style.color = "#6ee7b7";
+  } else {
+    exploreHint.textContent = attachedFiles.length > 0
+      ? "Build context from attached file"
+      : "Attach a file first";
+    exploreHint.style.color = "";
+  }
+}
+
+moreExploreBtn.addEventListener("click", async () => {
+  if (attachedFiles.length === 0) return;
+  moreDropdown.classList.remove("open");
+  moreBtn.classList.remove("open");
+
+  showSpinner("Exploring file…");
+  try {
+    const imageFiles = attachedFiles.filter(f => f.isImage);
+    const textFiles  = attachedFiles.filter(f => !f.isImage);
+    let contextText;
+
+    const prompt = "Give a concise overview of this material: what it is, its topic, key concepts, and any important details a student should know. Be factual and brief.";
+
+    if (imageFiles.length > 0) {
+      contextText = await analyzeWithQuestion(
+        imageFiles.map(f => ({ base64: f.base64, mimeType: f.mimeType })),
+        null,
+        prompt
+      );
+    } else {
+      const combined = textFiles.map(f => `--- ${f.name} ---\n${f.text}`).join("\n\n");
+      contextText = await analyzeText(combined, "explain");
+    }
+
+    await Conversations.setContext(activeConversationId, contextText);
+    _convContextCache[activeConversationId] = contextText;
+    updateExploreHint();
+    updateContextBadge();
+    showSpinner("Context loaded — AI now knows this file ✓");
+    setTimeout(() => { const sp = document.getElementById(SPINNER_ID); if (sp) sp.remove(); }, 2500);
+  } catch (err) {
+    showError("Explore failed: " + err.message);
+  }
 });
 
 function updateSessionBar() {

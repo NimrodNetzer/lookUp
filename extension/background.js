@@ -25,26 +25,21 @@ chrome.commands.onCommand.addListener((command) => {
   }
 });
 
-// ── PDF interception ───────────────────────────────────────────────────────
-// Chrome's built-in PDF viewer is a privileged page — content scripts can't
-// inject there and getSelection() is unavailable. When we detect a tab
-// navigating to a .pdf URL (or a response with Content-Type application/pdf),
-// we redirect it to our custom pdf-viewer.html which uses PDF.js + a text
-// layer, so normal DOM selection works and content.js can relay it.
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status !== "loading") return;
-  const url = tab.url || changeInfo.url;
-  if (!url) return;
-  // Ignore our own viewer to avoid redirect loop
-  const viewerBase = chrome.runtime.getURL("pdf-viewer.html");
-  if (url.startsWith(viewerBase)) return;
-  // Only intercept plain http/https PDF links (file:// won't have host_permissions)
-  if (!/^https?:\/\//i.test(url)) return;
-  if (!url.toLowerCase().includes(".pdf")) return;
-
-  const viewerUrl = viewerBase + "?url=" + encodeURIComponent(url);
-  chrome.tabs.update(tabId, { url: viewerUrl }).catch(() => {});
-});
+// ── PDF interception (disabled for now — revisit before Web Store publish) ──
+// Uncomment the listener below to redirect .pdf navigations to our custom
+// pdf-viewer.html (PDF.js + text layer) so text selection works in the panel.
+//
+// chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+//   if (changeInfo.status !== "loading") return;
+//   const url = tab.url || changeInfo.url;
+//   if (!url) return;
+//   const viewerBase = chrome.runtime.getURL("pdf-viewer.html");
+//   if (url.startsWith(viewerBase)) return;
+//   if (!/^https?:\/\//i.test(url)) return;
+//   if (!url.toLowerCase().includes(".pdf")) return;
+//   const viewerUrl = viewerBase + "?url=" + encodeURIComponent(url);
+//   chrome.tabs.update(tabId, { url: viewerUrl }).catch(() => {});
+// });
 
 // Keep service worker alive so sidepanel messages don't hang.
 // MV3 SWs sleep after ~30s of inactivity; sidepanel pings every 25s.

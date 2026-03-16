@@ -129,6 +129,18 @@
     }
     .more-item:hover { background: rgba(124,106,245,0.1); color: #ddd; }
     .more-item .more-icon { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
+    .more-item-win { flex-wrap: wrap; cursor: default; }
+    .more-item-win:hover { background: none; color: #999; }
+    .more-item-win .window-pills { width: 100%; margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px; }
+    .more-item-win.hidden { display: none; }
+    .more-item-hint { margin-left: auto; font-size: 9.5px; color: #444; font-weight: 400; }
+    /* Context loaded badge on conversation tab */
+    .conv-tab .ctx-badge {
+      font-size: 8px; background: rgba(52,211,153,0.2);
+      border: 1px solid rgba(52,211,153,0.4); color: #6ee7b7;
+      border-radius: 4px; padding: 0 3px; margin-left: 2px;
+      flex-shrink: 0;
+    }
     /* Language toggle */
     .lang-toggle {
       margin-left: auto; display: flex; background: rgba(255,255,255,0.05);
@@ -344,6 +356,16 @@
     .btn-session:hover  { border-color: rgba(124,106,245,0.5); color: #c0b8ff; background: rgba(124,106,245,0.07); }
     .btn-session.hidden { display: none; }
 
+    .btn-win-picker {
+      padding: 4px 7px; font-size: 13px;
+      background: none; border: 1px solid rgba(14,165,233,0.25);
+      border-radius: 7px; color: #7dd3fc; cursor: pointer;
+      flex-shrink: 0; transition: background 0.15s, border-color 0.15s;
+    }
+    .btn-win-picker:hover { background: rgba(14,165,233,0.1); border-color: rgba(14,165,233,0.5); }
+    .btn-win-picker.active { background: rgba(14,165,233,0.18); border-color: rgba(14,165,233,0.55); }
+    .btn-win-picker.hidden { display: none; }
+
 
     /* ── SELECTION BAR ───────────────────────── */
     .selection-bar {
@@ -408,6 +430,35 @@
       background: none; border: none; color: #444;
       cursor: pointer; font-size: 15px; padding: 0 2px;
     }
+
+    /* ── WINDOW PICKER BAR ──────────────────── */
+    .window-picker-bar {
+      display: none; align-items: center; gap: 6px;
+      padding: 5px 8px;
+      background: rgba(14,165,233,0.04);
+      border-bottom: 1px solid rgba(14,165,233,0.14);
+      font-size: 11px; flex-shrink: 0; flex-wrap: wrap;
+    }
+    .window-picker-bar.active { display: flex; }
+    .window-picker-label { color: #555; flex-shrink: 0; font-size: 10.5px; }
+    .window-pills { display: flex; gap: 5px; flex-wrap: wrap; flex: 1; }
+    .win-pill {
+      display: flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 99px; cursor: pointer;
+      background: rgba(14,165,233,0.08);
+      border: 1px solid rgba(14,165,233,0.18);
+      color: #7dd3fc; font-size: 10.5px;
+      max-width: 140px; overflow: hidden;
+      white-space: nowrap; text-overflow: ellipsis;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .win-pill:hover { background: rgba(14,165,233,0.16); border-color: rgba(14,165,233,0.35); }
+    .win-pill.selected {
+      background: rgba(14,165,233,0.22);
+      border-color: rgba(14,165,233,0.55);
+      color: #e0f2fe; font-weight: 600;
+    }
+    .win-pill-icon { font-size: 10px; flex-shrink: 0; }
 
     /* ── AUDIO VIDEO TOGGLE ─────────────────── */
     .av-toggle-row {
@@ -792,13 +843,23 @@
     .search-result-text { flex: 1; min-width: 0; }
     .search-result-title { font-size: 11px; font-weight: 600; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .search-result-meta  { font-size: 10px; color: #444; margin-top: 1px; }
-    .search-result-open  {
-      font-size: 10px; color: var(--accent);
-      border: 1px solid rgba(124,106,245,0.3);
-      background: rgba(124,106,245,0.06); border-radius: 6px; padding: 2px 6px;
-      cursor: pointer; transition: background 0.12s; flex-shrink: 0; white-space: nowrap;
+    /* ── NOTE CONTEXT MENU ──────────────────── */
+    .note-ctx-menu {
+      position: fixed; z-index: 9999;
+      background: #1a1a2e; border: 1px solid rgba(124,106,245,0.25);
+      border-radius: 10px; padding: 4px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      min-width: 160px;
     }
-    .search-result-open:hover { background: rgba(124,106,245,0.18); }
+    .note-ctx-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px; border-radius: 7px;
+      cursor: pointer; font-size: 12px; color: #ccc;
+      transition: background 0.1s;
+    }
+    .note-ctx-item:hover { background: rgba(124,106,245,0.12); color: #fff; }
+    .note-ctx-item.danger { color: #f87171; }
+    .note-ctx-item.danger:hover { background: rgba(248,113,113,0.1); }
 
     /* ── OPEN IN DASHBOARD ──────────────────── */
     .open-dash-row { margin-top: 10px; }
@@ -905,6 +966,19 @@
             <span class="lang-toggle-opt" id="langOptHE">עב</span>
           </div>
         </div>
+        <div class="more-divider"></div>
+        <div class="more-item" id="moreMultiBtn">
+          <span class="more-icon">📄</span> Multi-page capture
+          <span class="more-item-hint">Capture multiple pages</span>
+        </div>
+        <div class="more-item" id="moreExploreBtn">
+          <span class="more-icon">🔭</span> Explore file
+          <span class="more-item-hint" id="exploreHint">Build context from attached file</span>
+        </div>
+        <div class="more-item more-item-win hidden" id="moreWinItem">
+          <span class="more-icon">🖥️</span> Window
+          <div class="window-pills" id="windowPills"></div>
+        </div>
       </div>
       <div class="status-dot" id="statusDot"></div>
     </div>
@@ -986,9 +1060,6 @@
 
       <!-- Capture button (in toolbar) -->
       <button class="btn-capture" id="captureBtn">⚡ Capture</button>
-
-      <!-- Multi-page button -->
-      <button class="btn-session" id="sessionBtn">+ Multi</button>
 
     </div>
 
@@ -1118,6 +1189,14 @@
   </div>
 
   <script src="vendor/jszip.min.js"></script>
+  <!-- NOTE CONTEXT MENU (shared, repositioned on right-click) -->
+  <div class="note-ctx-menu" id="noteCtxMenu" style="display:none">
+    <div class="note-ctx-item" id="ctxOpenSide">📋 Open here</div>
+    <div class="note-ctx-item" id="ctxOpenChat">💬 Open in Chat</div>
+    <div class="note-ctx-item" id="ctxRename">✏️ Rename</div>
+    <div class="note-ctx-item danger" id="ctxDelete">🗑️ Delete</div>
+  </div>
+
   <script src="vendor/pdf.min.js"></script>
   <script type="module" src="sidepanel.js"></script>
 </body>

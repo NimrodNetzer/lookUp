@@ -79,7 +79,8 @@ async function renderAll() {
     // Render canvas
     await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
 
-    // Render text layer
+    // Render text layer — newer PDF.js requires --scale-factor on the container
+    textLayerDiv.style.setProperty("--scale-factor", scale);
     const textContent = await page.getTextContent();
     await pdfjsLib.renderTextLayer({
       textContent,

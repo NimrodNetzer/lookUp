@@ -226,6 +226,27 @@ export const Conversations = {
   async setActive(id) {
     await chrome.storage.local.set({ activeConversationId: id });
   },
+
+  // Explored context — a background summary stored on the conversation record
+  async setContext(id, contextText) {
+    const db = await openDB();
+    const t = tx(db, ["conversations"], "readwrite");
+    const s = t.store("conversations");
+    const conv = await req2p(s.get(id));
+    if (!conv) throw new Error("Conversation not found");
+    conv.exploredContext = contextText;
+    await req2p(s.put(conv));
+    await t.done;
+  },
+
+  async getContext(id) {
+    const conv = await Conversations.get(id);
+    return conv?.exploredContext ?? null;
+  },
+
+  async clearContext(id) {
+    return Conversations.setContext(id, null);
+  },
 };
 
 // ─── Messages ────────────────────────────────────────────────────────────────
