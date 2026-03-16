@@ -17,7 +17,7 @@ import { logActivity, getActivity, getStreak, getSetting, setSetting,
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // When running as a pkg exe, paths are relative to the exe; in dev, to the project root.
 const BASE_DIR = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, "..");
-const NOTES_DIR = path.join(BASE_DIR, "notes");
+const NOTES_DIR = process.env.TEST_NOTES_DIR || path.join(BASE_DIR, "notes");
 // When packaged: serve from a real "www" folder next to the exe.
 // pkg's virtual filesystem doesn't work reliably with express.static.
 const STATIC_DIR = process.pkg
@@ -318,6 +318,37 @@ app.get("/notes", async (_req, res) => {
   }
 });
 
+// --- GET /notes/search?q= — full-text search across note content ---
+// MUST be defined before GET /notes/:filename so "search" isn't captured as a filename.
+app.get("/notes/search", async (req, res) => {
+  const q = (req.query.q ?? "").trim().toLowerCase();
+  if (!q) return res.json([]);
+  try {
+    const files = await fs.readdir(NOTES_DIR);
+    const results = [];
+    for (const filename of files.filter((f) => f.endsWith(".md"))) {
+      const content = await fs.readFile(path.join(NOTES_DIR, filename), "utf-8");
+      if (!content.toLowerCase().includes(q)) continue;
+      const title = content.match(/^title:\s*"(.+)"/m)?.[1] ?? filename;
+      const mode  = content.match(/^mode:\s*"(.+)"/m)?.[1]  ?? "summary";
+      const date  = content.match(/^date:\s*"(.+)"/m)?.[1]  ?? "";
+      // Extract a short snippet around the match (from body, not frontmatter)
+      const bodyStart = content.indexOf("---\n\n");
+      const body = bodyStart !== -1 ? content.slice(bodyStart + 5) : content;
+      const lower = body.toLowerCase();
+      const idx = lower.indexOf(q);
+      const snippet = idx !== -1
+        ? body.slice(Math.max(0, idx - 60), idx + 120).replace(/\n/g, " ").trim()
+        : "";
+      results.push({ filename, title, mode, date, snippet });
+    }
+    results.sort((a, b) => b.date.localeCompare(a.date));
+    res.json(results.slice(0, 30));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- GET /notes/:filename ---
 app.get("/notes/:filename", async (req, res) => {
   const { filename } = req.params;
@@ -530,36 +561,6 @@ app.post("/chat/clear", (_req, res) => {
   try {
     const conv = createConversation();
     res.json({ success: true, conversationId: conv.id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// --- GET /notes/search?q= — full-text search across note content ---
-app.get("/notes/search", async (req, res) => {
-  const q = (req.query.q ?? "").trim().toLowerCase();
-  if (!q) return res.json([]);
-  try {
-    const files = await fs.readdir(NOTES_DIR);
-    const results = [];
-    for (const filename of files.filter((f) => f.endsWith(".md"))) {
-      const content = await fs.readFile(path.join(NOTES_DIR, filename), "utf-8");
-      if (!content.toLowerCase().includes(q)) continue;
-      const title = content.match(/^title:\s*"(.+)"/m)?.[1] ?? filename;
-      const mode  = content.match(/^mode:\s*"(.+)"/m)?.[1]  ?? "summary";
-      const date  = content.match(/^date:\s*"(.+)"/m)?.[1]  ?? "";
-      // Extract a short snippet around the match (from body, not frontmatter)
-      const bodyStart = content.indexOf("---\n\n");
-      const body = bodyStart !== -1 ? content.slice(bodyStart + 5) : content;
-      const lower = body.toLowerCase();
-      const idx = lower.indexOf(q);
-      const snippet = idx !== -1
-        ? body.slice(Math.max(0, idx - 60), idx + 120).replace(/\n/g, " ").trim()
-        : "";
-      results.push({ filename, title, mode, date, snippet });
-    }
-    results.sort((a, b) => b.date.localeCompare(a.date));
-    res.json(results.slice(0, 30));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -811,11 +812,15 @@ app.get("/note/*", (_req, res) => {
   res.sendFile(path.join(STATIC_DIR, "note/_placeholder.html"));
 });
 
-app.listen(PORT, "127.0.0.1", () => {
-  const url = `http://localhost:${PORT}`;
-  console.log(`LookUp Gateway running at ${url}`);
-  // Auto-open the dashboard in the default browser.
-  if (process.platform === "win32") exec(`start ${url}`);
-  else if (process.platform === "darwin") exec(`open ${url}`);
-  else exec(`xdg-open ${url}`);
-});
+export { app };
+
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, "127.0.0.1", () => {
+    const url = `http://localhost:${PORT}`;
+    console.log(`LookUp Gateway running at ${url}`);
+    // Auto-open the dashboard in the default browser.
+    if (process.platform === "win32") exec(`start ${url}`);
+    else if (process.platform === "darwin") exec(`open ${url}`);
+    else exec(`xdg-open ${url}`);
+  });
+}

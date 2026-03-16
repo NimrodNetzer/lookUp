@@ -10,7 +10,9 @@
     "dev": "node --watch index.js",
     "build:bundle": "node build.js",
     "build:exe": "pkg . --output ../dist/LookUp.exe",
-    "build": "npm run build:bundle && npm run build:exe"
+    "build": "npm run build:bundle && npm run build:exe",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",
@@ -22,10 +24,14 @@
   },
   "devDependencies": {
     "@yao-pkg/pkg": "^5.12.0",
-    "esbuild": "^0.27.4"
+    "esbuild": "^0.27.4",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.0"
   },
   "pkg": {
-    "targets": ["node22-win-x64"],
+    "targets": [
+      "node22-win-x64"
+    ],
     "assets": [
       "node_modules/better-sqlite3/**"
     ],
