@@ -129,18 +129,71 @@
     }
     .more-item:hover { background: rgba(124,106,245,0.1); color: #ddd; }
     .more-item .more-icon { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
-    .more-item-win { flex-wrap: wrap; cursor: default; }
-    .more-item-win:hover { background: none; color: #999; }
-    .more-item-win .window-pills { width: 100%; margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px; }
-    .more-item-win.hidden { display: none; }
-    .more-item-hint { margin-left: auto; font-size: 9.5px; color: #444; font-weight: 400; }
-    /* Context loaded badge on conversation tab */
-    .conv-tab .ctx-badge {
-      font-size: 8px; background: rgba(52,211,153,0.2);
-      border: 1px solid rgba(52,211,153,0.4); color: #6ee7b7;
-      border-radius: 4px; padding: 0 3px; margin-left: 2px;
-      flex-shrink: 0;
+    .more-item-win { justify-content: space-between; }
+    .win-current-label {
+      flex: 1; min-width: 0; overflow: hidden;
+      white-space: nowrap; text-overflow: ellipsis;
+      color: #7dd3fc; font-size: 10.5px; font-weight: 600;
     }
+    .win-chevron { font-size: 9px; color: #666; transition: transform 0.15s; flex-shrink: 0; }
+    .more-item-win.expanded .win-chevron { transform: rotate(90deg); }
+    .more-item-win.hidden { display: none; }
+    /* Window sub-list */
+    .win-submenu {
+      display: none; flex-direction: column; gap: 2px;
+      padding: 3px 4px 4px; margin-top: 2px;
+    }
+    .win-submenu.open { display: flex; }
+    .win-entry {
+      display: flex; align-items: center; gap: 7px;
+      padding: 5px 8px; border-radius: 7px; cursor: pointer;
+      font-size: 11px; font-weight: 500; color: #aaa;
+      transition: background 0.1s, color 0.1s;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .win-entry:hover { background: rgba(14,165,233,0.1); color: #ddd; }
+    .win-entry.selected { background: rgba(14,165,233,0.14); color: #7dd3fc; font-weight: 700; }
+    .win-entry-icon { font-size: 12px; flex-shrink: 0; }
+    .win-entry-check { margin-left: auto; font-size: 10px; color: #38bdf8; flex-shrink: 0; }
+    /* Token usage widget */
+    .usage-widget {
+      padding: 8px 8px 6px;
+      border-radius: 8px;
+      background: rgba(124,106,245,0.06);
+      border: 1px solid rgba(124,106,245,0.15);
+      margin-top: 2px;
+      cursor: default;
+    }
+    .usage-widget:hover { background: rgba(124,106,245,0.1); }
+    .usage-row {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 11px; font-weight: 600; color: #aaa; margin-bottom: 5px;
+    }
+    .usage-label { display: flex; align-items: center; gap: 5px; }
+    .usage-count { font-weight: 700; color: #c0b8ff; font-variant-numeric: tabular-nums; }
+    .usage-bar-bg {
+      height: 5px; border-radius: 3px;
+      background: rgba(255,255,255,0.08); overflow: hidden;
+    }
+    .usage-bar-fill {
+      height: 100%; border-radius: 3px;
+      background: #5cb85c;
+      transition: width 0.4s ease, background 0.4s ease;
+      width: 0%;
+    }
+    .usage-bar-fill.warn  { background: #f0ad4e; }
+    .usage-bar-fill.crit  { background: #d9534f; }
+    .usage-upgrade {
+      margin-top: 5px; font-size: 10px; color: #f0ad4e;
+      text-align: center; line-height: 1.4;
+    }
+    .usage-upgrade a { color: #f0ad4e; text-decoration: underline; }
+    .usage-reset {
+      font-size: 9.5px; color: #555; text-align: right;
+      margin-top: 3px;
+    }
+    .more-item-win:hover { background: rgba(124,106,245,0.1); color: #ddd; }
+    .more-item-hint { margin-left: auto; font-size: 9.5px; color: #444; font-weight: 400; }
     /* Language toggle */
     .lang-toggle {
       margin-left: auto; display: flex; background: rgba(255,255,255,0.05);
@@ -441,24 +494,6 @@
     }
     .window-picker-bar.active { display: flex; }
     .window-picker-label { color: #555; flex-shrink: 0; font-size: 10.5px; }
-    .window-pills { display: flex; gap: 5px; flex-wrap: wrap; flex: 1; }
-    .win-pill {
-      display: flex; align-items: center; gap: 4px;
-      padding: 2px 8px; border-radius: 99px; cursor: pointer;
-      background: rgba(14,165,233,0.08);
-      border: 1px solid rgba(14,165,233,0.18);
-      color: #7dd3fc; font-size: 10.5px;
-      max-width: 140px; overflow: hidden;
-      white-space: nowrap; text-overflow: ellipsis;
-      transition: background 0.15s, border-color 0.15s;
-    }
-    .win-pill:hover { background: rgba(14,165,233,0.16); border-color: rgba(14,165,233,0.35); }
-    .win-pill.selected {
-      background: rgba(14,165,233,0.22);
-      border-color: rgba(14,165,233,0.55);
-      color: #e0f2fe; font-weight: 600;
-    }
-    .win-pill-icon { font-size: 10px; flex-shrink: 0; }
 
     /* ── AUDIO VIDEO TOGGLE ─────────────────── */
     .av-toggle-row {
@@ -574,6 +609,19 @@
       border-radius: 11px; padding: 12px;
       font-size: 12px; color: #fca5a5; flex-shrink: 0;
     }
+    .error-card-quota {
+      text-align: center; padding: 16px 14px;
+    }
+    .error-card-quota .quota-icon { font-size: 28px; margin-bottom: 6px; }
+    .error-card-quota strong { display: block; font-size: 13px; margin-bottom: 4px; color: #fca5a5; }
+    .error-card-quota p { margin: 0 0 10px; color: #f9a8a8; font-size: 11.5px; }
+    .quota-upgrade-btn {
+      display: inline-block; padding: 6px 14px;
+      background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.4);
+      border-radius: 8px; color: #fca5a5; font-size: 11.5px; font-weight: 700;
+      text-decoration: none; transition: background 0.15s;
+    }
+    .quota-upgrade-btn:hover { background: rgba(239,68,68,0.35); }
 
     /* Typing / spinner — 3 bouncing dots like chat page */
     .spinner {
@@ -971,13 +1019,26 @@
           <span class="more-icon">📄</span> Multi-page capture
           <span class="more-item-hint">Capture multiple pages</span>
         </div>
-        <div class="more-item" id="moreExploreBtn">
-          <span class="more-icon">🔭</span> Explore file
-          <span class="more-item-hint" id="exploreHint">Build context from attached file</span>
-        </div>
         <div class="more-item more-item-win hidden" id="moreWinItem">
-          <span class="more-icon">🖥️</span> Window
-          <div class="window-pills" id="windowPills"></div>
+          <span class="more-icon">🖥️</span>
+          <span class="win-current-label" id="winCurrentLabel">This window</span>
+          <span class="win-chevron">▸</span>
+        </div>
+        <div class="win-submenu" id="winSubMenu"></div>
+        <div class="more-divider"></div>
+        <!-- Token usage -->
+        <div class="usage-widget" id="usageWidget">
+          <div class="usage-row">
+            <span class="usage-label">📊 Tokens today</span>
+            <span class="usage-count" id="usageCount">—</span>
+          </div>
+          <div class="usage-bar-bg">
+            <div class="usage-bar-fill" id="usageBarFill"></div>
+          </div>
+          <div class="usage-upgrade" id="usageUpgrade" style="display:none">
+            ⚠️ Quota almost full — <a href="https://console.groq.com" target="_blank">upgrade at console.groq.com</a>
+          </div>
+          <div class="usage-reset" id="usageResetHint"></div>
         </div>
       </div>
       <div class="status-dot" id="statusDot"></div>
@@ -1047,14 +1108,7 @@
           </span>
           <span class="d-check">✓</span>
         </div>
-        <div class="dropdown-item" data-mode="video" data-icon="🎥" data-color="#a78bfa">
-          <span class="d-icon">🎥</span>
-          <span class="d-text">
-            <span class="d-name">Video</span>
-            <span class="d-desc">Record screen video + audio</span>
-          </span>
-          <span class="d-check">✓</span>
-        </div>
+
       </div>
       </div><!-- end mode-trigger-wrap -->
 

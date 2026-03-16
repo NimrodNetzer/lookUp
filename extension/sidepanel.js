@@ -1,5 +1,5 @@
-import { Settings, Conversations, Messages, Notes } from "./storage.js";
-import { analyzeScreenshot, analyzeMulti, analyzeText, transcribeAndSummarize, chat, verifyApiKey, analyzeWithQuestion, setResponseLanguage } from "./groq-client.js";
+import { Settings, Conversations, Messages, Notes, TokenUsage } from "./storage.js";
+import { analyzeScreenshot, analyzeMulti, analyzeText, transcribeAndSummarize, chatStream, verifyApiKey, analyzeWithQuestionStream, setResponseLanguage } from "./groq-client.js";
 
 // --- DOM refs ---
 const convTabs         = document.getElementById("convTabs");
@@ -33,7 +33,8 @@ const avOptAudio       = document.getElementById("avOptAudio");
 const avOptMic         = document.getElementById("avOptMic");
 const moreBtn          = document.getElementById("moreBtn");
 const moreDropdown     = document.getElementById("moreDropdown");
-const windowPills      = document.getElementById("windowPills");
+const winSubMenu       = document.getElementById("winSubMenu");
+const winCurrentLabel  = document.getElementById("winCurrentLabel");
 const moreWinItem      = document.getElementById("moreWinItem");
 const noteCtxMenu      = document.getElementById("noteCtxMenu");
 const ctxOpenSide      = document.getElementById("ctxOpenSide");
@@ -44,8 +45,6 @@ const ctxDelete        = document.getElementById("ctxDelete");
 const moreDashboard    = document.getElementById("moreDashboard");
 const moreChatBtn      = document.getElementById("moreChatBtn");
 const moreMultiBtn     = document.getElementById("moreMultiBtn");
-const moreExploreBtn   = document.getElementById("moreExploreBtn");
-const exploreHint      = document.getElementById("exploreHint");
 const langOptEN        = document.getElementById("langOptEN");
 const langOptHE        = document.getElementById("langOptHE");
 const micPermBanner    = document.getElementById("micPermBanner");
@@ -65,12 +64,16 @@ let timerInterval       = null;
 let recSeconds          = 0;
 let activeConversationId = null;
 const tabResults        = new Map(); // conversationId → saved resultArea innerHTML
-const _convContextCache = {}; // conversationId → explored context string
 let _uid = 0; // unique ID counter for quiz/flashcard elements
 const SPINNER_ID = "inlineSpinner";
 
 // Attached files state — supports multiple images / files
 let attachedFiles = []; // [{ base64, mimeType, name, isImage }, ...]
+
+// Screenshot cache — reuse within 20s for follow-up screen references to save image tokens
+let _cachedScreenshot = null;
+let _cacheTs = 0;
+const SCREENSHOT_CACHE_TTL = 20_000;
 
 // ── Tab drag state ────────────────────────────────────────────────────────────
 let dragConvId     = null;
@@ -116,15 +119,47 @@ function applyLang() {
 }
 
 // ── More-options dropdown ─────────────────────────────────────────────────────
+const DAILY_TOKEN_LIMIT = 500_000;
+
+async function refreshUsageDisplay() {
+  const usageCount   = document.getElementById("usageCount");
+  const usageBarFill = document.getElementById("usageBarFill");
+  const usageUpgrade = document.getElementById("usageUpgrade");
+  const usageResetHint = document.getElementById("usageResetHint");
+  if (!usageCount) return;
+
+  const { tokens } = await TokenUsage.get();
+  const pct = Math.min(tokens / DAILY_TOKEN_LIMIT, 1);
+
+  usageCount.textContent = tokens >= 1000
+    ? `${(tokens / 1000).toFixed(1)}k / 500k`
+    : `${tokens} / 500,000`;
+
+  usageBarFill.style.width = (pct * 100).toFixed(1) + "%";
+  usageBarFill.classList.toggle("warn", pct >= 0.7 && pct < 0.9);
+  usageBarFill.classList.toggle("crit", pct >= 0.9);
+
+  usageUpgrade.style.display = pct >= 0.85 ? "block" : "none";
+
+  // Show when the counter resets (midnight local time)
+  const now = new Date();
+  const msUntilMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
+  const hh = Math.floor(msUntilMidnight / 3600000);
+  const mm = Math.floor((msUntilMidnight % 3600000) / 60000);
+  usageResetHint.textContent = `Resets in ${hh}h ${mm}m`;
+}
+
 moreBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   const open = moreDropdown.classList.toggle("open");
   moreBtn.classList.toggle("open", open);
-  if (open) { updateExploreHint(); refreshWindowPicker(); }
+  if (open) { refreshWindowPicker(); refreshUsageDisplay(); }
 });
 document.addEventListener("click", () => {
   moreDropdown.classList.remove("open");
   moreBtn.classList.remove("open");
+  winSubMenu.classList.remove("open");
+  moreWinItem.classList.remove("expanded");
   // Clear inline search when dropdown closes
   searchInput.value = "";
   renderSearchResults([]);
@@ -226,9 +261,9 @@ async function openNoteInSidepanel(note) {
   moreBtn.classList.remove("open");
   const cards = full.cards ?? (() => { try { return JSON.parse(full.content); } catch { return null; } })();
   if (Array.isArray(cards) && cards[0]?.front !== undefined) {
-    showFlashcards(cards, full.title, full.mode, full.filename);
+    showFlashcards(cards, full.title, full.mode);
   } else {
-    showResult(full.content, full.title, full.mode, full.filename);
+    showResult(full.content, full.title, full.mode);
   }
 }
 
@@ -379,18 +414,45 @@ async function saveNote({ title, mode, markdown, cards = null }) {
   return { filename, title: title ?? mode };
 }
 
+// ── Screen-reference detection ───────────────────────────────────────────────
+// Returns true if the message is likely asking about the current screen.
+function isScreenReference(msg) {
+  if (!msg) return false;
+  const m = msg.toLowerCase();
+  // Explicit screen references
+  if (/\b(screen|screenshot|page|slide|diagram|image|picture|photo|chart|graph|formula|equation|table|figure|shown|display|visible|here|this)\b/.test(m)) return true;
+  // Short vague questions with no named subject likely refer to what's on screen
+  // e.g. "what is this?", "explain this", "what does it mean?"
+  if (/\bthis\b/.test(m)) return true;
+  // Hebrew equivalents
+  if (/\b(מסך|תמונה|שקף|דיאגרמה|נוסחה|טבלה|כאן|זה|הנוכחי)\b/.test(m)) return true;
+  return false;
+}
+
 // ── Shared chat send logic ────────────────────────────────────────────────────
 async function sendChatMessage() {
   const message = titleInput.value.trim();
   if (!message && attachedFiles.length === 0) { captureBtn.click(); return; }
 
+  const hasUserImages = attachedFiles.some(f => f.isImage);
+  const hasHistory    = (await Messages.listByConversation(activeConversationId)).length > 0;
+  const needsScreen   = !hasUserImages && (
+    !hasHistory ||                      // first message → always capture
+    !message ||                         // no text → capture
+    isScreenReference(message)          // follow-up but references the screen
+  );
+
   // Capture screenshot NOW — must happen before any other await to preserve
   // the user-gesture context that authorises captureVisibleTab.
-  const hasUserImages = attachedFiles.some(f => f.isImage);
   let earlyScreenshot = null;
-  if (!hasUserImages) {
-    showSpinner("Capturing screen…");
-    try { earlyScreenshot = await captureTab(); } catch { /* permission denied or chrome:// page — handled below */ }
+  if (needsScreen) {
+    const cacheAge = Date.now() - _cacheTs;
+    if (hasHistory && message && isScreenReference(message) && _cachedScreenshot && cacheAge < SCREENSHOT_CACHE_TTL) {
+      earlyScreenshot = _cachedScreenshot; // screen likely unchanged — reuse to save tokens
+    } else {
+      showSpinner("Capturing screen…");
+      try { earlyScreenshot = await captureTab(); } catch { /* permission denied or chrome:// page — handled below */ }
+    }
   }
 
   titleInput.disabled = true;
@@ -440,35 +502,31 @@ async function sendChatMessage() {
       clearSelection();
     }
 
-    // Build history messages for multi-turn context
-    const exploredCtx = _convContextCache[activeConversationId] ?? await Conversations.getContext(activeConversationId);
-    const historyMsgs = [
-      ...(exploredCtx ? [{ role: "user", content: `[Document context — already explored]\n${exploredCtx}` }, { role: "assistant", content: "Understood, I have context about this document." }] : []),
-      ...history.map(m => ({ role: m.role, content: m.content })),
-    ];
+    // Build history messages for multi-turn context — cap at last 6 to avoid runaway token growth
+    const HISTORY_LIMIT = 6;
+    const historyMsgs = history
+      .slice(-HISTORY_LIMIT)
+      .map(m => ({ role: m.role, content: m.content }));
 
     if (imageFiles.length > 0) {
       // One or more images — vision model, include prior text history as system context
       const question = effectiveMessage || "Describe and analyze these images.";
-      reply = await analyzeWithQuestion(
-        imageFiles.map(f => ({ base64: f.base64, mimeType: f.mimeType })),
-        null,
-        historyMsgs.length > 0
-          ? `[Prior conversation context]\n${historyMsgs.map(m => `${m.role}: ${m.content}`).join("\n")}\n\n[User]\n${question}`
-          : question
-      );
+      const fullQuestion = historyMsgs.length > 0
+        ? `[Prior conversation context]\n${historyMsgs.map(m => `${m.role}: ${m.content}`).join("\n")}\n\n[User]\n${question}`
+        : question;
+      reply = await streamIntoCard(analyzeWithQuestionStream(
+        imageFiles.map(f => ({ base64: f.base64, mimeType: f.mimeType })), null, fullQuestion
+      ));
     } else if (effectiveMessage) {
-      // Text files or plain message — use the screenshot captured at gesture time
       if (earlyScreenshot) {
-        reply = await analyzeWithQuestion(earlyScreenshot.base64, earlyScreenshot.mimeType, effectiveMessage);
+        reply = await streamIntoCard(analyzeWithQuestionStream(earlyScreenshot.base64, earlyScreenshot.mimeType, effectiveMessage));
       } else {
-        const msgs = [...historyMsgs, { role: "user", content: effectiveMessage }];
-        reply = await chat(msgs);
+        reply = await streamIntoCard(chatStream([...historyMsgs, { role: "user", content: effectiveMessage }]));
       }
     } else {
       // No message and no files — fall back to screenshot
       if (!earlyScreenshot) throw new Error("Could not capture screen. Try navigating to a regular web page first.");
-      reply = await analyzeWithQuestion(earlyScreenshot.base64, earlyScreenshot.mimeType, "Describe and analyze this.");
+      reply = await streamIntoCard(analyzeWithQuestionStream(earlyScreenshot.base64, earlyScreenshot.mimeType, "Describe and analyze this."));
     }
 
     // Save effectiveMessage so file contents are preserved in history for follow-ups
@@ -477,18 +535,18 @@ async function sendChatMessage() {
 
     if (history.length === 0) {
       // Use typed message for title; fall back to attached filenames
-      const title = message.trim() ||
-        localFiles.map(f => f.name).join(", ");
+      const title = message.trim() || localFiles.map(f => f.name).join(", ");
       await Conversations.rename(activeConversationId, title.slice(0, 60));
     }
 
-    const isQuiz = reply.includes("**Answer:**");
-    appendCard(`
-      <div class="result-card">
-        ${isQuiz ? renderQuiz(reply) : `<div class="md-body" dir="auto">${renderMarkdown(reply)}</div>`}
-      </div>`,
-      isQuiz ? () => {
-        resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
+    // If the streamed response is quiz-formatted, re-render it properly
+    if (reply.includes("**Answer:**")) {
+      const cards = resultArea.querySelectorAll(".result-card");
+      const lastCard = cards[cards.length - 1];
+      const mdBody = lastCard?.querySelector(".md-body");
+      if (mdBody) {
+        mdBody.outerHTML = renderQuiz(reply);
+        lastCard.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
           btn.dataset.bound = "1";
           btn.addEventListener("click", () => {
             const el = document.getElementById(btn.dataset.answerId);
@@ -498,8 +556,9 @@ async function sendChatMessage() {
             btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
           });
         });
-      } : null
-    );
+      }
+    }
+
     loadConversations();
   } catch (err) { showError(err.message); }
   titleInput.disabled = false;
@@ -799,14 +858,6 @@ function renderConvTabs() {
     label.textContent = conv.title ?? "New conversation";
     tab.appendChild(label);
 
-    if (_convContextCache[conv.id]) {
-      const badge = document.createElement("span");
-      badge.className = "ctx-badge";
-      badge.title = "Explored context loaded";
-      badge.textContent = "ctx";
-      tab.appendChild(badge);
-    }
-
     tab.addEventListener("click", () => switchConversation(conv.id));
     tab.addEventListener("mousedown", (e) => { if (e.button === 1) { e.preventDefault(); deleteConvTab(conv.id); } });
     tab.addEventListener("contextmenu", (e) => {
@@ -887,10 +938,6 @@ async function loadConversations() {
 
 const PLACEHOLDER_HTML = `<p class="placeholder">Choose a mode, then hit <strong>⚡ Capture</strong>.<br>Or select text on any page to <strong>Ask</strong> about it.</p>`;
 
-function updateContextBadge() {
-  renderConvTabs(); // re-render to show/hide badge
-}
-
 async function switchConversation(id) {
   // Save current tab's content before leaving
   if (activeConversationId !== null) {
@@ -898,13 +945,6 @@ async function switchConversation(id) {
   }
   activeConversationId = id;
   await Conversations.setActive(id);
-
-  // Load explored context for this conversation into cache
-  if (_convContextCache[id] === undefined) {
-    const ctx = await Conversations.getContext(id);
-    _convContextCache[id] = ctx ?? null;
-  }
-  updateExploreHint();
 
   const cached = tabResults.get(id);
   if (cached !== undefined) {
@@ -1141,8 +1181,26 @@ function sendMessageSafe(msg) {
 // Uses null windowId (= current window) to avoid a tabs.query round-trip,
 // which would burn the user-gesture context before captureVisibleTab is called.
 async function captureTab() {
-  const dataUrl = await chrome.tabs.captureVisibleTab(targetWindowId, { format: "png" });
-  return { base64: dataUrl.replace(/^data:image\/png;base64,/, ""), mimeType: "image/png" };
+  const dataUrl = await chrome.tabs.captureVisibleTab(targetWindowId, { format: "jpeg", quality: 85 });
+  // Downscale to max 960px wide — cuts image tokens ~75% with no visible quality loss for AI
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX_W = 960;
+      const scale = img.width > MAX_W ? MAX_W / img.width : 1;
+      const w = Math.round(img.width  * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const resized = canvas.toDataURL("image/jpeg", 0.85);
+      const result = { base64: resized.replace(/^data:image\/jpeg;base64,/, ""), mimeType: "image/jpeg" };
+      _cachedScreenshot = result;
+      _cacheTs = Date.now();
+      resolve(result);
+    };
+    img.src = dataUrl;
+  });
 }
 
 // ── Window picker ────────────────────────────────────────────────────────────
@@ -1156,30 +1214,56 @@ async function refreshWindowPicker() {
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
   if (windows.length < 2) {
     moreWinItem.classList.add("hidden");
+    winSubMenu.classList.remove("open");
     targetWindowId = _ownWindowId;
     return;
   }
   moreWinItem.classList.remove("hidden");
 
-  windowPills.innerHTML = "";
+  // Update sub-menu entries
+  winSubMenu.innerHTML = "";
   windows.forEach((win, idx) => {
     const activeTab = win.tabs?.find(t => t.active);
     const label = activeTab?.title?.replace(/\s*[-|–]\s*(Google Chrome|Chrome).*$/, "").trim()
       || `Window ${idx + 1}`;
     const isOwn = win.id === _ownWindowId;
-    const pill = document.createElement("button");
-    pill.className = "win-pill" + (win.id === targetWindowId ? " selected" : "");
-    pill.title = activeTab?.title || label;
-    pill.innerHTML = `<span class="win-pill-icon">${isOwn ? "📌" : "🖥️"}</span>${label}`;
-    pill.addEventListener("click", (e) => {
-      e.stopPropagation(); // don't close dropdown
+    const isSelected = win.id === targetWindowId;
+
+    const entry = document.createElement("div");
+    entry.className = "win-entry" + (isSelected ? " selected" : "");
+    entry.title = activeTab?.title || label;
+    entry.innerHTML = `<span class="win-entry-icon">${isOwn ? "📌" : "🖥️"}</span><span style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(label)}</span>${isSelected ? '<span class="win-entry-check">✓</span>' : ""}`;
+    entry.addEventListener("click", (e) => {
+      e.stopPropagation();
       targetWindowId = win.id;
-      windowPills.querySelectorAll(".win-pill").forEach(p => p.classList.remove("selected"));
-      pill.classList.add("selected");
+      winCurrentLabel.textContent = label.length > 22 ? label.slice(0, 20) + "…" : label;
+      winSubMenu.querySelectorAll(".win-entry").forEach(el => {
+        el.classList.remove("selected");
+        el.querySelector(".win-entry-check")?.remove();
+      });
+      entry.classList.add("selected");
+      const check = document.createElement("span");
+      check.className = "win-entry-check"; check.textContent = "✓";
+      entry.appendChild(check);
+      // Close sub-menu after selection
+      winSubMenu.classList.remove("open");
+      moreWinItem.classList.remove("expanded");
     });
-    windowPills.appendChild(pill);
+    winSubMenu.appendChild(entry);
+
+    // Sync the header label with current selection
+    if (isSelected) {
+      winCurrentLabel.textContent = label.length > 22 ? label.slice(0, 20) + "…" : label;
+    }
   });
 }
+
+// Toggle sub-menu on click
+moreWinItem.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = winSubMenu.classList.toggle("open");
+  moreWinItem.classList.toggle("expanded", open);
+});
 
 // Refresh on open and whenever windows change
 refreshWindowPicker();
@@ -1200,11 +1284,10 @@ addPageBtn.addEventListener("click", async () => {
 });
 
 captureBtn.addEventListener("click", async () => {
-  if (selectedMode === "video") { startAudioCapture(true); return; }
   if (selectedMode === "audio") {
     const useMic = avOptMic.classList.contains("active");
     if (useMic) { startMicCapture(); return; }
-    startAudioCapture(false); return;
+    startAudioCapture(); return;
   }
 
   // In multi-page session, Capture adds a frame instead of analyzing immediately
@@ -1218,6 +1301,7 @@ captureBtn.addEventListener("click", async () => {
     showSpinner();
 
     const raw = await analyzeScreenshot(base64, mimeType, selectedMode);
+    refreshUsageDisplay();
     const noteTitle = titleInput.value.trim() || selectedMode;
 
     let markdown = raw;
@@ -1248,9 +1332,9 @@ captureBtn.addEventListener("click", async () => {
     }
 
     if (cards) {
-      showFlashcards(cards, saved.title, selectedMode, saved.filename);
+      showFlashcards(cards, saved.title, selectedMode);
     } else {
-      showResult(markdown, saved.title, selectedMode, saved.filename);
+      showResult(markdown, saved.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
   captureBtn.disabled = false;
@@ -1292,6 +1376,7 @@ askBtn.addEventListener("click", async () => {
     const capturedText = selectedText;
     clearSelection();
     const raw = await analyzeText(capturedText, selectedMode);
+    refreshUsageDisplay();
     const noteTitle = titleInput.value.trim() || "Selected text";
 
     let markdown = raw;
@@ -1313,9 +1398,9 @@ askBtn.addEventListener("click", async () => {
     await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : markdown);
 
     if (cards) {
-      showFlashcards(cards, saved.title, selectedMode, saved.filename);
+      showFlashcards(cards, saved.title, selectedMode);
     } else {
-      showResult(markdown, saved.title, selectedMode, saved.filename);
+      showResult(markdown, saved.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
   askBtn.disabled = false;
@@ -1329,58 +1414,6 @@ moreMultiBtn.addEventListener("click", () => {
   sessionFrames = [];
   sessionBar.classList.add("active");
   updateSessionBar();
-});
-
-// ── Explore File ─────────────────────────────────────────────────────────────
-// Silently analyzes attached files and stores a summary as persistent context
-// on the active conversation. Injected into all subsequent chat messages.
-
-function updateExploreHint() {
-  const ctx = _convContextCache[activeConversationId];
-  if (ctx) {
-    exploreHint.textContent = "✓ Context loaded";
-    exploreHint.style.color = "#6ee7b7";
-  } else {
-    exploreHint.textContent = attachedFiles.length > 0
-      ? "Build context from attached file"
-      : "Attach a file first";
-    exploreHint.style.color = "";
-  }
-}
-
-moreExploreBtn.addEventListener("click", async () => {
-  if (attachedFiles.length === 0) return;
-  moreDropdown.classList.remove("open");
-  moreBtn.classList.remove("open");
-
-  showSpinner("Exploring file…");
-  try {
-    const imageFiles = attachedFiles.filter(f => f.isImage);
-    const textFiles  = attachedFiles.filter(f => !f.isImage);
-    let contextText;
-
-    const prompt = "Give a concise overview of this material: what it is, its topic, key concepts, and any important details a student should know. Be factual and brief.";
-
-    if (imageFiles.length > 0) {
-      contextText = await analyzeWithQuestion(
-        imageFiles.map(f => ({ base64: f.base64, mimeType: f.mimeType })),
-        null,
-        prompt
-      );
-    } else {
-      const combined = textFiles.map(f => `--- ${f.name} ---\n${f.text}`).join("\n\n");
-      contextText = await analyzeText(combined, "explain");
-    }
-
-    await Conversations.setContext(activeConversationId, contextText);
-    _convContextCache[activeConversationId] = contextText;
-    updateExploreHint();
-    updateContextBadge();
-    showSpinner("Context loaded — AI now knows this file ✓");
-    setTimeout(() => { const sp = document.getElementById(SPINNER_ID); if (sp) sp.remove(); }, 2500);
-  } catch (err) {
-    showError("Explore failed: " + err.message);
-  }
 });
 
 function updateSessionBar() {
@@ -1404,6 +1437,7 @@ sessionFinish.addEventListener("click", async () => {
 
   try {
     const raw = await analyzeMulti(sessionFrames, selectedMode);
+    refreshUsageDisplay();
     const noteTitle = titleInput.value.trim() || `Multi (${sessionFrames.length} pages)`;
 
     let markdown = raw;
@@ -1425,9 +1459,9 @@ sessionFinish.addEventListener("click", async () => {
     await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : markdown);
 
     if (cards) {
-      showFlashcards(cards, saved.title, selectedMode, saved.filename);
+      showFlashcards(cards, saved.title, selectedMode);
     } else {
-      showResult(markdown, saved.title, selectedMode, saved.filename);
+      showResult(markdown, saved.title, selectedMode);
     }
   } catch (err) { showError(err.message); }
 
@@ -1438,7 +1472,7 @@ sessionFinish.addEventListener("click", async () => {
 });
 
 // ── Audio capture ───────────────────────────────────────────────────────────
-async function startAudioCapture(isVideo = false) {
+async function startAudioCapture() {
   captureBtn.disabled = true;
   try {
     const { streamId, error } = await sendMessageSafe({ type: "getTabCaptureStreamId" });
@@ -1446,36 +1480,22 @@ async function startAudioCapture(isVideo = false) {
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } },
-      video: isVideo
-        ? { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } }
-        : false,
+      video: false,
     });
 
-    if (!isVideo) {
-      // route audio to speakers so user can still hear the tab
-      const audioCtx = new AudioContext();
-      const source = audioCtx.createMediaStreamSource(stream);
-      source.connect(audioCtx.destination);
-      mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-      mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); audioCtx.close(); finishAudio(); };
-    } else {
-      // Route audio to speakers so user can still hear the tab while recording video
-      const audioCtxV = new AudioContext();
-      const sourceV = audioCtxV.createMediaStreamSource(stream);
-      sourceV.connect(audioCtxV.destination);
-      const mimeType = MediaRecorder.isTypeSupported("video/webm; codecs=vp9,opus")
-        ? "video/webm; codecs=vp9,opus"
-        : "video/webm";
-      mediaRecorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); audioCtxV.close(); finishAudio(); };
-    }
+    // route audio to speakers so user can still hear the tab
+    const audioCtx = new AudioContext();
+    const source = audioCtx.createMediaStreamSource(stream);
+    source.connect(audioCtx.destination);
+    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); audioCtx.close(); finishAudio(); };
 
     audioChunks = [];
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
     mediaRecorder.start(1000);
 
     recSeconds = 0;
-    document.getElementById("audioBarLabel").textContent = isVideo ? "Recording screen video…" : "Recording tab audio…";
+    document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
     audioBar.classList.add("active");
     timerInterval = setInterval(() => {
       recSeconds++;
@@ -1591,74 +1611,23 @@ stopAudio.addEventListener("click", () => {
   clearInterval(timerInterval);
   audioBar.classList.remove("active");
   document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
-  showSpinner(selectedMode === "video" ? "Extracting frames & transcribing…" : "Transcribing audio with Whisper…");
+  showSpinner("Transcribing audio with Whisper…");
 });
 
-// Extract up to `count` evenly-spaced JPEG frames from a video blob as base64 strings.
-async function extractVideoFrames(videoBlob, count = 4) {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(videoBlob);
-    const video = document.createElement("video");
-    video.muted = true;
-    video.src = url;
-    video.addEventListener("loadedmetadata", async () => {
-      const duration = video.duration;
-      if (!duration || !isFinite(duration)) { URL.revokeObjectURL(url); resolve([]); return; }
-      const canvas = document.createElement("canvas");
-      canvas.width  = Math.min(video.videoWidth,  1280);
-      canvas.height = Math.round(canvas.width * (video.videoHeight / video.videoWidth));
-      const ctx = canvas.getContext("2d");
-      const frames = [];
-      for (let i = 0; i < count; i++) {
-        video.currentTime = (duration * (i + 0.5)) / count;
-        await new Promise(r => video.addEventListener("seeked", r, { once: true }));
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        frames.push(canvas.toDataURL("image/jpeg", 0.82).replace(/^data:image\/jpeg;base64,/, ""));
-      }
-      URL.revokeObjectURL(url);
-      resolve(frames);
-    });
-    video.addEventListener("error", () => { URL.revokeObjectURL(url); resolve([]); });
-  });
-}
 
 async function finishAudio() {
-  const wasVideo = selectedMode === "video";
   try {
-    const blobType = wasVideo ? "video/webm" : "audio/webm";
-    const blob = new Blob(audioChunks, { type: blobType });
+    const blob = new Blob(audioChunks, { type: "audio/webm" });
     const userNote = titleInput.value.trim();
     if (userNote) titleInput.value = "";
 
-    let markdown, transcript, finalMarkdown, cards;
-    const audioMode = wasVideo ? `video-summary` : `audio-${selectedMode}`;
-
-    if (wasVideo) {
-      // Extract frames for visual context, transcribe audio for text context
-      const [frames, transcribeResult] = await Promise.all([
-        extractVideoFrames(blob),
-        transcribeAndSummarize(blob, selectedMode, userNote, audioChunks),
-      ]);
-      transcript = transcribeResult.transcript;
-      // If we got frames, enrich the result with visual analysis
-      if (frames.length > 0) {
-        const modePrompt = selectedMode === "flashcard"
-          ? `Generate flashcards based on both the visual content of these frames and this transcript.\nReturn ONLY a valid JSON array: [{\"front\":\"...\",\"back\":\"...\"}]\nTranscript: ${transcript}`
-          : `${userNote ? `User instruction: "${userNote}"\n\n` : ""}Analyze these video frames together with the following transcript and produce a ${selectedMode} study note.\n\nTranscript:\n${transcript}`;
-        markdown = await analyzeWithQuestion(
-          frames.map(b => ({ base64: b, mimeType: "image/jpeg" })),
-          "image/jpeg",
-          modePrompt,
-        );
-      } else {
-        markdown = transcribeResult.markdown;
-      }
-    } else {
-      ({ transcript, markdown } = await transcribeAndSummarize(blob, selectedMode, userNote, audioChunks));
-    }
+    const audioMode = `audio-${selectedMode}`;
+    let { markdown } = await transcribeAndSummarize(blob, selectedMode, userNote, audioChunks);
+    refreshUsageDisplay(); // token count updated by chatCompletion inside transcribeAndSummarize
 
     const noteTitle = userNote || "Recording";
-    finalMarkdown = markdown;
+    let finalMarkdown = markdown;
+    let cards;
 
     if (selectedMode === "flashcard") {
       try { cards = JSON.parse(markdown); } catch { cards = [{ front: "Parse error", back: markdown }]; }
@@ -1667,14 +1636,13 @@ async function finishAudio() {
 
     const saved = await saveNote({ title: noteTitle, mode: audioMode, markdown: finalMarkdown, cards });
 
-    const msgIcon = wasVideo ? "🎥" : "🎙️";
-    await Messages.append(activeConversationId, "user", `${msgIcon} Recording (${selectedMode})`);
+    await Messages.append(activeConversationId, "user", `🎙️ Recording (${selectedMode})`);
     await Messages.append(activeConversationId, "assistant", cards ? JSON.stringify(cards) : finalMarkdown);
 
     if (cards) {
-      showFlashcards(cards, saved.title, audioMode, saved.filename);
+      showFlashcards(cards, saved.title, audioMode);
     } else {
-      showResult(finalMarkdown, saved.title, audioMode, saved.filename);
+      showResult(finalMarkdown, saved.title, audioMode);
     }
   } catch (err) { showError(err.message); }
   mediaRecorder = null;
@@ -1697,14 +1665,13 @@ avOptMic.addEventListener("click", () => {
 });
 
 function resetCaptureBtn() {
-  if (selectedMode === "video") captureBtn.textContent = "🎥 Record";
-  else if (selectedMode === "audio") {
+  if (selectedMode === "audio") {
     captureBtn.textContent = avOptMic.classList.contains("active") ? "🎤 Record" : "🎙️ Record";
   } else captureBtn.textContent = "⚡ Capture";
 }
 
 function updateInputPlaceholder() {
-  if (selectedMode === "audio" || selectedMode === "video") {
+  if (selectedMode === "audio") {
     titleInput.placeholder = "Instructions for AI, e.g. 'explain deeply' or 'just transcribe'…";
   } else {
     titleInput.placeholder = "Ask about this screen…";
@@ -1736,13 +1703,70 @@ function appendCard(htmlStr, afterInsert) {
   resultArea.scrollTop = resultArea.scrollHeight;
 }
 
-function showSpinner(msg = "") {
+// Stream an async generator into a live-updating result card.
+// Renders markdown incrementally; returns the full accumulated text.
+async function streamIntoCard(generator) {
+  document.getElementById(SPINNER_ID)?.remove();
+  resultArea.querySelector(".placeholder")?.remove();
+
+  const card = document.createElement("div");
+  card.className = "result-card";
+  const body = document.createElement("div");
+  body.className = "md-body";
+  body.setAttribute("dir", "auto");
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "card-copy-btn";
+  copyBtn.title = "Copy to clipboard";
+  copyBtn.textContent = "⎘";
+  card.appendChild(body);
+  card.appendChild(copyBtn);
+  resultArea.appendChild(card);
+  resultArea.scrollTop = resultArea.scrollHeight;
+
+  let full = "";
+  let rafId = null;
+  const scheduleRender = () => {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+      body.innerHTML = renderMarkdown(full);
+      resultArea.scrollTop = resultArea.scrollHeight;
+      rafId = null;
+    });
+  };
+
+  try {
+    for await (const delta of generator) {
+      full += delta;
+      scheduleRender();
+    }
+  } catch (e) {
+    if (rafId) cancelAnimationFrame(rafId);
+    card.remove();
+    throw e;
+  }
+
+  if (rafId) cancelAnimationFrame(rafId);
+  body.innerHTML = renderMarkdown(full);
+  resultArea.scrollTop = resultArea.scrollHeight;
+
+  copyBtn.addEventListener("click", () => {
+    const text = card.innerText.replace(/^⎘\s*/m, "").trim();
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.textContent = "✓";
+      setTimeout(() => { copyBtn.textContent = "⎘"; }, 1500);
+    });
+  });
+
+  return full;
+}
+
+function showSpinner() {
   document.getElementById(SPINNER_ID)?.remove();
   resultArea.querySelector(".placeholder")?.remove();
   const div = document.createElement("div");
   div.id = SPINNER_ID;
   div.className = "spinner";
-  div.innerHTML = `<span></span><span></span><span></span>${msg ? `<span class="spinner-label">${escapeHtml(msg)}</span>` : ""}`;
+  div.innerHTML = `<span></span><span></span><span></span>`;
   resultArea.appendChild(div);
   resultArea.scrollTop = resultArea.scrollHeight;
 }
@@ -1756,17 +1780,14 @@ function resultHeadline(mode, title) {
   return `<div class="result-headline">${display}${hasTitle ? `: ${escapeHtml(title)}` : ""}</div>`;
 }
 
-function showResult(markdown, title, mode, filename) {
+function showResult(markdown, title, mode) {
   const bodyHtml = (mode === "quiz")
     ? renderQuiz(markdown)
     : `<div class="md-body" dir="auto">${renderMarkdown(markdown)}</div>`;
-  const dashLink = filename ? `<div class="open-dash-row"><button class="open-dash-btn" data-filename="${escapeHtml(filename)}">↗ View in Dashboard</button></div>` : "";
-
   appendCard(`
     <div class="result-card">
       ${resultHeadline(mode, title)}
       ${bodyHtml}
-      ${dashLink}
     </div>`,
     () => {
       if (mode === "quiz") {
@@ -1781,12 +1802,11 @@ function showResult(markdown, title, mode, filename) {
           });
         });
       }
-      if (filename) bindDashBtn(filename);
     }
   );
 }
 
-function showFlashcards(cards, title, mode = "flashcard", filename) {
+function showFlashcards(cards, title, mode = "flashcard") {
   const prefix = `fc${++_uid}_`;
   const grid = cards.map((card, i) => `
     <div class="flashcard" id="${prefix}${i}">
@@ -1794,38 +1814,33 @@ function showFlashcards(cards, title, mode = "flashcard", filename) {
       <div class="flashcard-back"><span class="fc-label">A</span>${renderMarkdown(card.back)}</div>
     </div>
   `).join("");
-  const dashLink = filename ? `<div class="open-dash-row"><button class="open-dash-btn" data-filename="${escapeHtml(filename)}">↗ View in Dashboard</button></div>` : "";
-
   appendCard(`
     <div class="result-card" style="background:transparent;border:none;padding:0">
       ${resultHeadline(mode, title)}
       <div class="flashcard-grid">${grid}</div>
-      ${dashLink}
-    </div>`,
-    () => {
-      if (filename) bindDashBtn(filename);
-    }
+    </div>`
   );
 }
 
 function showError(msg) {
   document.getElementById(SPINNER_ID)?.remove();
   const existing = resultArea.querySelector(".error-card:last-child");
-  if (existing) {
+
+  const isQuotaError = msg.toLowerCase().includes("daily token limit") || msg.toLowerCase().includes("quota");
+  const html = isQuotaError
+    ? `<div class="error-card error-card-quota">
+        <div class="quota-icon">🚫</div>
+        <strong>Daily quota reached</strong>
+        <p>Your free Groq quota resets every 24 hours.</p>
+        <a class="quota-upgrade-btn" href="https://console.groq.com" target="_blank">↗ Upgrade at console.groq.com</a>
+      </div>`
+    : `<div class="error-card"><strong>Error:</strong> ${escapeHtml(msg)}</div>`;
+
+  if (existing && !isQuotaError) {
     existing.innerHTML = `<strong>Error:</strong> ${escapeHtml(msg)}`;
     return;
   }
-  appendCard(`<div class="error-card"><strong>Error:</strong> ${escapeHtml(msg)}</div>`);
-}
-
-function bindDashBtn(filename) {
-  resultArea.querySelectorAll(`.open-dash-btn[data-filename="${CSS.escape(filename)}"]:not([data-bound])`).forEach((btn) => {
-    btn.dataset.bound = "1";
-    btn.addEventListener("click", async () => {
-      await chrome.storage.local.set({ pendingOpenNote: filename });
-      chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
-    });
-  });
+  appendCard(html);
 }
 
 // Extract a meaningful topic title from AI markdown output.

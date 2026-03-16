@@ -16,7 +16,7 @@
  *   verifyApiKey(key)                         → { ok, error? }
  */
 
-import { Settings } from "./storage.js";
+import { Settings, TokenUsage } from "./storage.js";
 
 const GROQ_API = "https://api.groq.com/openai/v1";
 const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
@@ -47,56 +47,42 @@ function authHeaders(key) {
 
 // ─── Prompts (identical to gateway/groq.js) ──────────────────────────────────
 
-const SYSTEM_PROMPT = `You are LookUp — a personal Study Sensei helping students understand academic content.
+const SYSTEM_PROMPT = `You are LookUp, a study assistant for students.
 
-STRICT PRIVACY RULES — follow unconditionally:
-- If you detect passwords, credit card numbers, bank details, SSNs, or any credentials, respond ONLY with: "I noticed sensitive information on screen. Please hide it before using LookUp."
-- Never repeat, summarize, or reference any sensitive data.
+Privacy: If you detect passwords, credit cards, bank details, SSNs, or credentials, respond ONLY with: "I noticed sensitive information on screen. Please hide it before using LookUp." Never reference such data.
 
-FORMATTING RULES:
-- Use GitHub-flavored Markdown.
-- Mathematical expressions: inline $...$ and block $$...$$
-- Diagrams/flows/relationships: Mermaid.js code blocks (\`\`\`mermaid)
-- Bold key terms with **term**.`;
+Format: GitHub-flavored Markdown. Math: $...$ inline, $$...$$ block. Diagrams: \`\`\`mermaid. Bold key terms: **term**.`;
 
 const modePrompts = {
-  summary: `Analyze this screenshot and produce a concise structured study summary.
-
-Output exactly this structure (omit any section that isn't applicable):
+  summary: `Produce a structured study summary:
 
 ## Overview
-One paragraph stating what this is about and why it matters.
+One paragraph: what this is and why it matters.
 
 ## Key Concepts
-- **Term or concept**: Clear, brief explanation
-(Include 4–8 bullet points covering the most important ideas)
+- **Term**: explanation (4–8 bullets)`,
 
-`,
+  explain: `Explain this as a patient tutor:
+1. Start with **why this topic exists** (1 short paragraph)
+2. Walk concepts in logical order — plain language first, technical terms second
+3. For formulas/algorithms — explain each part in plain English before math
+4. Give a real-world analogy for the most abstract concept
+5. End with: **The key insight:** [one sentence]
 
-  explain: `You are a patient, engaging tutor. A student shared this screenshot and asked "Can you explain this to me?"
-
-Your explanation must:
-1. Open with **why this topic exists** — the real-world motivation or problem it solves (1 short paragraph)
-2. Walk through each concept in logical order — plain language first, technical terms second
-3. For any formula or algorithm — describe what each part *does* in plain English before showing math
-4. Give a concrete real-world analogy for the most abstract concept
-5. Close with: **The key insight:** [one sentence capturing the essence]
-
-Write conversationally, like a knowledgeable friend explaining over coffee. Use headers only for major topic shifts — this should read like a spoken explanation, not a textbook.`,
+Write conversationally, not like a textbook.`,
 
   session: `These are multiple slides from the same lecture. Produce one unified study summary.
 
 ## Session Overview
-What this lecture session covers (1 paragraph).
+What this session covers (1 paragraph).
 
 ## Core Topics Covered
-For each major topic across the slides:
+For each major topic:
 ### [Topic Name]
-- Key points
-- Formulas if present (LaTeX)
+- Key points and formulas (LaTeX)
 
 ## How the Concepts Connect
-Explain the narrative arc — how ideas build on each other across the session.
+How ideas build on each other across the session.
 
 ## Study Questions
 3–5 questions spanning the full session.`,
@@ -134,9 +120,11 @@ async function chatCompletion(key, messages, temperature = 0.4) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    if (res.status === 429) throw new Error("Daily token limit reached. Your quota resets every 24 hours — try again tomorrow, or upgrade at console.groq.com.");
     throw new Error(err.error?.message ?? `Groq API error ${res.status}`);
   }
   const data = await res.json();
+  if (data.usage?.total_tokens) TokenUsage.add(data.usage.total_tokens);
   return data.choices[0].message.content;
 }
 
@@ -144,10 +132,11 @@ async function* chatCompletionStream(key, messages, temperature = 0.6) {
   const res = await fetch(`${GROQ_API}/chat/completions`, {
     method: "POST",
     headers: authHeaders(key),
-    body: JSON.stringify({ model: VISION_MODEL, messages, temperature, stream: true }),
+    body: JSON.stringify({ model: VISION_MODEL, messages, temperature, stream: true, stream_options: { include_usage: true } }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    if (res.status === 429) throw new Error("Daily token limit reached. Your quota resets every 24 hours — try again tomorrow, or upgrade at console.groq.com.");
     throw new Error(err.error?.message ?? `Groq API error ${res.status}`);
   }
 
@@ -167,6 +156,8 @@ async function* chatCompletionStream(key, messages, temperature = 0.6) {
       if (data === "[DONE]") return;
       try {
         const chunk = JSON.parse(data);
+        // Final chunk from stream_options.include_usage carries real token counts
+        if (chunk.usage?.total_tokens) TokenUsage.add(chunk.usage.total_tokens);
         const delta = chunk.choices?.[0]?.delta?.content;
         if (delta) yield delta;
       } catch {}
@@ -218,26 +209,12 @@ export async function analyzeScreenshot(base64Image, mimeType = "image/png", mod
     prompt += "\n\nכתוב את כל התשובה בעברית בלבד.";
   }
 
-  // For quiz/flashcard: extract text first to compute accurate count
-  if (mode === "quiz" || mode === "flashcard") {
-    const visibleText = await chatCompletion(key, [
-      {
-        role: "user",
-        content: [
-          { type: "image_url", image_url: { url: imageUrl } },
-          { type: "text", text: "Extract all visible text from this image. Output only the raw text, no commentary." },
-        ],
-      },
-    ], 0);
-
-    if (mode === "quiz") {
-      const n = quizQuestionCount(visibleText);
-      const langNote = _responseLanguage === "he" ? "\n\nכתוב את כל השאלות והתשובות בעברית." : "";
-      prompt = `Create a ${n}-question quiz based on this screenshot to test real understanding — not just memorization.\n\nFormat each question exactly like this:\n\n**Q1.** [Question]\n**Answer:** [Answer in 5–60 words — concise but complete]\n\nInclude these question types (proportionally to question count):\n- At least one "explain why…" question\n- At least one application question (how/when would you use this?)\n- If questions ≥ 4, include a comparison question (what's the difference between X and Y?)\n- Remaining questions can test definitions or recall\n\nIMPORTANT: Keep every answer between 5 and 60 words. No lengthy paragraphs.${langNote}`;
-    } else {
-      const n = flashcardCount(visibleText);
-      prompt = `Generate exactly ${n} flashcards from this screenshot.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]`;
-    }
+  // For quiz/flashcard: use a fixed count and send image directly — avoids a double API call
+  if (mode === "quiz") {
+    const langNote = _responseLanguage === "he" ? "\n\nכתוב את כל השאלות והתשובות בעברית." : "";
+    prompt = `Create a 5-question quiz based on this screenshot to test real understanding — not just memorization.\n\nFormat each question exactly like this:\n\n**Q1.** [Question]\n**Answer:** [Answer in 5–60 words — concise but complete]\n\nInclude these question types:\n- At least one "explain why…" question\n- At least one application question (how/when would you use this?)\n- One comparison question (what's the difference between X and Y?)\n- Remaining questions can test definitions or recall\n\nIMPORTANT: Keep every answer between 5 and 60 words. No lengthy paragraphs.${langNote}`;
+  } else if (mode === "flashcard") {
+    prompt = `Generate 5 flashcards from this screenshot.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]`;
   }
 
   return chatCompletion(key, [
@@ -286,6 +263,26 @@ export async function analyzeWithQuestion(base64Image, mimeType = "image/png", q
   }));
   const langSuffix = _responseLanguage === "he" ? "\n\nכתוב את כל התשובה בעברית בלבד." : "";
   return chatCompletion(key, [
+    { role: "system", content: buildSystemPrompt() },
+    {
+      role: "user",
+      content: [...imageContent, { type: "text", text: question + langSuffix }],
+    },
+  ]);
+}
+
+/** Streaming variant of analyzeWithQuestion — yields string deltas. */
+export async function* analyzeWithQuestionStream(base64Image, mimeType = "image/png", question) {
+  const key = await getKey();
+  const images = Array.isArray(base64Image)
+    ? base64Image
+    : [{ base64: base64Image, mimeType }];
+  const imageContent = images.map(img => ({
+    type: "image_url",
+    image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
+  }));
+  const langSuffix = _responseLanguage === "he" ? "\n\nכתוב את כל התשובה בעברית בלבד." : "";
+  yield* chatCompletionStream(key, [
     { role: "system", content: buildSystemPrompt() },
     {
       role: "user",
