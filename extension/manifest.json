@@ -9,8 +9,7 @@
     "tabs",
     "sidePanel",
     "tabCapture",
-    "storage",
-    "microphone"
+    "storage"
   ],
 
   "host_permissions": [

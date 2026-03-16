@@ -68,7 +68,7 @@
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     }
     .header-sub { font-size: 10px; color: #333; }
-    .header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-right: 4px; }
+    .header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-right: 4px; position: relative; }
 
     /* More-options dropdown */
     .btn-more {
@@ -86,7 +86,7 @@
     }
     .more-dropdown {
       display: none; position: absolute;
-      top: calc(100% + 6px); right: 0; width: 210px;
+      top: calc(100% + 6px); right: 0; width: 231px;
       background: #16162a; border: 1px solid rgba(124,106,245,0.25);
       border-radius: 14px; padding: 8px; z-index: 1000;
       box-shadow: 0 10px 36px rgba(0,0,0,0.6);
@@ -329,6 +329,16 @@
     }
     .btn-session:hover  { border-color: rgba(124,106,245,0.5); color: #c0b8ff; background: rgba(124,106,245,0.07); }
     .btn-session.hidden { display: none; }
+
+    .btn-clear-view {
+      width: 26px; height: 26px; flex-shrink: 0;
+      border: 1px solid rgba(124,106,245,0.15);
+      border-radius: 7px; background: transparent;
+      color: #444; cursor: pointer; font-size: 13px;
+      display: flex; align-items: center; justify-content: center;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .btn-clear-view:hover { border-color: rgba(239,68,68,0.4); color: #f87171; background: rgba(239,68,68,0.07); }
 
     /* ── SELECTION BAR ───────────────────────── */
     .selection-bar {
@@ -956,6 +966,9 @@
 
       <!-- Multi-page button -->
       <button class="btn-session" id="sessionBtn">+ Multi</button>
+
+      <!-- Clear view button -->
+      <button class="btn-clear-view" id="clearViewBtn" title="Clear results (keeps conversation history)">↺</button>
     </div>
 
   </div>

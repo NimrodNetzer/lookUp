@@ -23,7 +23,6 @@ const dropdownItems    = document.querySelectorAll(".dropdown-item");
 // (dashboardBtn and searchBtn now live inside the more-dropdown — handled below)
 const searchInput      = document.getElementById("searchInput");
 const searchResults    = document.getElementById("searchResults");
-const searchEmpty      = document.getElementById("searchEmpty");
 const selectionBar     = document.getElementById("selectionBar");
 const selectionPreview = document.getElementById("selectionPreview");
 const askBtn           = document.getElementById("askBtn");
@@ -49,7 +48,6 @@ let selectedMode        = "summary";
 
 let selectedText        = "";
 let sessionFrames       = [];
-let inSession           = false;
 let mediaRecorder       = null;
 let audioChunks         = [];
 let timerInterval       = null;
@@ -65,7 +63,6 @@ let attachedFiles = []; // [{ base64, mimeType, name, isImage }, ...]
 // ── Tab drag state ────────────────────────────────────────────────────────────
 let dragConvId     = null;
 let mergeTimer     = null;
-let mergeTargetId  = null;
 
 function clearDropIndicators() {
   convTabs.querySelectorAll(".tab-drop-before,.tab-drop-after,.tab-drop-merge")
@@ -73,7 +70,6 @@ function clearDropIndicators() {
 }
 function clearMergeTimer() {
   if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = null; }
-  mergeTargetId = null;
 }
 
 // ── Tab bar scroll arrows ─────────────────────────────────────────────────────
@@ -122,6 +118,11 @@ document.addEventListener("click", () => {
 });
 moreDropdown.addEventListener("click", (e) => e.stopPropagation());
 document.addEventListener("keydown", (e) => {
+  // Alt+S — trigger capture (same as clicking the Capture/Record button)
+  if (e.altKey && e.key === "s" && !captureBtn.disabled && !mediaRecorder) {
+    e.preventDefault();
+    captureBtn.click();
+  }
   if (e.key === "Escape" && moreDropdown.classList.contains("open")) {
     moreDropdown.classList.remove("open");
     moreBtn.classList.remove("open");
@@ -230,6 +231,7 @@ dropdownItems.forEach((item) => {
     if (mediaRecorder) return;
 
     selectedMode = item.dataset.mode;
+    chrome.storage.local.set({ savedMode: selectedMode });
 
     modeTrigger.querySelector(".mode-icon").textContent = item.dataset.icon;
     modeLabel.textContent = item.querySelector(".d-name").textContent;
@@ -311,6 +313,15 @@ async function sendChatMessage() {
   const message = titleInput.value.trim();
   if (!message && attachedFiles.length === 0) { captureBtn.click(); return; }
 
+  // Capture screenshot NOW — must happen before any other await to preserve
+  // the user-gesture context that authorises captureVisibleTab.
+  const hasUserImages = attachedFiles.some(f => f.isImage);
+  let earlyScreenshot = null;
+  if (!hasUserImages) {
+    showSpinner("Capturing screen…");
+    try { earlyScreenshot = await captureTab(); } catch { /* permission denied or chrome:// page — handled below */ }
+  }
+
   titleInput.disabled = true;
   chatSendBtn.disabled = true;
   const attachBtn = document.getElementById("attachBtn");
@@ -364,18 +375,17 @@ async function sendChatMessage() {
           : question
       );
     } else if (effectiveMessage) {
-      // Text files or plain message — text-only path (with optional tab screenshot)
-      try {
-        const { base64, mimeType } = await captureTab();
-        reply = await analyzeWithQuestion(base64, mimeType, effectiveMessage);
-      } catch {
+      // Text files or plain message — use the screenshot captured at gesture time
+      if (earlyScreenshot) {
+        reply = await analyzeWithQuestion(earlyScreenshot.base64, earlyScreenshot.mimeType, effectiveMessage);
+      } else {
         const msgs = [...historyMsgs, { role: "user", content: effectiveMessage }];
         reply = await chat(msgs);
       }
     } else {
       // No message and no files — fall back to screenshot
-      const { base64, mimeType } = await captureTab();
-      reply = await analyzeWithQuestion(base64, mimeType, "Describe and analyze this.");
+      if (!earlyScreenshot) throw new Error("Could not capture screen. Try navigating to a regular web page first.");
+      reply = await analyzeWithQuestion(earlyScreenshot.base64, earlyScreenshot.mimeType, "Describe and analyze this.");
     }
 
     // Save effectiveMessage so file contents are preserved in history for follow-ups
@@ -645,9 +655,41 @@ setupSaveBtn.addEventListener("click", async () => {
   await loadActiveConversation();
 });
 
+// ── Mode persistence ─────────────────────────────────────────────────────────
+function applyModeUI(mode) {
+  const item = [...dropdownItems].find(d => d.dataset.mode === mode);
+  if (!item) return;
+  selectedMode = mode;
+  modeTrigger.querySelector(".mode-icon").textContent = item.dataset.icon;
+  modeLabel.textContent = item.querySelector(".d-name").textContent;
+  modeTrigger.style.setProperty("--mode-color", item.dataset.color);
+  dropdownItems.forEach(d => d.classList.remove("active"));
+  item.classList.add("active");
+  sessionBtn.classList.toggle("hidden", selectedMode === "audio" || selectedMode === "video");
+  avToggleRow.classList.toggle("active", selectedMode === "audio");
+  updateInputPlaceholder();
+}
+
+async function initMode() {
+  const data = await chrome.storage.local.get(["savedMode", "savedAudioSrc"]).catch(() => ({}));
+  if (data.savedMode) applyModeUI(data.savedMode);
+  if (data.savedAudioSrc === "mic") {
+    avOptMic.classList.add("active");
+    avOptAudio.classList.remove("active");
+    resetCaptureBtn();
+  }
+}
+
+// ── Clear view button ────────────────────────────────────────────────────────
+document.getElementById("clearViewBtn").addEventListener("click", () => {
+  tabResults.delete(activeConversationId);
+  resultArea.innerHTML = PLACEHOLDER_HTML;
+});
+
 // Show overlay if not configured, otherwise boot normally
 async function initSetup() {
   await initLang();
+  await initMode();
   const configured = await Settings.isConfigured();
   if (configured) {
     setupOverlay.classList.add("hidden");
@@ -712,7 +754,6 @@ function renderConvTabs() {
       } else if (rel > 0.7) {
         tab.classList.add("tab-drop-after");
       } else {
-        mergeTargetId = conv.id;
         mergeTimer = setTimeout(() => {
           clearDropIndicators();
           convTabs.querySelector(`.conv-tab[data-id="${conv.id}"]`)?.classList.add("tab-drop-merge");
@@ -927,7 +968,7 @@ function renderAllMessages(messages) {
     if (msg.role === "user") {
       const el = document.createElement("div");
       el.className = "msg-user";
-      el.textContent = msg.content;
+      el.innerHTML = `<div>${escapeHtml(msg.content)}</div>`;
       resultArea.appendChild(el);
     } else if (msg.role === "assistant") {
       let cards = null;
@@ -975,7 +1016,10 @@ async function loadActiveConversation() {
     activeConversationId = conv.id;
     await loadConversations();
     const messages = await Messages.listByConversation(conv.id);
-    if (messages.length > 0) renderAllMessages(messages);
+    if (messages.length > 0) {
+      renderAllMessages(messages);
+      resultArea.scrollTop = resultArea.scrollHeight;
+    }
   } catch (err) { console.error(err); }
 }
 
@@ -998,10 +1042,10 @@ function sendMessageSafe(msg) {
 }
 
 // ── Tab capture helper ──────────────────────────────────────────────────────
+// Uses null windowId (= current window) to avoid a tabs.query round-trip,
+// which would burn the user-gesture context before captureVisibleTab is called.
 async function captureTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.windowId) throw new Error("No active tab found.");
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+  const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: "png" });
   return { base64: dataUrl.replace(/^data:image\/png;base64,/, ""), mimeType: "image/png" };
 }
 
@@ -1054,6 +1098,13 @@ captureBtn.addEventListener("click", async () => {
     // Append to conversation
     await Messages.append(activeConversationId, "user", `📸 Screenshot (${selectedMode})`);
     await Messages.append(activeConversationId, "assistant", selectedMode === "flashcard" ? JSON.stringify(cards) : markdown);
+
+    // Auto-rename tab on first capture
+    const history = await Messages.listByConversation(activeConversationId);
+    if (history.length <= 2) {
+      await Conversations.rename(activeConversationId, noteTitle.slice(0, 60));
+      loadConversations();
+    }
 
     if (cards) {
       showFlashcards(cards, saved.title, selectedMode, saved.filename);
@@ -1268,19 +1319,20 @@ micPermDismiss.addEventListener("click", () => micPermBanner.classList.remove("a
 
 // Called from the "Allow" button inside the sidepanel — this IS a user gesture,
 // so Chrome will show the permission dialog here without needing a new tab.
-micPermGrantBtn.addEventListener("click", async () => {
+micPermGrantBtn.addEventListener("click", () => {
   micPermGrantBtn.disabled = true;
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    stream.getTracks().forEach(t => t.stop()); // just granting; actual recording starts on next Record click
-    micPermBanner.classList.remove("active");
-  } catch (err) {
-    micPermGrantBtn.disabled = false;
-    if (err.name === "NotAllowedError") {
+  // getUserMedia is blocked in the sidepanel context; open the dedicated permission page instead
+  chrome.tabs.create({ url: chrome.runtime.getURL("mic-permission.html") });
+  micPermBanner.classList.remove("active");
+});
+
+// Listen for the result from mic-permission.html (sent via chrome.runtime.sendMessage)
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "micPermissionResult") {
+    if (!msg.granted) {
       showError("Microphone blocked. Enable it at: chrome://settings/content/microphone");
-    } else {
-      showError(err.message);
     }
+    micPermGrantBtn.disabled = false;
   }
 });
 
@@ -1428,11 +1480,13 @@ async function finishAudio() {
 avOptAudio.addEventListener("click", () => {
   avOptAudio.classList.add("active");
   avOptMic.classList.remove("active");
+  chrome.storage.local.set({ savedAudioSrc: "tab" });
   resetCaptureBtn();
 });
 avOptMic.addEventListener("click", () => {
   avOptMic.classList.add("active");
   avOptAudio.classList.remove("active");
+  chrome.storage.local.set({ savedAudioSrc: "mic" });
   resetCaptureBtn();
 });
 
@@ -1550,16 +1604,32 @@ function showFlashcards(cards, title, mode = "flashcard", filename) {
 
 function showError(msg) {
   document.getElementById(SPINNER_ID)?.remove();
+  const existing = resultArea.querySelector(".error-card:last-child");
+  if (existing) {
+    existing.innerHTML = `<strong>Error:</strong> ${escapeHtml(msg)}`;
+    return;
+  }
   appendCard(`<div class="error-card"><strong>Error:</strong> ${escapeHtml(msg)}</div>`);
 }
 
 function bindDashBtn(filename) {
   resultArea.querySelectorAll(`.open-dash-btn[data-filename="${CSS.escape(filename)}"]:not([data-bound])`).forEach((btn) => {
     btn.dataset.bound = "1";
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
+      await chrome.storage.local.set({ pendingOpenNote: filename });
       chrome.tabs.create({ url: chrome.runtime.getURL("built/dashboard.html") });
     });
   });
+}
+
+// Returns 'rtl' if the text (stripped of HTML tags) contains more Hebrew/Arabic
+// characters than Latin ones, otherwise 'auto'. Prevents dir="auto" from
+// wrongly choosing LTR just because a bold English term appears first.
+function bidiDir(html) {
+  const text = html.replace(/<[^>]+>/g, " ");
+  const rtlCount = (text.match(/[\u0590-\u05FF\u0600-\u06FF\uFB1D-\uFB4F]/g) ?? []).length;
+  const ltrCount = (text.match(/[A-Za-z]/g) ?? []).length;
+  return rtlCount > ltrCount ? "rtl" : "auto";
 }
 
 function escapeHtml(str = "") {
@@ -1597,9 +1667,9 @@ function renderQuiz(markdown) {
 
     html += `
       <div class="quiz-block">
-        <div class="quiz-question md-body">${renderMarkdown(questionPart)}</div>
+        <div class="quiz-question md-body" dir="${bidiDir(questionPart)}">${renderMarkdown(questionPart)}</div>
         <button class="quiz-reveal-btn" data-answer-id="${id}">▶ Show Answer</button>
-        <div class="quiz-answer md-body" id="${id}" style="display:none">${renderMarkdown(answerPart)}</div>
+        <div class="quiz-answer md-body" id="${id}" dir="${bidiDir(answerPart)}" style="display:none">${renderMarkdown(answerPart)}</div>
       </div>`;
   }
 
@@ -1723,11 +1793,13 @@ function renderMarkdown(raw) {
     if (/^[*-] /.test(line)) {
       if (inOl) { out.push('</ol>'); inOl = false; }
       if (!inUl) { out.push('<ul class="md-ul">'); inUl = true; }
-      out.push(`<li dir="auto">${line.replace(/^[*-] /, '')}</li>`);
+      const liContent = line.replace(/^[*-] /, '');
+      out.push(`<li dir="${bidiDir(liContent)}">${liContent}</li>`);
     } else if (/^\d+\. /.test(line)) {
       if (inUl) { out.push('</ul>'); inUl = false; }
       if (!inOl) { out.push('<ol class="md-ol">'); inOl = true; }
-      out.push(`<li dir="auto">${line.replace(/^\d+\. /, '')}</li>`);
+      const liContent = line.replace(/^\d+\. /, '');
+      out.push(`<li dir="${bidiDir(liContent)}">${liContent}</li>`);
     } else {
       if (inUl) { out.push('</ul>'); inUl = false; }
       if (inOl) { out.push('</ol>'); inOl = false; }
@@ -1737,7 +1809,7 @@ function renderMarkdown(raw) {
       } else if (BLOCK_STARTS.some(b => t.startsWith(b))) {
         out.push(t);
       } else {
-        out.push(`<p class="md-p" dir="auto">${t}</p>`);
+        out.push(`<p class="md-p" dir="${bidiDir(t)}">${t}</p>`);
       }
     }
   }
