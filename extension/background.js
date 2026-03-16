@@ -10,6 +10,21 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ windowId: tab.windowId });
 });
 
+// Cache the focused window ID so the command handler can call sidePanel.open()
+// synchronously — Chrome requires no await before sidePanel.open() or it throws
+// "may only be called in response to a user gesture".
+let _focusedWindowId = null;
+chrome.windows.onFocusChanged.addListener((id) => { if (id > 0) _focusedWindowId = id; });
+chrome.tabs.onActivated.addListener(({ windowId }) => { _focusedWindowId = windowId; });
+
+// Alt+S keyboard shortcut — opens the side panel from anywhere
+chrome.commands.onCommand.addListener((command) => {
+  if (command !== "open-sidepanel") return;
+  if (_focusedWindowId) {
+    chrome.sidePanel.open({ windowId: _focusedWindowId }).catch(() => {});
+  }
+});
+
 // Keep service worker alive so sidepanel messages don't hang.
 // MV3 SWs sleep after ~30s of inactivity; sidepanel pings every 25s.
 // Also relay mic permission results from the helper tab back to the sidepanel.

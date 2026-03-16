@@ -13,11 +13,21 @@
   ],
 
   "host_permissions": [
-    "https://api.groq.com/*"
+    "https://api.groq.com/*",
+    "<all_urls>"
   ],
 
   "action": {
     "default_title": "Open LookUp"
+  },
+
+  "commands": {
+    "open-sidepanel": {
+      "suggested_key": {
+        "default": "Alt+S"
+      },
+      "description": "Open LookUp side panel"
+    }
   },
 
   "side_panel": {

@@ -118,8 +118,9 @@ document.addEventListener("click", () => {
 });
 moreDropdown.addEventListener("click", (e) => e.stopPropagation());
 document.addEventListener("keydown", (e) => {
-  // Alt+S — trigger capture (same as clicking the Capture/Record button)
-  if (e.altKey && e.key === "s" && !captureBtn.disabled && !mediaRecorder) {
+  // Shift+S — trigger capture (only when input is not focused)
+  if (e.shiftKey && e.key === "S" && !captureBtn.disabled && !mediaRecorder &&
+      document.activeElement !== titleInput) {
     e.preventDefault();
     captureBtn.click();
   }
@@ -359,6 +360,14 @@ async function sendChatMessage() {
         `\n\n--- File: ${f.name} ---\n${f.text}\n--- End of ${f.name} ---`
       ).join("");
       effectiveMessage = (effectiveMessage ? effectiveMessage + fileBlocks : fileBlocks.trimStart());
+    }
+
+    // If the user had text selected on the page and typed a question, inject the
+    // selection as context so the AI answers in relation to that specific text.
+    const selectionContext = selectedText;
+    if (selectionContext && effectiveMessage) {
+      effectiveMessage = `[Selected text]\n${selectionContext}\n\n[Question]\n${effectiveMessage}`;
+      clearSelection();
     }
 
     // Build history messages for multi-turn context
@@ -680,11 +689,6 @@ async function initMode() {
   }
 }
 
-// ── Clear view button ────────────────────────────────────────────────────────
-document.getElementById("clearViewBtn").addEventListener("click", () => {
-  tabResults.delete(activeConversationId);
-  resultArea.innerHTML = PLACEHOLDER_HTML;
-});
 
 // Show overlay if not configured, otherwise boot normally
 async function initSetup() {
@@ -1075,7 +1079,7 @@ captureBtn.addEventListener("click", async () => {
 
   try {
     const { base64, mimeType } = await captureTab();
-    showSpinner("Analyzing…");
+    showSpinner();
 
     const raw = await analyzeScreenshot(base64, mimeType, selectedMode);
     const noteTitle = titleInput.value.trim() || selectedMode;
@@ -1099,10 +1103,11 @@ captureBtn.addEventListener("click", async () => {
     await Messages.append(activeConversationId, "user", `📸 Screenshot (${selectedMode})`);
     await Messages.append(activeConversationId, "assistant", selectedMode === "flashcard" ? JSON.stringify(cards) : markdown);
 
-    // Auto-rename tab on first capture
+    // Auto-rename tab on first capture — use AI topic if found, else mode name
     const history = await Messages.listByConversation(activeConversationId);
     if (history.length <= 2) {
-      await Conversations.rename(activeConversationId, noteTitle.slice(0, 60));
+      const tabTitle = extractTopic(markdown, noteTitle);
+      await Conversations.rename(activeConversationId, tabTitle.slice(0, 60));
       loadConversations();
     }
 
@@ -1116,22 +1121,31 @@ captureBtn.addEventListener("click", async () => {
 });
 
 // ── Text selection (from content script) ───────────────────────────────────
+const DEFAULT_PLACEHOLDER = "Ask about this screen…";
+
+function setSelectionActive(text) {
+  selectedText = text;
+  selectionPreview.textContent = text.length > 140 ? text.slice(0, 140) + "…" : text;
+  selectionBar.classList.add("active");
+  titleInput.placeholder = "Ask a question about the selection…";
+}
+
+function clearSelection() {
+  selectedText = "";
+  selectionBar.classList.remove("active");
+  titleInput.placeholder = DEFAULT_PLACEHOLDER;
+}
+
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type !== "textSelection") return;
   if (msg.text && msg.text.length >= 3) {
-    selectedText = msg.text;
-    selectionPreview.textContent = msg.text.length > 140 ? msg.text.slice(0, 140) + "…" : msg.text;
-    selectionBar.classList.add("active");
+    setSelectionActive(msg.text);
   } else {
-    selectedText = "";
-    selectionBar.classList.remove("active");
+    clearSelection();
   }
 });
 
-selectionDismiss.addEventListener("click", () => {
-  selectedText = "";
-  selectionBar.classList.remove("active");
-});
+selectionDismiss.addEventListener("click", clearSelection);
 
 askBtn.addEventListener("click", async () => {
   if (!selectedText) return;
@@ -1139,7 +1153,9 @@ askBtn.addEventListener("click", async () => {
   showSpinner("Analyzing selected text…");
 
   try {
-    const raw = await analyzeText(selectedText, selectedMode);
+    const capturedText = selectedText;
+    clearSelection();
+    const raw = await analyzeText(capturedText, selectedMode);
     const noteTitle = titleInput.value.trim() || "Selected text";
 
     let markdown = raw;
@@ -1530,13 +1546,13 @@ function appendCard(htmlStr, afterInsert) {
   resultArea.scrollTop = resultArea.scrollHeight;
 }
 
-function showSpinner(msg) {
+function showSpinner(msg = "") {
   document.getElementById(SPINNER_ID)?.remove();
   resultArea.querySelector(".placeholder")?.remove();
   const div = document.createElement("div");
   div.id = SPINNER_ID;
   div.className = "spinner";
-  div.innerHTML = `<span></span><span></span><span></span>`;
+  div.innerHTML = `<span></span><span></span><span></span>${msg ? `<span class="spinner-label">${escapeHtml(msg)}</span>` : ""}`;
   resultArea.appendChild(div);
   resultArea.scrollTop = resultArea.scrollHeight;
 }
@@ -1622,6 +1638,21 @@ function bindDashBtn(filename) {
   });
 }
 
+// Extract a meaningful topic title from AI markdown output.
+// Tries: first heading → first bold term → first content line → fallback.
+function extractTopic(markdown, fallback) {
+  const heading = markdown.match(/^#{1,4}\s+(.+)$/m);
+  if (heading) return heading[1].replace(/\*\*/g, "").trim().slice(0, 60);
+
+  const bold = markdown.match(/\*\*([^*\n]{4,50})\*\*/);
+  if (bold) return bold[1].trim();
+
+  const line = markdown.split("\n").find(l => l.replace(/^[*#\-\d.\s>]+/, "").trim().length > 8);
+  if (line) return line.replace(/^[*#\-\d.\s>]+/, "").replace(/\*\*/g, "").trim().slice(0, 60);
+
+  return fallback ?? null;
+}
+
 // Returns 'rtl' if the text (stripped of HTML tags) contains more Hebrew/Arabic
 // characters than Latin ones, otherwise 'auto'. Prevents dir="auto" from
 // wrongly choosing LTR just because a bold English term appears first.
@@ -1639,11 +1670,23 @@ function escapeHtml(str = "") {
 }
 
 // ── Quiz renderer — shows questions with hidden answers ──────────────────────
-function renderQuiz(markdown) {
-  let blocks = markdown.split(/\n[ \t]*---[ \t]*\n/);
+// Answer marker: handles English "**Answer:**" and Hebrew "**תשובה:**" (model translates when lang=he)
+// Matches full bold answer label: **Answer:** / **Answer**: / **תשובה:** etc.
+// Consumes closing ** so they don't bleed into the answer text.
+const QUIZ_ANSWER_RE = /\*\*(?:Answer|תשובה)[^*\n]*\*\*[:\s]*/i;
 
-  if (blocks.length <= 1 && (markdown.match(/\*\*Answer:\*\*/g) ?? []).length > 1) {
-    blocks = markdown.split(/\n\n(?=\*\*Q\d)/);
+function renderQuiz(markdown) {
+  // Strategy 1: explicit --- separators
+  let blocks = markdown.split(/\n[ \t]*---[ \t]*\n/).map(b => b.trim()).filter(Boolean);
+
+  // Strategy 2: split before any **Q{n} marker (single or double newline)
+  if (blocks.length <= 1) {
+    blocks = markdown.split(/\n+(?=\*\*Q\d)/).map(b => b.trim()).filter(Boolean);
+  }
+
+  // Strategy 3: split on blank line before numbered question
+  if (blocks.length <= 1) {
+    blocks = markdown.split(/\n\n+(?=\d+\.)/).map(b => b.trim()).filter(Boolean);
   }
 
   let html = "";
@@ -1651,29 +1694,30 @@ function renderQuiz(markdown) {
   const quizPrefix = `qz${++_uid}`;
 
   for (const block of blocks) {
-    const trimmed = block.trim();
-    if (!trimmed) continue;
+    if (!block) continue;
 
-    const answerIdx = trimmed.indexOf("**Answer:**");
-    if (answerIdx === -1) {
-      html += `<div class="md-body">${renderMarkdown(trimmed)}</div>`;
+    const match = QUIZ_ANSWER_RE.exec(block);
+    if (!match) {
+      html += `<div class="md-body" dir="${bidiDir(block)}">${renderMarkdown(block)}</div>`;
       continue;
     }
 
     qNum++;
-    const questionPart = trimmed.slice(0, answerIdx).trim();
-    const answerPart   = trimmed.slice(answerIdx + "**Answer:**".length).trim();
+    // Strip leading **Q{n}.** / Q{n}. / **{n}.** label — we render our own numeric prefix
+    const rawQuestion  = block.slice(0, match.index).trim().replace(/^\*?\*?Q?\d+[.)]\*?\*?\s*/i, "");
+    const questionPart = rawQuestion;
+    const answerPart   = block.slice(match.index + match[0].length).trim();
     const id = `${quizPrefix}-ans-${qNum}`;
 
     html += `
       <div class="quiz-block">
-        <div class="quiz-question md-body" dir="${bidiDir(questionPart)}">${renderMarkdown(questionPart)}</div>
+        <div class="quiz-question md-body" dir="${bidiDir(questionPart)}"><span class="quiz-num">${_lang === "he" ? `${qNum}.` : `Q${qNum}.`}</span> ${renderMarkdown(questionPart)}</div>
         <button class="quiz-reveal-btn" data-answer-id="${id}">▶ Show Answer</button>
         <div class="quiz-answer md-body" id="${id}" dir="${bidiDir(answerPart)}" style="display:none">${renderMarkdown(answerPart)}</div>
       </div>`;
   }
 
-  return html || `<div class="md-body">${renderMarkdown(markdown)}</div>`;
+  return html || `<div class="md-body" dir="${bidiDir(markdown)}">${renderMarkdown(markdown)}</div>`;
 }
 
 // ── Math renderer ────────────────────────────────────────────────────────────

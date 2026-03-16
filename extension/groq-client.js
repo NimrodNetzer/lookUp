@@ -211,6 +211,13 @@ export async function analyzeScreenshot(base64Image, mimeType = "image/png", mod
 
   let prompt = modePrompts[mode] ?? modePrompts.summary;
 
+  // Reinforce language in the user-facing prompt for non-quiz modes.
+  // The system prompt alone is not always sufficient when the mode prompt
+  // starts with a strong English persona directive ("You are a tutor…").
+  if (mode !== "quiz" && mode !== "flashcard" && _responseLanguage === "he") {
+    prompt += "\n\nכתוב את כל התשובה בעברית בלבד.";
+  }
+
   // For quiz/flashcard: extract text first to compute accurate count
   if (mode === "quiz" || mode === "flashcard") {
     const visibleText = await chatCompletion(key, [
@@ -255,7 +262,8 @@ export async function analyzeMulti(frames, mode = "session") {
     type: "image_url",
     image_url: { url: `data:${mimeType};base64,${base64}` },
   }));
-  const prompt = modePrompts[mode] ?? modePrompts.session;
+  let prompt = modePrompts[mode] ?? modePrompts.session;
+  if (_responseLanguage === "he") prompt += "\n\nכתוב את כל התשובה בעברית בלבד.";
 
   return chatCompletion(key, [
     { role: "system", content: buildSystemPrompt() },
@@ -276,11 +284,12 @@ export async function analyzeWithQuestion(base64Image, mimeType = "image/png", q
     type: "image_url",
     image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
   }));
+  const langSuffix = _responseLanguage === "he" ? "\n\nכתוב את כל התשובה בעברית בלבד." : "";
   return chatCompletion(key, [
     { role: "system", content: buildSystemPrompt() },
     {
       role: "user",
-      content: [...imageContent, { type: "text", text: question }],
+      content: [...imageContent, { type: "text", text: question + langSuffix }],
     },
   ]);
 }
