@@ -147,6 +147,12 @@ function _stopUsageCountdown() {
   }
 }
 
+document.getElementById("usageWidget")?.addEventListener("click", (e) => {
+  // Don't flip if clicking the Groq upgrade link
+  if (e.target.closest("a")) return;
+  document.getElementById("usageWidget").classList.toggle("flipped");
+});
+
 async function refreshUsageDisplay() {
   const usageCount   = document.getElementById("usageCount");
   const usageBarFill = document.getElementById("usageBarFill");
@@ -222,6 +228,10 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && moreDropdown.classList.contains("open")) {
     moreDropdown.classList.remove("open");
     moreBtn.classList.remove("open");
+  }
+  if (e.key === "Escape" && infoDropdown.classList.contains("open")) {
+    infoDropdown.classList.remove("open");
+    infoBtn.classList.remove("open");
     searchInput.value = "";
     renderSearchResults([]);
   }

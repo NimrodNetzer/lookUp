@@ -374,6 +374,12 @@ function buildSegmentBlobs(chunks, blobType) {
   return blobs;
 }
 
+/** Transcribe only — returns plain transcript string. Used by the chat page mic button. */
+export async function transcribeOnly(audioBlob) {
+  const key = await getKey();
+  return transcribeBlob(key, audioBlob);
+}
+
 export async function transcribeAndSummarize(audioBlob, mode = "summary", userNote = "", chunks = null) {
   const key = await getKey();
 

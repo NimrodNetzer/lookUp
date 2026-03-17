@@ -1,11 +1,68 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import CosmicBg from "./CosmicBg.jsx";
 import { Conversations, Messages, Notes, Settings } from "../storage.js";
-import { chatStream, chatStreamRich } from "../groq-client.js";
+import { chatStream, chatStreamRich, transcribeOnly } from "../groq-client.js";
+import hljs from "highlight.js/lib/core";
+import javascript from "highlight.js/lib/languages/javascript";
+import python from "highlight.js/lib/languages/python";
+import cpp from "highlight.js/lib/languages/cpp";
+import java from "highlight.js/lib/languages/java";
+import sql from "highlight.js/lib/languages/sql";
+import bash from "highlight.js/lib/languages/bash";
+import xml from "highlight.js/lib/languages/xml";
+import "highlight.js/styles/github-dark.css";
+hljs.registerLanguage("javascript", javascript);
+hljs.registerLanguage("js", javascript);
+hljs.registerLanguage("typescript", javascript);
+hljs.registerLanguage("ts", javascript);
+hljs.registerLanguage("python", python);
+hljs.registerLanguage("py", python);
+hljs.registerLanguage("cpp", cpp);
+hljs.registerLanguage("c", cpp);
+hljs.registerLanguage("java", java);
+hljs.registerLanguage("sql", sql);
+hljs.registerLanguage("bash", bash);
+hljs.registerLanguage("sh", bash);
+hljs.registerLanguage("html", xml);
+hljs.registerLanguage("xml", xml);
 
 // ── Lightweight markdown renderer ─────────────────────────────────────────────
 function renderMd(raw) {
+  // Extract math segments first (before HTML-escaping) to avoid double-escaping
+  const mathSlots = [];
+  function stash(expr, display) {
+    try {
+      const html = katex.renderToString(expr.trim(), { displayMode: display, throwOnError: false, output: "html" });
+      mathSlots.push(html);
+    } catch {
+      mathSlots.push(`<span class="math-err">${expr}</span>`);
+    }
+    return `\x00MATH${mathSlots.length - 1}\x00`;
+  }
+
+  // Also stash fenced code blocks before escaping
+  const codeSlots = [];
+  function stashCode(lang, code) {
+    let highlighted;
+    try {
+      highlighted = lang && hljs.getLanguage(lang)
+        ? hljs.highlight(code, { language: lang }).value
+        : hljs.highlightAuto(code).value;
+    } catch { highlighted = code.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+    const id = `cb${Date.now()}-${codeSlots.length}`;
+    const html = `<div class="chat-code-block"><div class="chat-code-header"><span class="chat-code-lang">${lang || "code"}</span><button class="chat-code-copy" data-code-id="${id}" onclick="(function(b){const pre=b.closest('.chat-code-block').querySelector('code');navigator.clipboard.writeText(pre.innerText).then(()=>{b.textContent='Copied!';setTimeout(()=>b.textContent='Copy',2000)}).catch(()=>{})})(this)">Copy</button></div><pre class="chat-pre"><code id="${id}" class="hljs">${highlighted}</code></pre></div>`;
+    codeSlots.push(html);
+    return `\x00CODE${codeSlots.length - 1}\x00`;
+  }
+
   let h = raw
+    .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => stashCode(lang.trim(), code.trimEnd()))
+    .replace(/\$\$([^$]+?)\$\$/gs, (_, e) => stash(e, true))
+    .replace(/\$([^$\n]+?)\$/g,    (_, e) => stash(e, false));
+
+  h = h
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/^#### (.+)$/gm, '<h4 class="chat-h4" dir="auto">$1</h4>')
     .replace(/^### (.+)$/gm,  '<h3 class="chat-h3" dir="auto">$1</h3>')
@@ -19,6 +76,9 @@ function renderMd(raw) {
   h = h.replace(/(<li[\s\S]*?<\/li>)(\n<li[\s\S]*?<\/li>)*/g,
     (m) => `<ul class="chat-ul">${m}</ul>`);
   h = h.replace(/\n\n+/g, '</p><p class="chat-p" dir="auto">').replace(/\n/g, "<br>");
+  // Restore math and code slots
+  h = h.replace(/\x00MATH(\d+)\x00/g, (_, i) => mathSlots[+i] ?? "");
+  h = h.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeSlots[+i] ?? "");
   return `<p class="chat-p" dir="auto">${h}</p>`;
 }
 
@@ -163,6 +223,17 @@ export default function ChatPage() {
   const [dragActive,     setDragActive]     = useState(false);
   const dragCounter                         = useRef(0);
 
+  // Voice recording state
+  const [recording,      setRecording]      = useState(false);
+  const [transcribing,   setTranscribing]   = useState(false);
+  const mediaRecRef                         = useRef(null);
+  const audioChunksRef                      = useRef([]);
+
+  // Note-attach picker state
+  const [notePickerOpen, setNotePickerOpen] = useState(false);
+  const [noteList,       setNoteList]       = useState([]);
+  const [noteSearch,     setNoteSearch]     = useState("");
+
   // Persistent mode (saved to storage)
   const [activeMode,     setActiveModeState] = useState("chat");
   const [modeDropOpen,   setModeDropOpen]   = useState(false);
@@ -284,6 +355,64 @@ export default function ChatPage() {
     dragCounter.current = 0;
     setDragActive(false);
     if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
+  }
+
+  // ── Voice recording ──────────────────────────────────────────────────────────
+  async function toggleRecording() {
+    if (recording) {
+      mediaRecRef.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      rec.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        setRecording(false);
+        setTranscribing(true);
+        try {
+          const blob = new Blob(audioChunksRef.current, { type: rec.mimeType || "audio/webm" });
+          const text = await transcribeOnly(blob);
+          if (text) setInput(prev => prev ? `${prev} ${text}` : text);
+        } catch (err) {
+          console.error("Transcription failed:", err);
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      mediaRecRef.current = rec;
+      rec.start();
+      setRecording(true);
+    } catch (err) {
+      console.error("Mic access denied:", err);
+    }
+  }
+
+  // ── Note attach picker ───────────────────────────────────────────────────────
+  async function openNotePicker() {
+    try {
+      const notes = await Notes.list();
+      setNoteList(notes);
+      setNoteSearch("");
+      setNotePickerOpen(true);
+    } catch {}
+  }
+
+  async function attachNote(note) {
+    try {
+      const full = await Notes.get(note.filename);
+      if (!full) return;
+      const asFile = {
+        id: `note-${note.filename}`,
+        name: note.title || note.filename,
+        isText: true,
+        textContent: full.content,
+      };
+      setAttachedFiles(prev => [...prev.filter(f => f.id !== asFile.id), asFile]);
+      setNotePickerOpen(false);
+    } catch {}
   }
 
   // ── Capture source card ──────────────────────────────────────────────────────
@@ -731,6 +860,35 @@ export default function ChatPage() {
               </div>
             )}
 
+            {/* Note picker popup */}
+            {notePickerOpen && (
+              <div className="chat-note-picker">
+                <div className="chat-note-picker-header">
+                  <span>Attach a note</span>
+                  <button className="chat-note-picker-close" onClick={() => setNotePickerOpen(false)}>✕</button>
+                </div>
+                <input
+                  className="chat-note-picker-search"
+                  placeholder="Search notes…"
+                  value={noteSearch}
+                  onChange={e => setNoteSearch(e.target.value)}
+                  autoFocus
+                />
+                <div className="chat-note-picker-list">
+                  {noteList
+                    .filter(n => !noteSearch || (n.title ?? "").toLowerCase().includes(noteSearch.toLowerCase()))
+                    .map(n => (
+                      <button key={n.filename} className="chat-note-picker-item" onClick={() => attachNote(n)}>
+                        <span className="chat-note-picker-title">{n.title || n.filename}</span>
+                        <span className="chat-note-picker-date">{new Date(n.createdAt).toLocaleDateString()}</span>
+                      </button>
+                    ))
+                  }
+                  {noteList.length === 0 && <div className="chat-note-picker-empty">No notes saved yet</div>}
+                </div>
+              </div>
+            )}
+
             <div className="chat-input-wrap">
               <input
                 ref={fileInputRef}
@@ -740,12 +898,25 @@ export default function ChatPage() {
                 style={{ display: "none" }}
                 onChange={e => { handleFiles(e.target.files); e.target.value = ""; }}
               />
-              {/* 📎 attach button */}
+              {/* 📎 attach file */}
               <button
                 className="chat-attach-btn"
                 onClick={() => fileInputRef.current?.click()}
                 title="Attach file"
               >📎</button>
+              {/* 📓 attach note */}
+              <button
+                className="chat-attach-btn"
+                onClick={() => notePickerOpen ? setNotePickerOpen(false) : openNotePicker()}
+                title="Attach a saved note"
+              >📓</button>
+              {/* 🎙 voice input */}
+              <button
+                className={`chat-attach-btn${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
+                onClick={toggleRecording}
+                title={recording ? "Stop recording" : transcribing ? "Transcribing…" : "Voice input"}
+                disabled={transcribing}
+              >{transcribing ? "…" : recording ? "⏹" : "🎙"}</button>
 
               <textarea
                 ref={textareaRef}

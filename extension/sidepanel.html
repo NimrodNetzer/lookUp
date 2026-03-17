@@ -134,14 +134,14 @@
       display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;
     }
     .more-primary-btn {
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
-      padding: 9px 6px; border-radius: 10px;
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      padding: 14px 6px; border-radius: 12px;
       background: rgba(124,106,245,0.08); border: 1px solid rgba(124,106,245,0.18);
       cursor: pointer; transition: background 0.12s, border-color 0.12s;
-      font-size: 11px; font-weight: 700; color: #c0b8ff;
+      font-size: 12px; font-weight: 700; color: #c0b8ff;
     }
     .more-primary-btn:hover { background: rgba(124,106,245,0.18); border-color: rgba(124,106,245,0.4); }
-    .more-primary-btn .mpb-icon { font-size: 18px; line-height: 1; }
+    .more-primary-btn .mpb-icon { font-size: 22px; line-height: 1; }
     /* Secondary items */
     .more-item {
       display: flex; align-items: center; gap: 10px;
@@ -177,16 +177,30 @@
     .win-entry.selected { background: rgba(14,165,233,0.14); color: #7dd3fc; font-weight: 700; }
     .win-entry-icon { font-size: 12px; flex-shrink: 0; }
     .win-entry-check { margin-left: auto; font-size: 10px; color: #38bdf8; flex-shrink: 0; }
-    /* Token usage widget */
+    /* Token usage flip card */
     .usage-widget {
-      padding: 8px 8px 6px;
-      border-radius: 8px;
-      background: rgba(124,106,245,0.06);
+      perspective: 600px; cursor: pointer;
+      border-radius: 8px; margin-top: 2px;
       border: 1px solid rgba(124,106,245,0.15);
-      margin-top: 2px;
-      cursor: default;
+      overflow: hidden;
     }
-    .usage-widget:hover { background: rgba(124,106,245,0.1); }
+    .usage-inner {
+      position: relative; width: 100%;
+      transition: transform 0.45s cubic-bezier(.4,0,.2,1);
+      transform-style: preserve-3d;
+    }
+    .usage-widget.flipped .usage-inner { transform: rotateY(180deg); }
+    .usage-face {
+      backface-visibility: hidden; -webkit-backface-visibility: hidden;
+      border-radius: 8px; padding: 8px 8px 6px;
+      background: rgba(124,106,245,0.06);
+    }
+    .usage-face.usage-back {
+      position: absolute; top: 0; left: 0; width: 100%; box-sizing: border-box;
+      transform: rotateY(180deg);
+      background: rgba(94,234,212,0.07);
+      display: flex; flex-direction: column; gap: 7px;
+    }
     .usage-row {
       display: flex; justify-content: space-between; align-items: center;
       font-size: 11px; font-weight: 600; color: #aaa; margin-bottom: 5px;
@@ -213,6 +227,28 @@
     .usage-reset {
       font-size: 9.5px; color: #555; text-align: right;
       margin-top: 3px;
+    }
+    .usage-flip-hint {
+      font-size: 9px; color: #444; text-align: right; margin-top: 3px; user-select: none;
+    }
+    .usage-back-title {
+      font-size: 11px; font-weight: 700; color: #5eead4;
+    }
+    .usage-back-body {
+      font-size: 10.5px; color: #a0a0b8; line-height: 1.5;
+    }
+    .usage-back-body b { color: #c0b8ff; }
+    .usage-groq-btn {
+      display: block; text-align: center; text-decoration: none;
+      background: linear-gradient(135deg, rgba(94,234,212,0.12), rgba(124,106,245,0.12));
+      border: 1px solid rgba(94,234,212,0.35);
+      border-radius: 7px; padding: 7px 10px;
+      font-size: 11px; font-weight: 700; color: #5eead4;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .usage-groq-btn:hover { background: rgba(94,234,212,0.22); border-color: rgba(94,234,212,0.55); }
+    .usage-back-note {
+      font-size: 9.5px; color: #444; text-align: center;
     }
     .more-item-win:hover { background: rgba(124,106,245,0.1); color: #ddd; }
     .more-item-hint { margin-left: auto; font-size: 9.5px; color: #444; font-weight: 400; }
@@ -1031,6 +1067,15 @@
     <div class="header-actions">
       <button class="btn-info" id="infoBtn" title="Usage &amp; settings">ℹ</button>
       <div class="info-dropdown" id="infoDropdown">
+        <!-- Inline search -->
+        <div class="more-search-wrap">
+          <span class="more-search-icon">🔍</span>
+          <input class="more-search-input" id="searchInput" type="text" placeholder="Search notes…" autocomplete="off" />
+        </div>
+        <div class="more-search-results" id="searchResults">
+          <p class="more-search-empty" id="searchEmpty"></p>
+        </div>
+        <div class="more-divider"></div>
         <!-- Language -->
         <div class="more-item" id="moreLang">
           <span class="more-icon">🌐</span> Language
@@ -1040,20 +1085,43 @@
           </div>
         </div>
         <div class="more-divider"></div>
-        <!-- Token usage -->
+        <!-- Token usage flip card -->
         <div class="usage-widget" id="usageWidget">
-          <div class="usage-row">
-            <span class="usage-label">📊 Tokens today</span>
-            <span class="usage-count" id="usageCount">—</span>
+          <div class="usage-inner" id="usageInner">
+            <!-- FRONT: usage stats -->
+            <div class="usage-face usage-front">
+              <div class="usage-row">
+                <span class="usage-label">📊 Tokens today</span>
+                <span class="usage-count" id="usageCount">—</span>
+              </div>
+              <div class="usage-bar-bg">
+                <div class="usage-bar-fill" id="usageBarFill"></div>
+              </div>
+              <div class="usage-upgrade" id="usageUpgrade" style="display:none">
+                ⚠️ Quota almost full
+              </div>
+              <div class="usage-reset" id="usageResetHint"></div>
+              <div class="usage-flip-hint">tap for more ›</div>
+            </div>
+            <!-- BACK: upgrade info -->
+            <div class="usage-face usage-back">
+              <div class="usage-back-title">⚡ Need more tokens?</div>
+              <div class="usage-back-body">
+                LookUp runs on <b>Groq's free tier</b> — 500k tokens/day at no cost.<br>
+                For heavier use, upgrade your Groq account directly.
+              </div>
+              <a class="usage-groq-btn" href="https://console.groq.com" target="_blank">
+                Upgrade on Groq →
+              </a>
+              <div class="usage-back-note">Your key · your data · no middleman</div>
+              <div class="usage-flip-hint" style="text-align:left">‹ back</div>
+            </div>
           </div>
-          <div class="usage-bar-bg">
-            <div class="usage-bar-fill" id="usageBarFill"></div>
-          </div>
-          <div class="usage-upgrade" id="usageUpgrade" style="display:none">
-            ⚠️ Quota almost full — <a href="https://console.groq.com" target="_blank">upgrade at console.groq.com</a>
-          </div>
-          <div class="usage-reset" id="usageResetHint"></div>
         </div>
+        <div class="more-divider"></div>
+        <a class="more-item" id="moreProjectInfo" href="https://look-up-gold.vercel.app" target="_blank" style="text-decoration:none;color:inherit;">
+          <span class="more-icon">🌐</span> Project info
+        </a>
       </div>
       <button class="btn-more" id="moreBtn" title="More options">⋯</button>
       <div class="more-dropdown" id="moreDropdown">
@@ -1065,15 +1133,6 @@
           <div class="more-primary-btn" id="moreChatBtn">
             <span class="mpb-icon">💬</span>Chat
           </div>
-        </div>
-        <div class="more-divider"></div>
-        <!-- Inline search -->
-        <div class="more-search-wrap">
-          <span class="more-search-icon">🔍</span>
-          <input class="more-search-input" id="searchInput" type="text" placeholder="Search notes…" autocomplete="off" />
-        </div>
-        <div class="more-search-results" id="searchResults">
-          <p class="more-search-empty" id="searchEmpty"></p>
         </div>
         <div class="more-divider"></div>
         <div class="more-item" id="moreMultiBtn">

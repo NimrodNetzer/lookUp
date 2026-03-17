@@ -213,8 +213,9 @@ export default function NoteViewer({ filename, onBack }) {
 
   return (
     <main className="max-w-2xl mx-auto px-5 py-8">
-      <div className="flex items-center justify-between mb-6 print:hidden">
-        <button onClick={onBack} className="text-sm text-accent hover:underline">← Back to notes</button>
+      <div className="sticky top-0 z-20 -mx-5 px-5 py-3 mb-6 print:hidden pointer-events-none">
+        <div className="flex items-center justify-between max-w-2xl mx-auto pointer-events-auto">
+        <button onClick={onBack} className="text-sm text-accent hover:underline drop-shadow-sm">← Back to notes</button>
         <div className="flex items-center gap-2">
           {note.mode === "chat" && !editing && (
             <button
@@ -260,6 +261,7 @@ export default function NoteViewer({ filename, onBack }) {
               </button>
             </>
           )}
+        </div>
         </div>
       </div>
 

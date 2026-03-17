@@ -12,7 +12,8 @@
     "offscreen",
     "storage",
     "notifications",
-    "contextMenus"
+    "contextMenus",
+    "windows"
   ],
 
   "host_permissions": [

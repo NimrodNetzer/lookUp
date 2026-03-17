@@ -1,25 +1,22 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { FileText, Mic, Layers, BookOpen, HelpCircle, CreditCard, FolderSymlink, GitMerge, Trash2, Pencil, MessageSquare, Pin, PinOff } from "lucide-react";
+import { FolderSymlink, GitMerge, Trash2, Pencil, Pin, PinOff } from "lucide-react";
 import clsx from "clsx";
 import { Notes } from "../storage.js";
 
-const GROUP_CONFIG = {
-  summary:   { label: "Summary",    icon: "📄", color: "bg-accent/20 text-accent border-accent/30",             Icon: FileText   },
-  explain:   { label: "Explain",    icon: "📖", color: "bg-teal/20 text-teal border-teal/30",                   Icon: BookOpen   },
-  quiz:      { label: "Quiz",       icon: "❓", color: "bg-amber-500/20 text-amber-400 border-amber-500/30",    Icon: HelpCircle },
-  flashcard: { label: "Flashcards", icon: "🃏", color: "bg-orange-500/20 text-orange-400 border-orange-500/30", Icon: CreditCard },
-  session:   { label: "Session",    icon: "📚", color: "bg-purple-500/20 text-purple-300 border-purple-500/30", Icon: Layers     },
-  audio:     { label: "Audio",      icon: "🎙️", color: "bg-pink-500/20 text-pink-400 border-pink-500/30",       Icon: Mic        },
-  chat:      { label: "General Notes", icon: "💬", color: "bg-blue-500/20 text-blue-400 border-blue-500/30",   Icon: MessageSquare },
+const MODE_BADGE = {
+  summary:   { icon: "📄", color: "bg-accent/20 text-accent border-accent/30" },
+  explain:   { icon: "📖", color: "bg-teal/20 text-teal border-teal/30" },
+  quiz:      { icon: "❓", color: "bg-amber-500/20 text-amber-400 border-amber-500/30" },
+  flashcard: { icon: "🃏", color: "bg-orange-500/20 text-orange-400 border-orange-500/30" },
+  session:   { icon: "📚", color: "bg-purple-500/20 text-purple-300 border-purple-500/30" },
+  audio:     { icon: "🎙️", color: "bg-pink-500/20 text-pink-400 border-pink-500/30" },
+  chat:      { icon: "💬", color: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
 };
 
-const GROUP_ORDER = ["summary", "explain", "quiz", "flashcard", "session", "audio", "chat"];
-const DATE_LABELS = { today: "Today", week: "This week", month: "This month", all: "All time" };
-
-function getGroupKey(mode) {
+function getModeKey(mode) {
   if (!mode) return "summary";
   if (mode.startsWith("audio")) return "audio";
-  return GROUP_ORDER.includes(mode) ? mode : "summary";
+  return mode in MODE_BADGE ? mode : "summary";
 }
 
 function flattenFolders(nodes, depth = 0) {
@@ -160,23 +157,6 @@ function ContextMenu({ note, x, y, folders, onClose, onStartRename, onAssign, on
   );
 }
 
-// ── Delete button ─────────────────────────────────────────────────────────────
-function DeleteButton({ note, onRefresh }) {
-  const [deleting, setDeleting] = useState(false);
-  async function handleDelete(e) {
-    e.preventDefault(); e.stopPropagation();
-    setDeleting(true);
-    try { await Notes.delete(note.filename); onRefresh(); } catch {}
-    setDeleting(false);
-  }
-  return (
-    <button onClick={handleDelete} disabled={deleting} title="Delete note"
-      className="opacity-0 group-hover:opacity-100 flex items-center gap-1 text-muted hover:text-red-400 disabled:opacity-40 transition-all px-2 py-0.5 rounded border border-transparent hover:border-red-400/30">
-      <Trash2 className="w-4 h-4" />
-    </button>
-  );
-}
-
 // ── Inline rename ─────────────────────────────────────────────────────────────
 function InlineRename({ note, onConfirm, onCancel }) {
   const [val, setVal] = useState(note.title ?? note.filename);
@@ -262,18 +242,18 @@ function SelectionBar({ selected, folders, onClear, onMerge, onDelete, onTransfe
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
-  const [dateFilter,     setDateFilter]     = useState("all");
-  const [sortMode,       setSortMode]       = useState("date");
-  const [expandedGroups, setExpandedGroups] = useState(new Set());
-  const [showRange,      setShowRange]      = useState(false);
-  const [rangeFrom,      setRangeFrom]      = useState("");
-  const [rangeTo,        setRangeTo]        = useState("");
-  const [selectMode,     setSelectMode]     = useState(false);
-  const [selected,       setSelected]       = useState(new Set());
-  const [actionError,    setActionError]    = useState(null);
-  const [ctxMenu,        setCtxMenu]        = useState(null);
+export default function NotesList({ notes, folders, onRefresh, onOpenNote, limit }) {
+  const [dateFilter,       setDateFilter]       = useState("all");
+  const [sortMode,         setSortMode]         = useState("date");
+  const [showRange,        setShowRange]        = useState(false);
+  const [rangeFrom,        setRangeFrom]        = useState("");
+  const [rangeTo,          setRangeTo]          = useState("");
+  const [selectMode,       setSelectMode]       = useState(false);
+  const [selected,         setSelected]         = useState(new Set());
+  const [actionError,      setActionError]      = useState(null);
+  const [ctxMenu,          setCtxMenu]          = useState(null);
   const [renamingFilename, setRenamingFilename] = useState(null);
+  const [expanded,         setExpanded]         = useState(false);
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
@@ -292,7 +272,7 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
     try { await Notes.updateMeta(note.filename, { pinned: !note.pinned }); onRefresh(); } catch {}
   }
 
-  const groups = useMemo(() => {
+  const sortedNotes = useMemo(() => {
     const now   = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
@@ -309,25 +289,15 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
       return true;
     });
 
-    const map = new Map();
-    for (const n of filtered) {
-      const key = getGroupKey(n.mode);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(n);
-    }
-    map.forEach((arr) => {
-      if (sortMode === "date") arr.sort((a, b) => (b.modified ?? b.updatedAt ?? 0) - (a.modified ?? a.updatedAt ?? 0));
-      else arr.sort((a, b) => (a.title ?? a.filename).localeCompare(b.title ?? b.filename));
-      arr.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
-    });
-    return GROUP_ORDER.filter((k) => map.has(k)).map((k) => ({ key: k, notes: map.get(k) }));
+    const sorted = [...filtered];
+    if (sortMode === "date") sorted.sort((a, b) => (b.modified ?? b.updatedAt ?? 0) - (a.modified ?? a.updatedAt ?? 0));
+    else sorted.sort((a, b) => (a.title ?? a.filename).localeCompare(b.title ?? b.filename));
+    sorted.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+    return sorted;
   }, [notes, dateFilter, sortMode, rangeFrom, rangeTo, showRange]);
 
-  const totalVisible = groups.reduce((s, g) => s + g.notes.length, 0);
-
-  function toggleGroup(key) {
-    setExpandedGroups((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
-  }
+  const displayedNotes = limit && !expanded ? sortedNotes.slice(0, limit) : sortedNotes;
+  const hiddenCount = limit && !expanded ? Math.max(0, sortedNotes.length - limit) : 0;
 
   function toggleNote(filename) {
     setSelected((prev) => { const next = new Set(prev); if (next.has(filename)) next.delete(filename); else next.add(filename); return next; });
@@ -408,88 +378,88 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
       )}
       {actionError && <p className="text-xs text-red-400 mb-3 px-1">{actionError}</p>}
 
-      {groups.length === 0 ? (
+      {sortedNotes.length === 0 ? (
         <div className="text-center py-16 text-muted text-sm border border-dashed border-border rounded-xl">
-          {"No notes for this period — capture something!"}
+          No notes for this period — capture something!
         </div>
       ) : (
-        <>
-          <p className="text-xs text-muted mb-4">{totalVisible} note{totalVisible !== 1 ? "s" : ""} · {groups.length} type{groups.length !== 1 ? "s" : ""}</p>
-          <div className="flex flex-col gap-3">
-            {groups.map(({ key, notes: groupNotes }) => {
-              const cfg      = GROUP_CONFIG[key];
-              const expanded = expandedGroups.has(key);
-              return (
-                <div key={key} className="border border-border rounded-xl overflow-hidden">
-                  <button onClick={() => toggleGroup(key)}
-                    className="w-full flex items-center gap-3 px-4 py-3.5 bg-surface hover:bg-surface/70 transition-colors">
-                    <div className={clsx("p-1.5 rounded-lg border text-base leading-none shrink-0", cfg.color)}>{cfg.icon}</div>
-                    <span className="text-sm font-semibold text-text">{cfg.label}</span>
-                    <span className="text-xs text-muted">{groupNotes.length} note{groupNotes.length !== 1 ? "s" : ""}</span>
-                    <span className={clsx("ml-auto text-muted text-sm transition-transform duration-200", expanded ? "rotate-90" : "")}>▸</span>
+        <div className="border border-border rounded-xl overflow-hidden divide-y divide-border/50">
+          {displayedNotes.map((note) => {
+            const modeKey    = getModeKey(note.mode);
+            const badge      = MODE_BADGE[modeKey];
+            const noteDate   = note.modified ?? note.updatedAt ?? note.createdAt;
+            const isRenaming = renamingFilename === note.filename;
+            return (
+              <div key={note.filename}
+                draggable={!selectMode && !isRenaming}
+                onDragStart={(e) => { e.dataTransfer.setData("text/plain", note.filename); e.dataTransfer.effectAllowed = "move"; }}
+                onClick={selectMode ? () => toggleNote(note.filename) : undefined}
+                onContextMenu={!selectMode ? (e) => handleContextMenu(e, note) : undefined}
+                className={clsx(
+                  "group flex items-center gap-3 px-4 py-2.5 hover:bg-surface/40 transition-colors",
+                  !selectMode && !isRenaming && "cursor-grab active:cursor-grabbing",
+                  selectMode && "cursor-pointer",
+                  selectMode && selected.has(note.filename) && "bg-accent/10"
+                )}>
+                {selectMode && (
+                  <input type="checkbox" readOnly checked={selected.has(note.filename)}
+                    className="w-4 h-4 accent-[#7c6af5] shrink-0 pointer-events-none" />
+                )}
+                <span className={clsx("text-xs px-1.5 py-0.5 rounded border leading-none shrink-0", badge.color)}>
+                  {badge.icon}
+                </span>
+                {isRenaming ? (
+                  <InlineRename note={note} onConfirm={(title) => handleRenameNote(note, title)} onCancel={() => setRenamingFilename(null)} />
+                ) : (
+                  <button className="flex-1 min-w-0 text-left" onClick={!selectMode ? () => onOpenNote(note.filename) : undefined}>
+                    <p className="text-sm font-medium text-text truncate">
+                      {note.pinned && <span className="text-accent mr-1.5 text-xs">📌</span>}
+                      {note.title ?? note.filename}
+                    </p>
+                    <p className="text-xs text-muted mt-0.5">
+                      {noteDate ? new Date(noteDate).toLocaleString() : ""}
+                    </p>
                   </button>
+                )}
+                {!selectMode && !isRenaming && (
+                  <>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setRenamingFilename(note.filename); }}
+                      title="Rename note"
+                      className="opacity-0 group-hover:opacity-100 flex items-center px-2 py-0.5 rounded border border-transparent hover:border-accent/30 hover:text-accent text-muted transition-all"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={async (e) => { e.stopPropagation(); try { await Notes.delete(note.filename); onRefresh(); } catch {} }}
+                      title="Delete note"
+                      className="opacity-0 group-hover:opacity-100 flex items-center gap-1 text-muted hover:text-red-400 transition-all px-2 py-0.5 rounded border border-transparent hover:border-red-400/30">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-                  {expanded && (
-                    <div className="border-t border-border">
-                      {groupNotes.map((note) => {
-                        const isRenaming = renamingFilename === note.filename;
-                        const noteDate = note.modified ?? note.updatedAt ?? note.createdAt;
-                        return (
-                          <div key={note.filename}
-                            draggable={!selectMode && !isRenaming}
-                            onDragStart={(e) => { e.dataTransfer.setData("text/plain", note.filename); e.dataTransfer.effectAllowed = "move"; }}
-                            onClick={selectMode ? () => toggleNote(note.filename) : undefined}
-                            onContextMenu={!selectMode ? (e) => handleContextMenu(e, note) : undefined}
-                            className={clsx(
-                              "group flex items-center gap-3 px-4 py-3 hover:bg-surface/40 transition-colors border-b border-border last:border-b-0",
-                              !selectMode && !isRenaming && "cursor-grab active:cursor-grabbing",
-                              selectMode && "cursor-pointer",
-                              selectMode && selected.has(note.filename) && "bg-accent/10"
-                            )}>
-                            {selectMode && (
-                              <input type="checkbox" readOnly checked={selected.has(note.filename)}
-                                className="w-4 h-4 accent-[#7c6af5] shrink-0 pointer-events-none" />
-                            )}
-                            {isRenaming ? (
-                              <InlineRename note={note} onConfirm={(title) => handleRenameNote(note, title)} onCancel={() => setRenamingFilename(null)} />
-                            ) : (
-                              <button
-                                className="flex-1 min-w-0 text-left"
-                                onClick={!selectMode ? () => onOpenNote(note.filename) : undefined}
-                              >
-                                <p className="text-sm font-medium text-text truncate">{note.title ?? note.filename}</p>
-                                <p className="text-xs text-muted mt-0.5">
-                                  {noteDate ? new Date(noteDate).toLocaleString() : ""}
-                                </p>
-                              </button>
-                            )}
-                            {!selectMode && !isRenaming && (
-                              <>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleTogglePin(note); }}
-                                  title={note.pinned ? "Unpin" : "Pin to top"}
-                                  className={clsx(
-                                    "flex items-center px-2 py-0.5 rounded border transition-all",
-                                    note.pinned
-                                      ? "opacity-100 text-accent border-accent/30 hover:border-red-400/30 hover:text-red-400"
-                                      : "opacity-0 group-hover:opacity-100 text-muted border-transparent hover:border-accent/30 hover:text-accent"
-                                  )}
-                                >
-                                  <Pin className="w-3.5 h-3.5" />
-                                </button>
-                                <DeleteButton note={note} onRefresh={onRefresh} />
-                              </>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </>
+      {hiddenCount > 0 && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="mt-2 w-full flex items-center justify-center gap-2 py-2 text-xs text-muted hover:text-accent border border-dashed border-border/60 hover:border-accent/40 rounded-xl transition-colors"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          {hiddenCount} more note{hiddenCount !== 1 ? "s" : ""}
+        </button>
+      )}
+      {expanded && limit && sortedNotes.length > limit && (
+        <button
+          onClick={() => setExpanded(false)}
+          className="mt-2 w-full flex items-center justify-center gap-1 py-2 text-xs text-muted hover:text-text border border-dashed border-border/60 hover:border-border rounded-xl transition-colors"
+        >
+          Show less
+        </button>
       )}
 
       {ctxMenu && (

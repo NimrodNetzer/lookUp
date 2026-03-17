@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Plus, Pencil, Trash2, Check, X, ChevronRight, MessageSquare, FilePlus, Pin, PinOff, FolderSymlink } from "lucide-react";
+import { Pencil, Trash2, Check, X, ChevronRight } from "lucide-react";
 import clsx from "clsx";
 import { Notes, Folders } from "../storage.js";
 import NotesList from "./NotesList.jsx";
@@ -261,171 +261,8 @@ function FolderHeadline({ folder, showUnattached, activeType, visibleNotes, onDr
   );
 }
 
-// ── Strip context menu ────────────────────────────────────────────────────────
-function StripContextMenu({ note, x, y, folders, onClose, onTogglePin, onStartRename, onAssign }) {
-  const [view, setView] = useState("menu");
-  const ref = useRef(null);
-  const flatFolders = useMemo(() => flattenFolders(folders), [folders]);
-
-  useEffect(() => {
-    function handler(e) { if (ref.current && !ref.current.contains(e.target)) onClose(); }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
-
-  const [pos, setPos] = useState({ top: y, left: x });
-  useEffect(() => {
-    if (!ref.current) return;
-    const { width, height } = ref.current.getBoundingClientRect();
-    setPos({ top: Math.min(y, window.innerHeight - height - 8), left: Math.min(x, window.innerWidth - width - 8) });
-  }, [x, y, view]);
-
-  return (
-    <div ref={ref} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
-      className="bg-surface border border-border rounded-xl shadow-2xl overflow-hidden min-w-[190px]"
-      onContextMenu={(e) => e.preventDefault()}>
-      {view === "menu" ? (
-        <div className="py-1">
-          <button onClick={onTogglePin}
-            className="w-full text-left px-4 py-2.5 text-sm text-text hover:bg-accent/10 flex items-center gap-2.5 transition-colors">
-            {note.pinned ? <PinOff className="w-3.5 h-3.5 text-muted" /> : <Pin className="w-3.5 h-3.5 text-muted" />}
-            {note.pinned ? "Unpin" : "Pin to top"}
-          </button>
-          <button onClick={onStartRename}
-            className="w-full text-left px-4 py-2.5 text-sm text-text hover:bg-accent/10 flex items-center gap-2.5 transition-colors">
-            <Pencil className="w-3.5 h-3.5 text-muted" /> Rename
-          </button>
-          <button onClick={() => setView("folders")}
-            className="w-full text-left px-4 py-2.5 text-sm text-text hover:bg-accent/10 flex items-center gap-2.5 transition-colors">
-            <FolderSymlink className="w-3.5 h-3.5 text-muted" /> Assign to folder
-          </button>
-        </div>
-      ) : (
-        <>
-          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
-            <button onClick={() => setView("menu")} className="text-muted hover:text-text text-sm px-0.5 transition-colors">←</button>
-            <span className="text-xs font-semibold text-muted uppercase tracking-widest">Assign to folder</span>
-          </div>
-          <div className="max-h-56 overflow-y-auto py-1">
-            <button onClick={() => onAssign(null)}
-              className={clsx("w-full text-left px-4 py-2 text-sm hover:bg-accent/10 transition-colors italic",
-                !note.folder_id ? "text-accent font-semibold" : "text-muted")}>
-              None (unattached)
-            </button>
-            {flatFolders.map(({ folder, depth }) => (
-              <button key={folder.id} onClick={() => onAssign(folder.id)}
-                style={{ paddingLeft: `${16 + depth * 14}px` }}
-                className={clsx("w-full text-left text-sm py-2 pr-3 hover:bg-accent/10 transition-colors flex items-center gap-1.5",
-                  note.folder_id === folder.id ? "text-accent font-semibold" : "text-text")}>
-                📁 {folder.name}
-              </button>
-            ))}
-            {flatFolders.length === 0 && <p className="text-xs text-muted px-4 py-3">No folders yet</p>}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ── Today strip ───────────────────────────────────────────────────────────────
-const GROUP_COLORS = {
-  summary:   "bg-accent/20 text-accent border-accent/30",
-  explain:   "bg-teal/20 text-teal border-teal/30",
-  quiz:      "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  flashcard: "bg-orange-500/20 text-orange-400 border-orange-500/30",
-  session:   "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  audio:     "bg-pink-500/20 text-pink-400 border-pink-500/30",
-  chat:      "bg-blue-500/20 text-blue-400 border-blue-500/30",
-};
-const GROUP_ICONS = {
-  summary: "📄", explain: "📖", quiz: "❓", flashcard: "🃏",
-  session: "📚", audio: "🎙️", chat: "💬",
-};
-
-function TodayStrip({ notes, onOpenNote, folders, noteActions }) {
-  const [open,             setOpen]             = useState(true);
-  const [ctxMenu,          setCtxMenu]          = useState(null);
-  const [renamingFilename, setRenamingFilename] = useState(null);
-
-  const todayNotes = useMemo(() => {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    return notes
-      .filter((n) => new Date(n.modified ?? n.updatedAt ?? n.createdAt) >= start)
-      .sort((a, b) => (b.modified ?? b.updatedAt ?? 0) - (a.modified ?? a.updatedAt ?? 0));
-  }, [notes]);
-
-  if (todayNotes.length === 0) return null;
-
-  return (
-    <div className="border border-border rounded-xl overflow-hidden mb-1">
-      <button onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-3 px-4 py-3 bg-surface hover:bg-surface/70 transition-colors">
-        <span className="text-base leading-none">⚡</span>
-        <span className="text-sm font-semibold text-text">Today</span>
-        <span className="text-xs text-muted">{todayNotes.length} note{todayNotes.length !== 1 ? "s" : ""}</span>
-        <span className={clsx("ml-auto text-muted text-sm transition-transform duration-200", open ? "rotate-90" : "")}>▸</span>
-      </button>
-      {open && (
-        <div className="border-t border-border divide-y divide-border/50">
-          {todayNotes.map((note) => {
-            const modeKey   = !note.mode ? "summary" : note.mode.startsWith("audio") ? "audio" : note.mode;
-            const color     = GROUP_COLORS[modeKey] ?? GROUP_COLORS.summary;
-            const icon      = GROUP_ICONS[modeKey]  ?? "📄";
-            const ts        = note.modified ?? note.updatedAt ?? note.createdAt;
-            const isRenaming = renamingFilename === note.filename;
-            return (
-              <div key={note.filename}
-                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, note }); }}
-                className="group flex items-center gap-3 px-4 py-2.5 hover:bg-surface/40 transition-colors">
-                <span className={clsx("text-xs px-1.5 py-0.5 rounded border leading-none shrink-0", color)}>{icon}</span>
-                {isRenaming ? (
-                  <InlineInput
-                    initial={note.title ?? note.filename}
-                    placeholder="Note title…"
-                    onConfirm={(title) => { noteActions.rename(note, title); setRenamingFilename(null); }}
-                    onCancel={() => setRenamingFilename(null)}
-                  />
-                ) : (
-                  <button className="flex-1 min-w-0 text-left" onClick={() => onOpenNote(note.filename)}>
-                    <span className="text-sm text-text truncate block">{note.title ?? note.filename}</span>
-                  </button>
-                )}
-                {!isRenaming && (
-                  <>
-                    {note.pinned && <span className="text-accent text-xs shrink-0">📌</span>}
-                    <span className="text-xs text-muted shrink-0">
-                      {ts ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
-                    </span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); noteActions.delete(note); }}
-                      title="Delete"
-                      className="opacity-0 group-hover:opacity-100 text-muted hover:text-red-400 transition-all shrink-0">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {ctxMenu && (
-        <StripContextMenu
-          note={ctxMenu.note} x={ctxMenu.x} y={ctxMenu.y} folders={folders}
-          onClose={() => setCtxMenu(null)}
-          onTogglePin={() => { noteActions.togglePin(ctxMenu.note); setCtxMenu(null); }}
-          onStartRename={() => { setRenamingFilename(ctxMenu.note.filename); setCtxMenu(null); }}
-          onAssign={(folderId) => { noteActions.assign(ctxMenu.note, folderId); setCtxMenu(null); }}
-        />
-      )}
-    </div>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
-export default function LearningHub({ onOpenNote, onOpenChat }) {
+export default function LearningHub({ onOpenNote, actionsRef }) {
   const [activeFolderId,  setActiveFolderId]  = useState(null);
   const [activeType,      setActiveType]      = useState(null);
   const [folders,         setFolders]         = useState([]);
@@ -492,12 +329,13 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
   const parentFolderId = folderPath.length >= 2 ? folderPath[folderPath.length - 2].id : null;
   const visibleNotes   = useMemo(() => activeType !== null ? showingNotes.filter((n) => getTypeKey(n.mode) === activeType) : showingNotes, [showingNotes, activeType]);
 
-  const noteActions = {
-    togglePin: async (note) => { try { await Notes.updateMeta(note.filename, { pinned: !note.pinned }); refresh(); } catch {} },
-    rename:    async (note, title) => { try { await Notes.updateMeta(note.filename, { title }); refresh(); } catch {} },
-    assign:    async (note, folderId) => { try { await Notes.updateMeta(note.filename, { folder_id: folderId }); refresh(); } catch {} },
-    delete:    async (note) => { try { await Notes.delete(note.filename); refresh(); } catch {} },
-  };
+  // Expose actions to parent (homepage header dropdown)
+  useEffect(() => {
+    if (actionsRef) actionsRef.current = {
+      openNewNote:   () => setNewNoteOpen(true),
+      openNewFolder: () => setAddingFolder(true),
+    };
+  });
 
   function showToast(msg) {
     setToast(msg);
@@ -519,12 +357,7 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
     setAddingFolder(false); fetchFolders();
   }
 
-  const typeLabel  = TYPE_GROUPS.find((g) => g.key === activeType)?.label;
-  const notesLabel = activeFolderId !== null && showUnattached
-    ? (activeType ? `Unsorted — ${typeLabel}` : "Unsorted Notes")
-    : activeFolderId !== null
-      ? (activeType ? `${activeFolder?.name ?? "Folder"} — ${typeLabel}` : (activeFolder?.name ?? "Folder"))
-      : (activeType ? `Unsorted — ${typeLabel}` : "Unsorted Notes");
+
 
   return (
     <div className="flex gap-6 items-start relative">
@@ -618,21 +451,7 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
               ))}
             </nav>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setNewNoteOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white border border-accent rounded-lg transition-colors text-xs font-semibold hover:bg-accent/80">
-              <FilePlus className="w-3.5 h-3.5" /> New note
-            </button>
-            <button onClick={() => setAddingFolder((v) => !v)}
-              className={clsx("flex items-center gap-1.5 px-3 py-1.5 bg-surface border rounded-lg transition-colors text-xs font-semibold",
-                addingFolder ? "border-accent/50 text-accent" : "border-border text-muted hover:border-accent/50 hover:text-accent")}>
-              <Plus className="w-3.5 h-3.5" /> New folder
-            </button>
-            <button onClick={onOpenChat}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-muted hover:text-accent border border-border hover:border-accent/40 bg-surface rounded-lg transition-colors">
-              <MessageSquare className="w-3.5 h-3.5" /> Chat
-            </button>
-          </div>
+          <div />
         </div>
 
         {addingFolder && (
@@ -640,10 +459,6 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
             <span className="text-base">📁</span>
             <InlineInput placeholder="Folder name…" onConfirm={handleCreateFolder} onCancel={() => setAddingFolder(false)} />
           </div>
-        )}
-
-        {activeFolderId === null && (
-          <TodayStrip notes={localNotes} onOpenNote={onOpenNote} folders={folders} noteActions={noteActions} />
         )}
 
         {displayFolders.length > 0 && (
@@ -673,14 +488,15 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
               onDrop={(filename) => handleDropNote(filename, activeFolderId)}
             />
           ) : (
-            <div className="flex items-center gap-3 mb-4 pb-2 border-b border-border">
-              <h2 className="text-sm font-bold text-text">{notesLabel}</h2>
-              {activeType !== null && (
-                <span className="text-xs bg-accent/10 text-accent/80 px-2 py-0.5 rounded-full border border-accent/20">
-                  {TYPE_GROUPS.find((g) => g.key === activeType)?.label}
-                </span>
-              )}
-              <span className="text-xs text-muted ml-auto">{visibleNotes.length} note{visibleNotes.length !== 1 ? "s" : ""}</span>
+            <div className="flex items-center gap-3 mb-5 pb-3 border-b-2 border-accent/30">
+              <span className="text-2xl leading-none">📋</span>
+              <h2 className="text-lg font-extrabold text-accent tracking-tight flex-1">
+                {activeFolderId === null && !showUnattached ? "All Notes" : "Unsorted"}
+                {activeType !== null && (
+                  <span className="ml-2 text-sm font-semibold text-accent/60">— {TYPE_GROUPS.find((g) => g.key === activeType)?.label}</span>
+                )}
+              </h2>
+              <span className="text-xs text-muted">{visibleNotes.length} note{visibleNotes.length !== 1 ? "s" : ""}</span>
             </div>
           )}
           {visibleNotes.length === 0 && activeFolderId !== null && !showUnattached ? (
@@ -690,7 +506,7 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
               <p className="text-xs mt-1 text-muted/70">Drag notes here, or capture something from the extension</p>
             </div>
           ) : (
-            <NotesList notes={visibleNotes} folders={folders} onRefresh={refresh} onOpenNote={onOpenNote} />
+            <NotesList notes={visibleNotes} folders={folders} onRefresh={refresh} onOpenNote={onOpenNote} limit={2} />
           )}
         </div>
       </main>
