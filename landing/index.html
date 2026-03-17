@@ -142,6 +142,10 @@
       50%       { border-color: transparent; }
     }
 
+    .hero-builder {
+      font-size: 13.5px; color: #555; font-style: italic;
+      max-width: 480px; margin: -22px auto 32px; line-height: 1.5;
+    }
     .hero-btns { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
     .btn-primary {
       display: inline-flex; align-items: center; gap: 9px;
@@ -191,10 +195,10 @@
     .stat-text span { color: var(--purple-lt); }
 
     /* ── Hero screenshot ───────────────────────────────────────────────────── */
-    .hero-screenshot { margin: 68px auto 0; max-width: 860px; position: relative; }
+    .hero-screenshot { margin: 68px auto 0; max-width: 420px; position: relative; }
     .hero-screenshot-glow {
-      position: absolute; inset: -40px;
-      background: radial-gradient(ellipse at 50% 60%, rgba(124,106,245,0.18) 0%, transparent 70%);
+      position: absolute; inset: -60px;
+      background: radial-gradient(ellipse at 50% 50%, rgba(124,106,245,0.22) 0%, transparent 65%);
       pointer-events: none;
     }
     .screenshot-frame {
@@ -492,6 +496,9 @@
     <p class="hero-sub fade-up">
       <span class="hero-sub-static">Ask LookUp to </span><span class="hero-sub-typed" id="typed-text"></span>
     </p>
+    <p class="hero-builder fade-up">
+      Built by a software engineering student who was tired of switching between lecture slides, notes, and ChatGPT.
+    </p>
     <div class="hero-btns fade-up">
       <a class="btn-primary" href="https://github.com/NimrodNetzer/lookUp" target="_blank" rel="noopener">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -510,10 +517,7 @@
           <span class="screenshot-dot grn"></span>
           <span class="screenshot-title">LookUp — AI Study Assistant</span>
         </div>
-        <div class="screenshot-placeholder">
-          <div class="placeholder-icon">✦</div>
-          <span class="placeholder-text">Screenshot coming soon</span>
-        </div>
+        <img src="screenshots/hero.png" alt="LookUp extension showing AI-generated flashcards" style="width:100%;display:block;border-radius:0;" />
       </div>
     </div>
   </section>

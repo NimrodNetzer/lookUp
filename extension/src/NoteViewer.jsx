@@ -53,18 +53,24 @@ function detectType(text) {
 }
 
 function QuizViewer({ pairs }) {
+  const [revealed, setRevealed] = useState({});
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       {pairs.map((p, i) => (
-        <div key={i} className="border border-border rounded-xl p-4 bg-surface">
-          <p className="font-semibold text-text mb-3">
-            <span className="text-muted text-xs font-bold uppercase mr-2">Q{i+1}</span>
+        <div key={i} className="chat-quiz-block">
+          <p style={{ fontSize: 17, lineHeight: 1.6, color: "#e8e8f0", margin: "0 0 10px" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "#7c6af5", marginRight: 8, letterSpacing: "0.05em" }}>Q{i+1}</span>
             {p.q}
           </p>
-          <div className="border-t border-border pt-3 mt-1">
-            <p className="text-xs font-bold uppercase text-muted mb-1">Answer</p>
-            <p className="text-sm text-text">{p.a}</p>
-          </div>
+          <button
+            className="chat-quiz-reveal"
+            onClick={() => setRevealed((r) => ({ ...r, [i]: !r[i] }))}
+          >
+            {revealed[i] ? "▼ Hide Answer" : "▶ Show Answer"}
+          </button>
+          {revealed[i] && (
+            <div className="chat-quiz-answer">{p.a}</div>
+          )}
         </div>
       ))}
     </div>

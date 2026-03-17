@@ -127,11 +127,30 @@ function applyLang() {
 // ── More-options dropdown ─────────────────────────────────────────────────────
 const DAILY_TOKEN_LIMIT = 500_000;
 
+// Live countdown interval handle — started when the info dropdown opens, cleared on close.
+let _usageCountdownInterval = null;
+
+function _updateResetHint() {
+  const usageResetHint = document.getElementById("usageResetHint");
+  if (!usageResetHint) return;
+  const now = new Date();
+  const msUntilMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
+  const hh = Math.floor(msUntilMidnight / 3600000);
+  const mm = Math.floor((msUntilMidnight % 3600000) / 60000);
+  usageResetHint.textContent = `Resets in ${hh}h ${mm}m`;
+}
+
+function _stopUsageCountdown() {
+  if (_usageCountdownInterval !== null) {
+    clearInterval(_usageCountdownInterval);
+    _usageCountdownInterval = null;
+  }
+}
+
 async function refreshUsageDisplay() {
   const usageCount   = document.getElementById("usageCount");
   const usageBarFill = document.getElementById("usageBarFill");
   const usageUpgrade = document.getElementById("usageUpgrade");
-  const usageResetHint = document.getElementById("usageResetHint");
   if (!usageCount) return;
 
   const { tokens } = await TokenUsage.get();
@@ -147,16 +166,13 @@ async function refreshUsageDisplay() {
 
   usageUpgrade.style.display = pct >= 0.85 ? "block" : "none";
 
-  // Show when the counter resets (midnight local time)
-  const now = new Date();
-  const msUntilMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
-  const hh = Math.floor(msUntilMidnight / 3600000);
-  const mm = Math.floor((msUntilMidnight % 3600000) / 60000);
-  usageResetHint.textContent = `Resets in ${hh}h ${mm}m`;
+  // Update reset hint immediately, then start live 1-minute countdown.
+  _updateResetHint();
 }
 
 moreBtn.addEventListener("click", (e) => {
   e.stopPropagation();
+  _stopUsageCountdown();
   infoDropdown.classList.remove("open");
   infoBtn.classList.remove("open");
   const open = moreDropdown.classList.toggle("open");
@@ -173,9 +189,17 @@ infoBtn.addEventListener("click", (e) => {
   renderSearchResults([]);
   const open = infoDropdown.classList.toggle("open");
   infoBtn.classList.toggle("open", open);
-  if (open) refreshUsageDisplay();
+  if (open) {
+    refreshUsageDisplay();
+    // Tick every 60s so the countdown stays accurate while the dropdown is open.
+    _stopUsageCountdown();
+    _usageCountdownInterval = setInterval(_updateResetHint, 60_000);
+  } else {
+    _stopUsageCountdown();
+  }
 });
 document.addEventListener("click", () => {
+  _stopUsageCountdown();
   moreDropdown.classList.remove("open");
   moreBtn.classList.remove("open");
   infoDropdown.classList.remove("open");
@@ -1235,8 +1259,9 @@ async function processPendingCapture() {
 
   showSpinner("Processing shortcut capture…");
   try {
-    const mimeType = "image/jpeg";
-    const base64 = pendingCapture.dataUrl.split(",")[1];
+    // Downscale the shortcut capture (same as captureTab) — background.js stores
+    // full-resolution JPEG; resize to max 1280px longest side before sending to API.
+    const { base64, mimeType } = await resizeDataUrl(pendingCapture.dataUrl);
     const raw = await analyzeScreenshot(base64, mimeType, selectedMode);
     refreshUsageDisplay();
 
@@ -1312,30 +1337,40 @@ function sendMessageSafe(msg) {
   });
 }
 
-// ── Tab capture helper ──────────────────────────────────────────────────────
-// Uses null windowId (= current window) to avoid a tabs.query round-trip,
-// which would burn the user-gesture context before captureVisibleTab is called.
-async function captureTab() {
-  const dataUrl = await chrome.tabs.captureVisibleTab(targetWindowId, { format: "jpeg", quality: 85 });
-  // Downscale to max 960px wide — cuts image tokens ~75% with no visible quality loss for AI
+// ── Image resize helper ──────────────────────────────────────────────────────
+// Downscales a data URL to MAX_CAP px on the longest side, re-encodes as JPEG.
+// Used by both captureTab() and processPendingCapture() so all screenshot paths
+// go through the same resize before being sent to the Groq vision API.
+const MAX_CAP = 1280;
+
+function resizeDataUrl(dataUrl, quality = 0.85) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      const MAX_W = 960;
-      const scale = img.width > MAX_W ? MAX_W / img.width : 1;
+      const longest = Math.max(img.width, img.height);
+      const scale = longest > MAX_CAP ? MAX_CAP / longest : 1;
       const w = Math.round(img.width  * scale);
       const h = Math.round(img.height * scale);
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-      const resized = canvas.toDataURL("image/jpeg", 0.85);
-      const result = { base64: resized.replace(/^data:image\/jpeg;base64,/, ""), mimeType: "image/jpeg" };
-      _cachedScreenshot = result;
-      _cacheTs = Date.now();
-      resolve(result);
+      const resized = canvas.toDataURL("image/jpeg", quality);
+      resolve({ base64: resized.replace(/^data:image\/jpeg;base64,/, ""), mimeType: "image/jpeg" });
     };
     img.src = dataUrl;
   });
+}
+
+// ── Tab capture helper ──────────────────────────────────────────────────────
+// Uses null windowId (= current window) to avoid a tabs.query round-trip,
+// which would burn the user-gesture context before captureVisibleTab is called.
+async function captureTab() {
+  const dataUrl = await chrome.tabs.captureVisibleTab(targetWindowId, { format: "jpeg", quality: 85 });
+  // Downscale to max MAX_CAP px longest side — cuts image tokens vs. full HD with no AI quality loss
+  const result = await resizeDataUrl(dataUrl);
+  _cachedScreenshot = result;
+  _cacheTs = Date.now();
+  return result;
 }
 
 // ── Window picker ────────────────────────────────────────────────────────────

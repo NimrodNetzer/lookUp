@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import CosmicBg from "./CosmicBg.jsx";
-import { Conversations, Messages, Notes } from "../storage.js";
+import { Conversations, Messages, Notes, Settings } from "../storage.js";
 import { chatStream, chatStreamRich } from "../groq-client.js";
 
 // ── Lightweight markdown renderer ─────────────────────────────────────────────
@@ -156,26 +156,39 @@ export default function ChatPage() {
   const [sidebarOpen,    setSidebarOpen]    = useState(true);
   const [searchQuery,    setSearchQuery]    = useState("");
 
-  // Attachment state
+  // Attachment state (manual drag/paste/file)
   const [attachedFiles,  setAttachedFiles]  = useState([]);
 
   // Drag-and-drop state
   const [dragActive,     setDragActive]     = useState(false);
   const dragCounter                         = useRef(0);
 
-  // Input bar dropdown — capture wizard state machine
-  // captureStep: null | "pick-window" | "pick-action"
-  const [dropdownOpen,   setDropdownOpen]   = useState(false);
-  const [captureStep,    setCaptureStep]    = useState(null);   // wizard step
-  const [captureWindows, setCaptureWindows] = useState([]);     // [{id, title}]
-  const [captureWinId,   setCaptureWinId]   = useState(null);  // selected windowId
-  const [activeMode,     setActiveMode]     = useState("chat");
-  const dropdownRef                         = useRef(null);
+  // Persistent mode (saved to storage)
+  const [activeMode,     setActiveModeState] = useState("chat");
+  const [modeDropOpen,   setModeDropOpen]   = useState(false);
+
+  // Persistent capture source for this conversation
+  // null = no capture | { winId, title } = a selected window
+  const [captureSource,  setCaptureSource]  = useState(null);
+
+  // Capture card picker state (shown inside the sidebar card)
+  const [pickerOpen,     setPickerOpen]     = useState(false);
+  const [pickerWindows,  setPickerWindows]  = useState([]);
 
   const bottomRef   = useRef(null);
   const textareaRef = useRef(null);
   const renameRef   = useRef(null);
   const fileInputRef = useRef(null);
+
+  // Load persisted mode on mount
+  useEffect(() => {
+    Settings.getChatMode().then(m => setActiveModeState(m)).catch(() => {});
+  }, []);
+
+  async function setActiveMode(mode) {
+    setActiveModeState(mode);
+    await Settings.setChatMode(mode).catch(() => {});
+  }
 
   // ── Load conversations ──────────────────────────────────────────────────────
   const loadConversations = useCallback(async () => {
@@ -185,6 +198,8 @@ export default function ChatPage() {
   // ── Switch to a conversation ────────────────────────────────────────────────
   const switchConversation = useCallback(async (id) => {
     setActiveId(id);
+    setCaptureSource(null);
+    setPickerOpen(false);
     try {
       const msgs = await Messages.listByConversation(id);
       setMessages(msgs.map((m) => ({ role: m.role, content: m.content })));
@@ -225,14 +240,6 @@ export default function ChatPage() {
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, [ctxMenu]);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    if (!dropdownOpen) return;
-    const close = (e) => { if (!dropdownRef.current?.contains(e.target)) setDropdownOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [dropdownOpen]);
 
   // Paste images anywhere on the page
   useEffect(() => {
@@ -279,15 +286,8 @@ export default function ChatPage() {
     if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
   }
 
-  // ── Capture wizard ───────────────────────────────────────────────────────────
-  function closeDropdown() {
-    setDropdownOpen(false);
-    setCaptureStep(null);
-    setCaptureWindows([]);
-    setCaptureWinId(null);
-  }
-
-  async function startCapture() {
+  // ── Capture source card ──────────────────────────────────────────────────────
+  async function openPicker() {
     try {
       const wins = await chrome.windows.getAll({ populate: true });
       const normal = wins
@@ -295,57 +295,46 @@ export default function ChatPage() {
         .map(w => ({
           id: w.id,
           title: w.tabs?.find(t => t.active)?.title ?? `Window ${w.id}`,
-          tabId: w.tabs?.find(t => t.active)?.id,
         }));
-      if (normal.length <= 1) {
-        // Only one window — skip picker, go straight to action step
-        setCaptureWinId(normal[0]?.id ?? null);
-        setCaptureStep("pick-action");
-      } else {
-        setCaptureWindows(normal);
-        setCaptureStep("pick-window");
-      }
+      setPickerWindows(normal);
+      setPickerOpen(true);
     } catch (err) {
       console.error("Could not list windows:", err);
     }
   }
 
-  function selectWindow(winId) {
-    setCaptureWinId(winId);
-    setCaptureStep("pick-action");
+  function selectCaptureWindow(win) {
+    setCaptureSource(win);   // { id, title }
+    setPickerOpen(false);
   }
 
-  async function doCapture(mode) {
-    const winId = captureWinId;
-    closeDropdown();
-    try {
-      const dataUrl = await chrome.tabs.captureVisibleTab(winId, { format: "jpeg", quality: 85 });
-      const base64 = dataUrl.split(",")[1];
-      setAttachedFiles(prev => [...prev, {
-        id: `${Date.now()}-cap`,
-        name: "screenshot.jpg",
-        mimeType: "image/jpeg",
-        base64,
-        isImage: true,
-      }]);
-      if (mode !== "chat") {
-        setActiveMode(mode);
-        // Auto-send with mode prefix if user doesn't type anything
-      }
-      textareaRef.current?.focus();
-    } catch (err) {
-      console.error("Capture failed:", err);
-    }
+  function clearCapture() {
+    setCaptureSource(null);
+    setPickerOpen(false);
   }
 
   // ── Send message ─────────────────────────────────────────────────────────────
   async function send() {
     const text = input.trim();
-    if ((!text && attachedFiles.length === 0) || loading || !activeId) return;
+    if ((!text && attachedFiles.length === 0 && !captureSource) || loading || !activeId) return;
     setInput("");
     setLoading(true);
 
-    const imageFiles = attachedFiles.filter(f => f.isImage);
+    // Auto-capture from selected source before building the message
+    let autoCapture = null;
+    if (captureSource) {
+      try {
+        const dataUrl = await chrome.tabs.captureVisibleTab(captureSource.id, { format: "jpeg", quality: 85 });
+        autoCapture = {
+          id: `${Date.now()}-cap`, name: "screenshot.jpg",
+          mimeType: "image/jpeg", base64: dataUrl.split(",")[1], isImage: true,
+        };
+      } catch (err) {
+        console.error("Auto-capture failed:", err);
+      }
+    }
+
+    const imageFiles = [...attachedFiles.filter(f => f.isImage), ...(autoCapture ? [autoCapture] : [])];
     const textFiles  = attachedFiles.filter(f => f.isText);
     setAttachedFiles([]);
 
@@ -373,9 +362,12 @@ export default function ChatPage() {
 
       let fullResponse = "";
 
+      // Trim history to last 20 messages (10 turns) to keep requests under ~10k tokens
+      const recentHistory = prevMessages.slice(-20);
+
       if (imageFiles.length > 0) {
         // Use in-memory history (no DB re-fetch) — strip display-only fields
-        const historyMsgs = prevMessages.map(m => ({ role: m.role, content: m.content }));
+        const historyMsgs = recentHistory.map(m => ({ role: m.role, content: m.content }));
         const imageContent = imageFiles.map(f => ({
           type: "image_url",
           image_url: { url: `data:${f.mimeType};base64,${f.base64}` },
@@ -395,7 +387,7 @@ export default function ChatPage() {
       } else {
         // Use in-memory history + new user message (no DB re-fetch)
         const apiMessages = [
-          ...prevMessages.map(m => ({ role: m.role, content: m.content })),
+          ...recentHistory.map(m => ({ role: m.role, content: m.content })),
           { role: "user", content: effectiveText },
         ];
         for await (const delta of chatStream(apiMessages)) {
@@ -440,6 +432,7 @@ export default function ChatPage() {
     try {
       const c = await Conversations.create("New Conversation");
       setActiveId(c.id); setMessages([]); setAttachedFiles([]);
+      setCaptureSource(null); setPickerOpen(false);
       await Conversations.setActive(c.id);
       await loadConversations();
     } catch {}
@@ -576,6 +569,72 @@ export default function ChatPage() {
             )}
           </div>
 
+          {/* ── Bottom: capture + mode ──────────────────────────────── */}
+          <div className="chat-sidebar-bottom">
+            {/* Mode dropdown — only visible when capture is active */}
+            {captureSource && (
+              <div className="chat-mode-select">
+                <button
+                  className="chat-mode-trigger"
+                  onClick={() => setModeDropOpen(o => !o)}
+                  title="Select output mode"
+                >
+                  <span>{MODES.find(m => m.key === activeMode)?.label ?? "Chat"}</span>
+                  <span className="chat-mode-trigger-arrow">{modeDropOpen ? "▴" : "▾"}</span>
+                </button>
+                {modeDropOpen && (
+                  <div className="chat-mode-dropdown">
+                    {MODES.map(m => (
+                      <button
+                        key={m.key}
+                        className={`chat-mode-opt${activeMode === m.key ? " active" : ""}`}
+                        onClick={() => { setActiveMode(m.key); setModeDropOpen(false); }}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Compact capture source button */}
+            <div className="chat-cap-row">
+              {captureSource ? (
+                <>
+                  <button className="chat-cap-btn active" onClick={openPicker} title="Change capture window">
+                    <span className="chat-capture-dot active" />
+                    <span className="chat-cap-label">{captureSource.title}</span>
+                  </button>
+                  <button className="chat-cap-clear" onClick={clearCapture} title="Stop capturing">✕</button>
+                </>
+              ) : (
+                <button className="chat-cap-btn" onClick={openPicker} title="Capture a window on each message">
+                  <span className="chat-capture-dot" />
+                  <span className="chat-cap-none">📷 Capture screen</span>
+                </button>
+              )}
+            </div>
+
+            {/* Window picker */}
+            {pickerOpen && (
+              <div className="chat-capture-picker">
+                <div className="chat-capture-picker-hint">Captures the active tab</div>
+                <button className="chat-capture-picker-item none" onClick={clearCapture}>⊘ No capture</button>
+                {pickerWindows.map(w => (
+                  <button
+                    key={w.id}
+                    className={`chat-capture-picker-item${captureSource?.id === w.id ? " selected" : ""}`}
+                    onClick={() => selectCaptureWindow(w)}
+                  >
+                    <span className="chat-capture-dot active" />
+                    <span className="chat-capture-title">{w.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="chat-sidebar-back">
             <button
               onClick={() => window.open(chrome.runtime.getURL("built/dashboard.html"), "_self")}
@@ -613,20 +672,13 @@ export default function ChatPage() {
               m.role === "user" ? (
                 <div key={i} className="msg-user">
                   <div className="msg-user-bubble">
-                    {/* Image thumbnails */}
                     {m._images?.length > 0 && (
                       <div className="msg-user-imgs">
                         {m._images.map((img, ii) => (
-                          <img
-                            key={ii}
-                            src={`data:${img.mimeType};base64,${img.base64}`}
-                            alt={img.name}
-                            className="msg-user-thumb"
-                          />
+                          <img key={ii} src={`data:${img.mimeType};base64,${img.base64}`} alt={img.name} className="msg-user-thumb" />
                         ))}
                       </div>
                     )}
-                    {/* File name chips */}
                     {m._fileNames?.length > 0 && (
                       <div className="msg-user-chips">
                         {m._fileNames.map((name, fi) => (
@@ -663,7 +715,7 @@ export default function ChatPage() {
           {/* ── Input bar ───────────────────────────────────────────── */}
           <div className="chat-input-bar">
 
-            {/* Attachment preview strip */}
+            {/* Manual attachment preview strip */}
             {attachedFiles.length > 0 && (
               <div className="chat-attach-preview">
                 {attachedFiles.map(f => (
@@ -680,8 +732,6 @@ export default function ChatPage() {
             )}
 
             <div className="chat-input-wrap">
-
-              {/* Hidden file input */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -690,83 +740,30 @@ export default function ChatPage() {
                 style={{ display: "none" }}
                 onChange={e => { handleFiles(e.target.files); e.target.value = ""; }}
               />
-
-              {/* Dropdown menu button */}
-              <div className="chat-dropdown-wrap" ref={dropdownRef}>
-                <button
-                  className="chat-dropdown-btn"
-                  onClick={() => { setDropdownOpen(o => !o); setCaptureStep(null); }}
-                  title="Options"
-                >
-                  ⋯
-                </button>
-                {dropdownOpen && (
-                  <div className="chat-dropdown-menu">
-
-                    {/* ── Step: top level ─────────────────────────── */}
-                    {captureStep === null && (<>
-                      <button className="chat-dropdown-item" onClick={closeDropdown}>
-                        💬 Chat
-                      </button>
-                      <div className="chat-dropdown-divider" />
-                      <button className="chat-dropdown-item" onClick={startCapture}>
-                        📷 Capture
-                      </button>
-                    </>)}
-
-                    {/* ── Step: pick window ───────────────────────── */}
-                    {captureStep === "pick-window" && (<>
-                      <div className="chat-dropdown-section">
-                        <button className="chat-dropdown-back" onClick={() => setCaptureStep(null)}>←</button>
-                        Select window
-                      </div>
-                      <div className="chat-dropdown-hint">Captures the active tab of each window</div>
-                      {captureWindows.map(w => (
-                        <button key={w.id} className="chat-dropdown-item chat-dropdown-window" onClick={() => selectWindow(w.id)}>
-                          <span className="chat-dropdown-win-dot" />
-                          <span className="chat-dropdown-win-title">{w.title}</span>
-                        </button>
-                      ))}
-                    </>)}
-
-                    {/* ── Step: pick action ───────────────────────── */}
-                    {captureStep === "pick-action" && (<>
-                      <div className="chat-dropdown-section">
-                        <button className="chat-dropdown-back" onClick={() => setCaptureStep(captureWindows.length > 1 ? "pick-window" : null)}>←</button>
-                        What to do with it?
-                      </div>
-                      <button className="chat-dropdown-item" onClick={() => doCapture("chat")}>
-                        💬 Chat about it
-                      </button>
-                      <div className="chat-dropdown-divider" />
-                      {MODES.filter(m => m.key !== "chat").map(m => (
-                        <button key={m.key} className="chat-dropdown-item" onClick={() => doCapture(m.key)}>
-                          {m.label}
-                        </button>
-                      ))}
-                    </>)}
-
-                  </div>
-                )}
-              </div>
+              {/* 📎 attach button */}
+              <button
+                className="chat-attach-btn"
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach file"
+              >📎</button>
 
               <textarea
                 ref={textareaRef}
                 className="chat-textarea"
-                placeholder={activeMode === "chat" ? "Ask a question…" : `${MODES.find(m=>m.key===activeMode)?.label} mode — type or drop content…`}
+                placeholder="Ask a question…"
                 rows={1}
                 value={input}
                 onChange={(e) => { setInput(e.target.value); autoResize(); }}
                 onKeyDown={handleKey}
               />
-              <button className="chat-send" onClick={send} disabled={loading || (!input.trim() && attachedFiles.length === 0)} aria-label="Send">
-                ↑
-              </button>
+              <button
+                className="chat-send"
+                onClick={send}
+                disabled={loading || (!input.trim() && attachedFiles.length === 0 && !captureSource)}
+                aria-label="Send"
+              >↑</button>
             </div>
-            <p className="chat-hint">
-              {activeMode !== "chat" && <span className="chat-mode-badge">{MODES.find(m=>m.key===activeMode)?.label}</span>}
-              Enter to send · Shift+Enter for new line
-            </p>
+            <p className="chat-hint">Enter to send · Shift+Enter for new line</p>
           </div>
         </div>
 

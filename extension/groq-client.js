@@ -112,11 +112,13 @@ function quizQuestionCount(text) {
 
 // ─── Core fetch helpers ───────────────────────────────────────────────────────
 
-async function chatCompletion(key, messages, temperature = 0.4) {
+async function chatCompletion(key, messages, temperature = 0.4, max_tokens = undefined) {
+  const body = { model: VISION_MODEL, messages, temperature };
+  if (max_tokens !== undefined) body.max_tokens = max_tokens;
   const res = await fetch(`${GROQ_API}/chat/completions`, {
     method: "POST",
     headers: authHeaders(key),
-    body: JSON.stringify({ model: VISION_MODEL, messages, temperature }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -138,11 +140,13 @@ function groq429Message(err) {
   return msg || "Too many requests — wait a moment and try again (Groq 429).";
 }
 
-async function* chatCompletionStream(key, messages, temperature = 0.6) {
+async function* chatCompletionStream(key, messages, temperature = 0.6, max_tokens = undefined) {
+  const body = { model: VISION_MODEL, messages, temperature, stream: true, stream_options: { include_usage: true } };
+  if (max_tokens !== undefined) body.max_tokens = max_tokens;
   const res = await fetch(`${GROQ_API}/chat/completions`, {
     method: "POST",
     headers: authHeaders(key),
-    body: JSON.stringify({ model: VISION_MODEL, messages, temperature, stream: true, stream_options: { include_usage: true } }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -222,11 +226,12 @@ export async function analyzeScreenshot(base64Image, mimeType = "image/png", mod
   // For quiz/flashcard: use a fixed count and send image directly — avoids a double API call
   if (mode === "quiz") {
     const langNote = _responseLanguage === "he" ? "\n\nכתוב את כל השאלות והתשובות בעברית." : "";
-    prompt = `Create a 5-question quiz based on this screenshot to test real understanding — not just memorization.\n\nFormat each question exactly like this:\n\n**Q1.** [Question]\n**Answer:** [Answer in 5–60 words — concise but complete]\n\nInclude these question types:\n- At least one "explain why…" question\n- At least one application question (how/when would you use this?)\n- One comparison question (what's the difference between X and Y?)\n- Remaining questions can test definitions or recall\n\nIMPORTANT: Keep every answer between 5 and 60 words. No lengthy paragraphs.${langNote}`;
+    prompt = `Create a 5-question quiz testing real understanding (not just recall). Mix explanation, application, and comparison questions.\n\nFormat:\n**Q1.** [Question]\n**Answer:** [5–60 words — concise but complete]${langNote}`;
   } else if (mode === "flashcard") {
     prompt = `Generate 5 flashcards from this screenshot.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]`;
   }
 
+  const maxTok = { summary: 800, explain: 1200, quiz: 1000, flashcard: 600 }[mode] ?? 800;
   return chatCompletion(key, [
     { role: "system", content: buildSystemPrompt() },
     {
@@ -236,7 +241,7 @@ export async function analyzeScreenshot(base64Image, mimeType = "image/png", mod
         { type: "text", text: prompt },
       ],
     },
-  ]);
+  ], 0.4, maxTok);
 }
 
 /**
@@ -252,10 +257,12 @@ export async function analyzeMulti(frames, mode = "session") {
   let prompt = modePrompts[mode] ?? modePrompts.session;
   if (_responseLanguage === "he") prompt += "\n\nכתוב את כל התשובה בעברית בלבד.";
 
+  // session mode produces a multi-slide unified summary — allow more headroom
+  const maxTok = { summary: 800, explain: 1200, quiz: 1000, flashcard: 600, session: 1500 }[mode] ?? 1000;
   return chatCompletion(key, [
     { role: "system", content: buildSystemPrompt() },
     { role: "user", content: [...imageContent, { type: "text", text: prompt }] },
-  ]);
+  ], 0.4, maxTok);
 }
 
 /**
@@ -278,7 +285,7 @@ export async function analyzeWithQuestion(base64Image, mimeType = "image/png", q
       role: "user",
       content: [...imageContent, { type: "text", text: question + langSuffix }],
     },
-  ]);
+  ], 0.4, 1000);
 }
 
 /** Streaming variant of analyzeWithQuestion — yields string deltas. */
@@ -298,7 +305,7 @@ export async function* analyzeWithQuestionStream(base64Image, mimeType = "image/
       role: "user",
       content: [...imageContent, { type: "text", text: question + langSuffix }],
     },
-  ]);
+  ], 0.6, 1000);
 }
 
 /**
@@ -314,11 +321,12 @@ export async function analyzeText(selectedText, mode = "summary") {
     flashcard: `Generate exactly ${flashcardCount(selectedText)} flashcards from this text.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]`,
   };
   const instruction = instructions[mode] ?? instructions.summary;
+  const maxTok = { summary: 800, explain: 1200, quiz: 1000, flashcard: 600 }[mode] ?? 800;
 
   return chatCompletion(key, [
     { role: "system", content: buildSystemPrompt() },
     { role: "user", content: `${instruction}\n\n---\n\n${selectedText}` },
-  ]);
+  ], 0.4, maxTok);
 }
 
 /**
@@ -394,14 +402,15 @@ export async function transcribeAndSummarize(audioBlob, mode = "summary", userNo
   const audioPrompts = {
     summary:   `${modePrompts.summary}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
     explain:   `${modePrompts.explain}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
-    quiz:      `Generate a ${n}-question quiz based on this transcript, testing real understanding.\n\nFormat each question exactly like this:\n\n**Q1.** [Question]\n**Answer:** [5–60 words — concise but complete]\n\nIMPORTANT: Keep every answer between 5 and 60 words.${langNote}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
+    quiz:      `Generate a ${n}-question quiz from this transcript testing real understanding. Mix explanation, application, and comparison questions.\n\nFormat:\n**Q1.** [Question]\n**Answer:** [5–60 words — concise but complete]${langNote}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
     flashcard: `Generate exactly ${flashcardCount(transcript)} flashcards from this transcript.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
   };
 
+  const audioMaxTok = { summary: 800, explain: 1200, quiz: 1000, flashcard: 600 }[mode] ?? 800;
   const markdown = await chatCompletion(key, [
     { role: "system", content: buildSystemPrompt() },
     { role: "user", content: audioPrompts[mode] ?? audioPrompts.summary },
-  ]);
+  ], 0.4, audioMaxTok);
 
   return { transcript, markdown };
 }
@@ -415,7 +424,7 @@ export async function chat(messages) {
   return chatCompletion(key, [
     { role: "system", content: buildSystemPrompt() },
     ...messages,
-  ], 0.6);
+  ], 0.6, 1000);
 }
 
 /**
@@ -432,7 +441,7 @@ export async function* chatStream(messages) {
   yield* chatCompletionStream(key, [
     { role: "system", content: buildSystemPrompt() },
     ...messages,
-  ]);
+  ], 0.6, 1000);
 }
 
 /**
@@ -446,7 +455,7 @@ export async function* chatStreamRich(messages) {
   yield* chatCompletionStream(key, [
     { role: "system", content: buildSystemPrompt() },
     ...messages,
-  ]);
+  ], 0.6, 1000);
 }
 
 /**
@@ -491,5 +500,5 @@ RULES:
     { role: "user", content: command },
   ];
 
-  return chatCompletion(key, messages, 0.1);
+  return chatCompletion(key, messages, 0.1, 1000);
 }

@@ -112,6 +112,15 @@ export const Settings = {
     return key != null && key.trim().length > 0;
   },
 
+  async getChatMode() {
+    const result = await chrome.storage.local.get("chatMode");
+    return result.chatMode ?? "chat";
+  },
+
+  async setChatMode(mode) {
+    await chrome.storage.local.set({ chatMode: mode });
+  },
+
   async getCommandLog() {
     const result = await chrome.storage.local.get("commandLog");
     return result.commandLog ?? [];
