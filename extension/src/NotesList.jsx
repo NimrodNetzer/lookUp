@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { FileText, Mic, Layers, BookOpen, HelpCircle, CreditCard, FolderSymlink, GitMerge, Trash2, Pencil, MessageSquare } from "lucide-react";
+import { FileText, Mic, Layers, BookOpen, HelpCircle, CreditCard, FolderSymlink, GitMerge, Trash2, Pencil, MessageSquare, Pin, PinOff } from "lucide-react";
 import clsx from "clsx";
 import { Notes } from "../storage.js";
 
@@ -27,7 +27,7 @@ function flattenFolders(nodes, depth = 0) {
 }
 
 // ── Context menu ──────────────────────────────────────────────────────────────
-function ContextMenu({ note, x, y, folders, onClose, onStartRename, onAssign }) {
+function ContextMenu({ note, x, y, folders, onClose, onStartRename, onAssign, onTogglePin }) {
   const [view, setView] = useState("menu");
   const ref = useRef(null);
   const flatFolders = useMemo(() => flattenFolders(folders), [folders]);
@@ -52,6 +52,11 @@ function ContextMenu({ note, x, y, folders, onClose, onStartRename, onAssign }) 
     >
       {view === "menu" ? (
         <div className="py-1">
+          <button onClick={() => { onTogglePin(); onClose(); }}
+            className="w-full text-left px-4 py-2.5 text-sm text-text hover:bg-accent/10 flex items-center gap-2.5 transition-colors">
+            {note.pinned ? <PinOff className="w-3.5 h-3.5 text-muted" /> : <Pin className="w-3.5 h-3.5 text-muted" />}
+            {note.pinned ? "Unpin" : "Pin to top"}
+          </button>
           <button onClick={() => { onStartRename(); onClose(); }}
             className="w-full text-left px-4 py-2.5 text-sm text-text hover:bg-accent/10 flex items-center gap-2.5 transition-colors">
             <Pencil className="w-3.5 h-3.5 text-muted" /> Rename
@@ -217,6 +222,10 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
     try { await Notes.updateMeta(note.filename, { folder_id: folderId }); onRefresh(); } catch {}
   }
 
+  async function handleTogglePin(note) {
+    try { await Notes.updateMeta(note.filename, { pinned: !note.pinned }); onRefresh(); } catch {}
+  }
+
   const groups = useMemo(() => {
     const now   = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -243,6 +252,7 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
     map.forEach((arr) => {
       if (sortMode === "date") arr.sort((a, b) => (b.modified ?? b.updatedAt ?? 0) - (a.modified ?? a.updatedAt ?? 0));
       else arr.sort((a, b) => (a.title ?? a.filename).localeCompare(b.title ?? b.filename));
+      arr.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
     });
     return GROUP_ORDER.filter((k) => map.has(k)).map((k) => ({ key: k, notes: map.get(k) }));
   }, [notes, dateFilter, sortMode, rangeFrom, rangeTo, showRange]);
@@ -393,7 +403,23 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
                                 </p>
                               </button>
                             )}
-                            {!selectMode && !isRenaming && <DeleteButton note={note} onRefresh={onRefresh} />}
+                            {!selectMode && !isRenaming && (
+                              <>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleTogglePin(note); }}
+                                  title={note.pinned ? "Unpin" : "Pin to top"}
+                                  className={clsx(
+                                    "flex items-center px-2 py-0.5 rounded border transition-all",
+                                    note.pinned
+                                      ? "opacity-100 text-accent border-accent/30 hover:border-red-400/30 hover:text-red-400"
+                                      : "opacity-0 group-hover:opacity-100 text-muted border-transparent hover:border-accent/30 hover:text-accent"
+                                  )}
+                                >
+                                  <Pin className="w-3.5 h-3.5" />
+                                </button>
+                                <DeleteButton note={note} onRefresh={onRefresh} />
+                              </>
+                            )}
                           </div>
                         );
                       })}
@@ -410,7 +436,8 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
         <ContextMenu note={ctxMenu.note} x={ctxMenu.x} y={ctxMenu.y} folders={folders}
           onClose={closeCtxMenu}
           onStartRename={() => setRenamingFilename(ctxMenu.note.filename)}
-          onAssign={(folderId) => handleAssignFolder(ctxMenu.note, folderId)} />
+          onAssign={(folderId) => handleAssignFolder(ctxMenu.note, folderId)}
+          onTogglePin={() => handleTogglePin(ctxMenu.note)} />
       )}
     </div>
   );

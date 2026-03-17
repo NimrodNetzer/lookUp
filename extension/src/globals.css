@@ -399,3 +399,12 @@
   @apply rounded-xl flex items-center justify-center p-6 text-center;
 }
 .flip-card-back { transform: rotateY(180deg); }
+
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+  .print\:hidden { display: none !important; }
+  canvas { display: none !important; }
+  .prose, .prose * { color: #111 !important; background: transparent !important; border-color: #ccc !important; }
+  .prose a { color: #1a0a8c !important; }
+  .prose pre, .prose code { background: #f4f4f4 !important; }
+}
