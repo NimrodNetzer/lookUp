@@ -35,7 +35,8 @@ function tryParseCards(content) {
 
 function parseQuiz(content) {
   const pairs = [];
-  const regex = /\*\*Q\d+\.\*\*\s*([\s\S]*?)\n\*\*Answer:\*\*\s*([\s\S]*?)(?=\n\*\*Q\d+\.\*\*|$)/g;
+  // Covers: **Q1.** / **Q1:** / **Question 1.** / **1.**  +  **Answer:** / **A:** / **A.**
+  const regex = /\*\*(?:Q(?:uestion)?\s*\d+[.:]?|\d+\.)\*\*\s*([\s\S]*?)\n\*\*(?:Answer|A)[.:]\*\*\s*([\s\S]*?)(?=\n\*\*(?:Q(?:uestion)?\s*\d+[.:]?|\d+\.)\*\*|$)/gi;
   let match;
   while ((match = regex.exec(content)) !== null) {
     const q = match[1].trim();
@@ -169,15 +170,27 @@ export default function NoteViewer({ filename, onBack }) {
 
   return (
     <main className="max-w-2xl mx-auto px-5 py-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 print:hidden">
         <button onClick={onBack} className="text-sm text-accent hover:underline">← Back to notes</button>
-        <button
-          onClick={() => downloadNote(note, filename)}
-          className="text-xs text-muted hover:text-text border border-border hover:border-accent/40 px-3 py-1.5 rounded-lg transition-colors"
-          title="Download as Markdown"
-        >
-          ↓ Export .md
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => downloadNote(note, filename)}
+            className="text-xs text-muted hover:text-text border border-border hover:border-accent/40 px-3 py-1.5 rounded-lg transition-colors"
+            title="Download as Markdown"
+          >
+            ↓ Export .md
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-1.5 text-xs text-muted hover:text-text border border-border hover:border-accent/40 px-3 py-1.5 rounded-lg transition-colors"
+            title="Export to PDF"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>
+            </svg>
+            Export PDF
+          </button>
+        </div>
       </div>
 
       <header className="mb-7">

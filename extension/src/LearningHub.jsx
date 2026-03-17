@@ -3,7 +3,6 @@ import { Plus, Pencil, Trash2, Check, X, ChevronRight, MessageSquare } from "luc
 import clsx from "clsx";
 import { Notes, Folders } from "../storage.js";
 import NotesList from "./NotesList.jsx";
-import CommandChat from "./CommandChat.jsx";
 
 const TYPE_GROUPS = [
   { key: "summary",   label: "Summary",    icon: "📄" },
@@ -208,6 +207,67 @@ function FolderHeadline({ folder, showUnattached, activeType, visibleNotes, onDr
   );
 }
 
+// ── Today strip ───────────────────────────────────────────────────────────────
+const GROUP_COLORS = {
+  summary:   "bg-accent/20 text-accent border-accent/30",
+  explain:   "bg-teal/20 text-teal border-teal/30",
+  quiz:      "bg-amber-500/20 text-amber-400 border-amber-500/30",
+  flashcard: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  session:   "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  audio:     "bg-pink-500/20 text-pink-400 border-pink-500/30",
+  chat:      "bg-blue-500/20 text-blue-400 border-blue-500/30",
+};
+const GROUP_ICONS = {
+  summary: "📄", explain: "📖", quiz: "❓", flashcard: "🃏",
+  session: "📚", audio: "🎙️", chat: "💬",
+};
+
+function TodayStrip({ notes, onOpenNote }) {
+  const [open, setOpen] = useState(true);
+  const todayNotes = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return notes
+      .filter((n) => new Date(n.modified ?? n.updatedAt ?? n.createdAt) >= start)
+      .sort((a, b) => (b.modified ?? b.updatedAt ?? 0) - (a.modified ?? a.updatedAt ?? 0));
+  }, [notes]);
+
+  if (todayNotes.length === 0) return null;
+
+  return (
+    <div className="border border-border rounded-xl overflow-hidden mb-1">
+      <button onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-3 bg-surface hover:bg-surface/70 transition-colors">
+        <span className="text-base leading-none">⚡</span>
+        <span className="text-sm font-semibold text-text">Today</span>
+        <span className="text-xs text-muted">{todayNotes.length} note{todayNotes.length !== 1 ? "s" : ""}</span>
+        <span className={clsx("ml-auto text-muted text-sm transition-transform duration-200", open ? "rotate-90" : "")}>▸</span>
+      </button>
+      {open && (
+        <div className="border-t border-border divide-y divide-border/50">
+          {todayNotes.map((note) => {
+            const modeKey = !note.mode ? "summary" : note.mode.startsWith("audio") ? "audio" : note.mode;
+            const color = GROUP_COLORS[modeKey] ?? GROUP_COLORS.summary;
+            const icon  = GROUP_ICONS[modeKey]  ?? "📄";
+            const ts    = note.modified ?? note.updatedAt ?? note.createdAt;
+            return (
+              <button key={note.filename} onClick={() => onOpenNote(note.filename)}
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface/40 transition-colors text-left">
+                <span className={clsx("text-xs px-1.5 py-0.5 rounded border leading-none shrink-0", color)}>{icon}</span>
+                <span className="text-sm text-text truncate flex-1">{note.title ?? note.filename}</span>
+                {note.pinned && <span className="text-accent text-xs shrink-0">📌</span>}
+                <span className="text-xs text-muted shrink-0">
+                  {ts ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function LearningHub({ onOpenNote, onOpenChat }) {
   const [activeFolderId,  setActiveFolderId]  = useState(null);
@@ -365,7 +425,6 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
           </div>
         )}
 
-        <CommandChat onRefresh={refresh} />
       </aside>
 
       {/* Main */}
@@ -414,6 +473,8 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
             <InlineInput placeholder="Folder name…" onConfirm={handleCreateFolder} onCancel={() => setAddingFolder(false)} />
           </div>
         )}
+
+        {activeFolderId === null && <TodayStrip notes={localNotes} onOpenNote={onOpenNote} />}
 
         {displayFolders.length > 0 && (
           <div>

@@ -124,7 +124,7 @@ async function chatCompletion(key, messages, temperature = 0.4) {
     throw new Error(err.error?.message ?? `Groq API error ${res.status}`);
   }
   const data = await res.json();
-  if (data.usage?.total_tokens) TokenUsage.add(data.usage.total_tokens);
+  if (data.usage?.total_tokens) await TokenUsage.add(data.usage.total_tokens);
   return data.choices[0].message.content;
 }
 
@@ -157,7 +157,7 @@ async function* chatCompletionStream(key, messages, temperature = 0.6) {
       try {
         const chunk = JSON.parse(data);
         // Final chunk from stream_options.include_usage carries real token counts
-        if (chunk.usage?.total_tokens) TokenUsage.add(chunk.usage.total_tokens);
+        if (chunk.usage?.total_tokens) await TokenUsage.add(chunk.usage.total_tokens);
         const delta = chunk.choices?.[0]?.delta?.content;
         if (delta) yield delta;
       } catch {}
@@ -418,6 +418,20 @@ export async function chat(messages) {
  *   }
  */
 export async function* chatStream(messages) {
+  const key = await getKey();
+  yield* chatCompletionStream(key, [
+    { role: "system", content: buildSystemPrompt() },
+    ...messages,
+  ]);
+}
+
+/**
+ * Multi-turn chat with streaming — rich content variant.
+ * Like chatStream but each message's `content` may be a string OR an array
+ * of content blocks (e.g. [{ type:"image_url", image_url:{url:"data:..."} }, { type:"text", text:"..." }]).
+ * Use this when the conversation includes image attachments.
+ */
+export async function* chatStreamRich(messages) {
   const key = await getKey();
   yield* chatCompletionStream(key, [
     { role: "system", content: buildSystemPrompt() },

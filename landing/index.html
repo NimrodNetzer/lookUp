@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LookUp — AI Study Assistant</title>
+  <meta name="description" content="LookUp is a Chrome extension that captures your screen, transcribes audio, and lets you chat with an AI tutor — all without leaving your browser." />
+  <meta property="og:title" content="LookUp — AI Study Assistant" />
+  <meta property="og:description" content="Capture. Ask. Learn. An AI study assistant that lives in your browser." />
+  <meta property="og:type" content="website" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & base ──────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: Inter, system-ui, sans-serif;
+      background: #010108;
+      color: #e8e8f0;
+      overflow-x: hidden;
+      line-height: 1.6;
+    }
+    a { color: inherit; text-decoration: none; }
+    img { display: block; max-width: 100%; border-radius: 12px; }
+
+    /* ── Design tokens ─────────────────────────────────────────────────────── */
+    :root {
+      --purple:    #7c6af5;
+      --purple-lt: #9d8cff;
+      --teal:      #5eead4;
+      --bg:        #010108;
+      --surface:   rgba(20,20,32,0.9);
+      --border:    rgba(124,106,245,0.2);
+      --text:      #e8e8f0;
+      --muted:     #777;
+      --grad:      linear-gradient(130deg, #9d8cff 0%, #7c6af5 50%, #5eead4 100%);
+    }
+
+    /* ── Cosmic background ─────────────────────────────────────────────────── */
+    #cosmic-bg {
+      position: fixed; inset: 0; z-index: 0;
+      pointer-events: none; overflow: hidden;
+      background: #010108;
+    }
+    #cosmic-bg svg {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+    }
+
+    /* ── Layout ────────────────────────────────────────────────────────────── */
+    .page { position: relative; z-index: 1; }
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 28px;
+    }
+
+    /* ── Nav ───────────────────────────────────────────────────────────────── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      border-bottom: 1px solid rgba(124,106,245,0.1);
+      background: rgba(1,1,8,0.7);
+      backdrop-filter: blur(18px);
+    }
+    .nav-inner {
+      max-width: 1100px; margin: 0 auto; padding: 0 28px;
+      height: 60px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .nav-logo {
+      font-size: 19px; font-weight: 800; letter-spacing: -0.4px;
+      background: var(--grad);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .nav-links { display: flex; align-items: center; gap: 8px; }
+    .nav-link {
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 14px; border-radius: 9px;
+      font-size: 13px; font-weight: 500; color: var(--muted);
+      border: 1px solid transparent;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+    .nav-link:hover {
+      color: var(--purple-lt);
+      border-color: var(--border);
+      background: rgba(124,106,245,0.07);
+    }
+    .nav-link svg { flex-shrink: 0; }
+    .nav-cta {
+      padding: 7px 18px; border-radius: 9px;
+      background: rgba(124,106,245,0.15);
+      border: 1px solid rgba(124,106,245,0.4);
+      color: var(--purple-lt); font-size: 13px; font-weight: 600;
+      transition: background 0.15s, box-shadow 0.15s;
+    }
+    .nav-cta:hover {
+      background: rgba(124,106,245,0.25);
+      box-shadow: 0 0 18px rgba(124,106,245,0.2);
+    }
+
+    /* ── Hero ──────────────────────────────────────────────────────────────── */
+    .hero {
+      padding: 110px 0 80px;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(124,106,245,0.1);
+      border: 1px solid rgba(124,106,245,0.3);
+      border-radius: 100px; padding: 6px 16px;
+      font-size: 12px; font-weight: 600; color: var(--purple-lt);
+      letter-spacing: 0.5px; text-transform: uppercase;
+      margin-bottom: 30px;
+    }
+    .hero-badge-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--teal);
+      box-shadow: 0 0 8px var(--teal);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(0.8); }
+    }
+    .hero h1 {
+      font-size: clamp(40px, 7vw, 72px);
+      font-weight: 800;
+      line-height: 1.08;
+      letter-spacing: -2px;
+      margin-bottom: 22px;
+    }
+    .hero h1 .grad {
+      background: var(--grad);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      font-size: clamp(16px, 2vw, 19px);
+      color: var(--muted);
+      max-width: 580px; margin: 0 auto 42px;
+      line-height: 1.65;
+    }
+    .hero-btns {
+      display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+    }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 9px;
+      padding: 14px 28px; border-radius: 12px;
+      background: linear-gradient(135deg, #6b5ef0, #7c6af5);
+      color: #fff; font-size: 15px; font-weight: 600;
+      box-shadow: 0 4px 20px rgba(124,106,245,0.35);
+      transition: opacity 0.15s, box-shadow 0.15s, transform 0.12s;
+      cursor: pointer; border: none;
+    }
+    .btn-primary:hover {
+      opacity: 0.9;
+      box-shadow: 0 4px 30px rgba(124,106,245,0.5);
+      transform: translateY(-1px);
+    }
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 9px;
+      padding: 14px 28px; border-radius: 12px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #bbb; font-size: 15px; font-weight: 500;
+      transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.12s;
+    }
+    .btn-secondary:hover {
+      background: rgba(124,106,245,0.1);
+      border-color: rgba(124,106,245,0.4);
+      color: var(--purple-lt);
+      transform: translateY(-1px);
+    }
+
+    /* ── Hero screenshot placeholder ───────────────────────────────────────── */
+    .hero-screenshot {
+      margin: 68px auto 0;
+      max-width: 860px;
+      position: relative;
+    }
+    .hero-screenshot-glow {
+      position: absolute; inset: -40px;
+      background: radial-gradient(ellipse at 50% 60%, rgba(124,106,245,0.18) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .screenshot-frame {
+      border-radius: 16px;
+      border: 1px solid rgba(124,106,245,0.25);
+      background: rgba(12,12,22,0.85);
+      overflow: hidden;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(124,106,245,0.1);
+      backdrop-filter: blur(8px);
+    }
+    .screenshot-bar {
+      display: flex; align-items: center; gap: 7px;
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(124,106,245,0.1);
+      background: rgba(8,8,16,0.6);
+    }
+    .screenshot-dot {
+      width: 11px; height: 11px; border-radius: 50%;
+    }
+    .screenshot-dot.red   { background: #ff5f57; }
+    .screenshot-dot.yel   { background: #febc2e; }
+    .screenshot-dot.grn   { background: #28c840; }
+    .screenshot-title {
+      margin-left: auto; margin-right: auto;
+      font-size: 11.5px; color: #444; letter-spacing: 0.3px;
+    }
+    /* ── Placeholder slot ── replace the .screenshot-placeholder div with an <img> when ready */
+    .screenshot-placeholder {
+      width: 100%;
+      aspect-ratio: 16/9;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 14px;
+      background: repeating-linear-gradient(
+        45deg,
+        rgba(124,106,245,0.03) 0px,
+        rgba(124,106,245,0.03) 1px,
+        transparent 1px,
+        transparent 28px
+      );
+    }
+    .placeholder-icon {
+      width: 60px; height: 60px; border-radius: 50%;
+      background: linear-gradient(135deg, rgba(124,106,245,0.2), rgba(94,234,212,0.1));
+      border: 1px solid rgba(124,106,245,0.3);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px; color: var(--purple-lt);
+      box-shadow: 0 0 28px rgba(124,106,245,0.2);
+    }
+    .placeholder-text { font-size: 13px; color: #444; }
+
+    /* ── Section headings ──────────────────────────────────────────────────── */
+    .section { padding: 96px 0; }
+    .section-label {
+      font-size: 11px; font-weight: 700; letter-spacing: 2px;
+      text-transform: uppercase; color: var(--purple-lt);
+      margin-bottom: 14px;
+    }
+    .section-title {
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 800; letter-spacing: -1px;
+      line-height: 1.12; margin-bottom: 16px;
+    }
+    .section-sub {
+      font-size: 16px; color: var(--muted);
+      max-width: 520px; line-height: 1.65; margin-bottom: 56px;
+    }
+    .centered { text-align: center; }
+    .centered .section-sub { margin-left: auto; margin-right: auto; }
+
+    /* ── Features grid ─────────────────────────────────────────────────────── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .feature-card {
+      background: rgba(12,12,22,0.6);
+      border: 1px solid rgba(124,106,245,0.14);
+      border-radius: 16px;
+      padding: 28px 26px;
+      transition: border-color 0.2s, background 0.2s, transform 0.18s;
+      position: relative; overflow: hidden;
+    }
+    .feature-card::before {
+      content: "";
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, rgba(124,106,245,0.04) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .feature-card:hover {
+      border-color: rgba(124,106,245,0.35);
+      background: rgba(20,18,38,0.7);
+      transform: translateY(-3px);
+    }
+    .feature-icon {
+      width: 44px; height: 44px; border-radius: 12px; margin-bottom: 18px;
+      background: linear-gradient(135deg, rgba(124,106,245,0.2), rgba(94,234,212,0.08));
+      border: 1px solid rgba(124,106,245,0.3);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      box-shadow: 0 0 18px rgba(124,106,245,0.12);
+    }
+    .feature-title {
+      font-size: 16px; font-weight: 700; color: var(--text);
+      margin-bottom: 9px;
+    }
+    .feature-desc {
+      font-size: 14px; color: var(--muted); line-height: 1.6;
+    }
+
+    /* ── How it works ──────────────────────────────────────────────────────── */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 28px; position: relative;
+    }
+    .steps::before {
+      content: "";
+      position: absolute; top: 32px; left: 10%; right: 10%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent 0%, rgba(124,106,245,0.3) 30%, rgba(94,234,212,0.3) 70%, transparent 100%);
+      pointer-events: none;
+    }
+    .step {
+      display: flex; flex-direction: column; align-items: center;
+      text-align: center; padding: 28px 20px;
+    }
+    .step-num {
+      width: 64px; height: 64px; border-radius: 50%;
+      background: linear-gradient(135deg, rgba(124,106,245,0.18), rgba(94,234,212,0.08));
+      border: 1px solid rgba(124,106,245,0.35);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; font-weight: 800; color: var(--purple-lt);
+      margin-bottom: 20px;
+      box-shadow: 0 0 28px rgba(124,106,245,0.15), inset 0 0 20px rgba(124,106,245,0.05);
+      position: relative; z-index: 1;
+    }
+    .step h3 { font-size: 17px; font-weight: 700; margin-bottom: 10px; }
+    .step p  { font-size: 14px; color: var(--muted); line-height: 1.6; }
+
+    /* ── Tech stack ────────────────────────────────────────────────────────── */
+    .tech-grid {
+      display: flex; flex-wrap: wrap; gap: 12px;
+      justify-content: center;
+    }
+    .tech-chip {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 18px; border-radius: 100px;
+      background: rgba(12,12,22,0.7);
+      border: 1px solid rgba(124,106,245,0.18);
+      font-size: 13.5px; font-weight: 500; color: #bbb;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .tech-chip:hover {
+      border-color: rgba(124,106,245,0.45);
+      color: var(--purple-lt);
+      background: rgba(124,106,245,0.08);
+    }
+    .tech-chip-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--grad);
+    }
+
+    /* ── Demo section (second placeholder) ────────────────────────────────── */
+    .demo-frame {
+      border-radius: 16px;
+      border: 1px solid rgba(124,106,245,0.2);
+      background: rgba(10,10,20,0.7);
+      overflow: hidden;
+      box-shadow: 0 16px 60px rgba(0,0,0,0.4);
+      max-width: 760px; margin: 0 auto;
+    }
+    /* Replace .demo-placeholder with an <img> or <video> when you have a demo GIF */
+    .demo-placeholder {
+      width: 100%; aspect-ratio: 16/9;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 14px;
+    }
+
+    /* ── CTA band ───────────────────────────────────────────────────────────── */
+    .cta-band {
+      margin: 0 0 96px;
+    }
+    .cta-inner {
+      border-radius: 20px;
+      background: rgba(12,12,28,0.7);
+      border: 1px solid rgba(124,106,245,0.22);
+      padding: 64px 48px;
+      text-align: center;
+      position: relative; overflow: hidden;
+      box-shadow: 0 0 80px rgba(124,106,245,0.08);
+    }
+    .cta-inner::before {
+      content: "";
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at 50% 0%, rgba(124,106,245,0.12) 0%, transparent 65%);
+      pointer-events: none;
+    }
+    .cta-inner h2 {
+      font-size: clamp(26px, 4vw, 40px);
+      font-weight: 800; letter-spacing: -1px;
+      margin-bottom: 14px; position: relative;
+    }
+    .cta-inner p {
+      font-size: 16px; color: var(--muted);
+      max-width: 460px; margin: 0 auto 36px; position: relative;
+    }
+    .cta-btns {
+      display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+      position: relative;
+    }
+
+    /* ── Footer ────────────────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid rgba(124,106,245,0.1);
+      padding: 36px 0 40px;
+    }
+    .footer-inner {
+      max-width: 1100px; margin: 0 auto; padding: 0 28px;
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 18px;
+    }
+    .footer-logo {
+      font-size: 16px; font-weight: 800;
+      background: var(--grad);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .footer-copy {
+      font-size: 12.5px; color: #333;
+    }
+    .footer-links {
+      display: flex; gap: 20px; align-items: center;
+    }
+    .footer-link {
+      font-size: 12.5px; color: #444;
+      transition: color 0.15s;
+    }
+    .footer-link:hover { color: var(--purple-lt); }
+
+    /* ── Divider ───────────────────────────────────────────────────────────── */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent 0%, rgba(124,106,245,0.2) 50%, transparent 100%);
+      margin: 0;
+    }
+
+    /* ── Scroll fade-in ────────────────────────────────────────────────────── */
+    .fade-up {
+      opacity: 0; transform: translateY(24px);
+      transition: opacity 0.55s ease, transform 0.55s ease;
+    }
+    .fade-up.visible { opacity: 1; transform: translateY(0); }
+
+    /* ── Responsive ────────────────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .steps::before { display: none; }
+      .nav-links .nav-link span { display: none; }
+      .cta-inner { padding: 44px 24px; }
+      .footer-inner { justify-content: center; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Cosmic background (SVG, matches app exactly) ──────────────────────── -->
+<div id="cosmic-bg" aria-hidden="true">
+  <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <pattern id="cbGrid" width="58" height="58" patternUnits="userSpaceOnUse">
+        <path d="M 58 0 L 0 0 0 58" fill="none" stroke="rgba(70,50,170,0.07)" stroke-width="0.6"/>
+      </pattern>
+      <pattern id="cbGrid2" width="290" height="290" patternUnits="userSpaceOnUse">
+        <path d="M 290 0 L 0 0 0 290" fill="none" stroke="rgba(70,50,170,0.09)" stroke-width="1"/>
+      </pattern>
+      <linearGradient id="cbWave" x1="0%" y1="100%" x2="100%" y2="0%">
+        <stop offset="0%"   stop-color="#3a1e8f"/>
+        <stop offset="35%"  stop-color="#7c6af5"/>
+        <stop offset="65%"  stop-color="#7c6af5"/>
+        <stop offset="100%" stop-color="#5eead4"/>
+      </linearGradient>
+      <filter id="cbGlow" x="-80%" y="-80%" width="260%" height="260%">
+        <feGaussianBlur stdDeviation="5" result="b1"/>
+        <feGaussianBlur stdDeviation="12" result="b2" in="SourceGraphic"/>
+        <feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="cbRibbonGlow" x="-60%" y="-60%" width="220%" height="220%">
+        <feGaussianBlur stdDeviation="22" result="blur"/>
+        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="cbDotGlow" x="-200%" y="-200%" width="500%" height="500%">
+        <feGaussianBlur stdDeviation="4" result="blur"/>
+        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <radialGradient id="cbAmbient1" cx="0%" cy="0%" r="55%">
+        <stop offset="0%"   stop-color="#2a15a0" stop-opacity="0.28"/>
+        <stop offset="100%" stop-color="transparent" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="cbAmbient2" cx="100%" cy="100%" r="45%">
+        <stop offset="0%"   stop-color="#1a4040" stop-opacity="0.18"/>
+        <stop offset="100%" stop-color="transparent" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="1440" height="900" fill="#010108"/>
+    <rect width="1440" height="900" fill="url(#cbGrid)"/>
+    <rect width="1440" height="900" fill="url(#cbGrid2)"/>
+    <rect width="1440" height="900" fill="url(#cbAmbient1)"/>
+    <rect width="1440" height="900" fill="url(#cbAmbient2)"/>
+    <!-- Wave ribbon -->
+    <path d="M -150,950 C 100,850 280,60 680,175 C 1080,290 1140,820 1540,80"
+          fill="none" stroke="url(#cbWave)" stroke-width="160" stroke-opacity="0.045"
+          stroke-linecap="round" filter="url(#cbRibbonGlow)"/>
+    <path d="M -150,950 C 100,850 280,60 680,175 C 1080,290 1140,820 1540,80"
+          fill="none" stroke="url(#cbWave)" stroke-width="80" stroke-opacity="0.065"
+          stroke-linecap="round"/>
+    <path d="M -150,950 C 100,850 280,60 680,175 C 1080,290 1140,820 1540,80"
+          fill="none" stroke="url(#cbWave)" stroke-width="30" stroke-opacity="0.11"
+          stroke-linecap="round"/>
+    <path d="M -150,950 C 100,850 280,60 680,175 C 1080,290 1140,820 1540,80"
+          fill="none" stroke="url(#cbWave)" stroke-width="2.5" stroke-linecap="round"
+          stroke-opacity="0.5" filter="url(#cbGlow)"/>
+    <!-- Glowing dots -->
+    <g filter="url(#cbDotGlow)"><circle cx="55"   cy="820" r="5.5" fill="rgba(160,140,255,0.55)"/><circle cx="55"   cy="820" r="2.5" fill="rgba(230,225,255,0.95)"/></g>
+    <g filter="url(#cbDotGlow)"><circle cx="210"  cy="620" r="5.5" fill="rgba(160,140,255,0.55)"/><circle cx="210"  cy="620" r="2.5" fill="rgba(230,225,255,0.95)"/></g>
+    <g filter="url(#cbDotGlow)"><circle cx="390"  cy="260" r="5.5" fill="rgba(160,140,255,0.55)"/><circle cx="390"  cy="260" r="2.5" fill="rgba(230,225,255,0.95)"/></g>
+    <g filter="url(#cbDotGlow)"><circle cx="570"  cy="150" r="5.5" fill="rgba(160,140,255,0.55)"/><circle cx="570"  cy="150" r="2.5" fill="rgba(230,225,255,0.95)"/></g>
+    <g filter="url(#cbDotGlow)"><circle cx="730"  cy="185" r="5.5" fill="rgba(160,140,255,0.55)"/><circle cx="730"  cy="185" r="2.5" fill="rgba(230,225,255,0.95)"/></g>
+    <g filter="url(#cbDotGlow)"><circle cx="900"  cy="290" r="5.5" fill="rgba(160,140,255,0.55)"/><circle cx="900"  cy="290" r="2.5" fill="rgba(230,225,255,0.95)"/></g>
+    <g filter="url(#cbDotGlow)"><circle cx="1060" cy="480" r="5.5" fill="rgba(160,140,255,0.55)"/><circle cx="1060" cy="480" r="2.5" fill="rgba(230,225,255,0.95)"/></g>
+    <g filter="url(#cbDotGlow)"><circle cx="1220" cy="660" r="5.5" fill="rgba(160,140,255,0.55)"/><circle cx="1220" cy="660" r="2.5" fill="rgba(230,225,255,0.95)"/></g>
+    <!-- Hexagons -->
+    <polygon points="1313,17 1340,33 1340,65 1313,81 1286,65 1286,33" fill="none" stroke="rgba(100,80,210,0.22)" stroke-width="1.5"/>
+    <polygon points="490,518 523,537 523,575 490,594 457,575 457,537"  fill="none" stroke="rgba(90,70,200,0.18)"  stroke-width="1.5"/>
+    <polygon points="1060,503 1091,521 1091,557 1060,575 1029,557 1029,521" fill="none" stroke="rgba(60,180,160,0.16)" stroke-width="1.5"/>
+    <polygon points="160,92 183,105 183,131 160,144 137,131 137,105"   fill="none" stroke="rgba(100,80,210,0.12)" stroke-width="1.2"/>
+    <!-- Corner brackets -->
+    <path d="M 1400 18 L 1432 18 L 1432 50"   fill="none" stroke="rgba(100,80,210,0.16)" stroke-width="1"/>
+    <path d="M 8 882 L 8 850 L 40 850"         fill="none" stroke="rgba(60,180,160,0.14)"  stroke-width="1"/>
+    <!-- Dot trail lines -->
+    <line x1="55"  y1="820" x2="210"  y2="620" stroke="rgba(120,100,230,0.12)" stroke-width="0.8"/>
+    <line x1="210" y1="620" x2="390"  y2="260" stroke="rgba(120,100,230,0.12)" stroke-width="0.8"/>
+    <line x1="390" y1="260" x2="570"  y2="150" stroke="rgba(120,100,230,0.12)" stroke-width="0.8"/>
+    <line x1="570" y1="150" x2="730"  y2="185" stroke="rgba(120,100,230,0.12)" stroke-width="0.8"/>
+    <line x1="730" y1="185" x2="900"  y2="290" stroke="rgba(120,100,230,0.12)" stroke-width="0.8"/>
+    <line x1="900" y1="290" x2="1060" y2="480" stroke="rgba(120,100,230,0.12)" stroke-width="0.8"/>
+    <line x1="1060" y1="480" x2="1220" y2="660" stroke="rgba(120,100,230,0.12)" stroke-width="0.8"/>
+  </svg>
+</div>
+
+<div class="page">
+
+  <!-- ── Nav ──────────────────────────────────────────────────────────────── -->
+  <nav>
+    <div class="nav-inner">
+      <span class="nav-logo">✦ LookUp</span>
+      <div class="nav-links">
+        <a class="nav-link" href="https://github.com/NimrodNetzer/lookUp" target="_blank" rel="noopener">
+          <!-- GitHub icon -->
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <a class="nav-link" href="https://www.linkedin.com/in/nimrod-netzer-8360b8294/" target="_blank" rel="noopener">
+          <!-- LinkedIn icon -->
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+          </svg>
+          <span>LinkedIn</span>
+        </a>
+        <a class="nav-cta" href="https://github.com/NimrodNetzer/lookUp" target="_blank" rel="noopener">View on GitHub →</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── Hero ─────────────────────────────────────────────────────────────── -->
+  <section class="hero container">
+    <div class="hero-badge fade-up">
+      <span class="hero-badge-dot"></span>
+      Chrome Extension · Powered by Groq AI
+    </div>
+    <h1 class="fade-up">
+      Your AI study assistant<br/>
+      <span class="grad">lives in your browser</span>
+    </h1>
+    <p class="hero-sub fade-up">
+      Capture your screen, transcribe lectures, and chat with an AI tutor —
+      all without leaving your tab. No server needed.
+    </p>
+    <div class="hero-btns fade-up">
+      <a class="btn-primary" href="https://github.com/NimrodNetzer/lookUp" target="_blank" rel="noopener">
+        <!-- GitHub icon -->
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+        </svg>
+        View on GitHub
+      </a>
+      <a class="btn-secondary" href="#demo">
+        Watch demo ↓
+      </a>
+    </div>
+
+    <!-- Hero screenshot — replace .screenshot-placeholder with <img src="your-screenshot.png" alt="LookUp screenshot"> -->
+    <div class="hero-screenshot fade-up">
+      <div class="hero-screenshot-glow"></div>
+      <div class="screenshot-frame">
+        <div class="screenshot-bar">
+          <span class="screenshot-dot red"></span>
+          <span class="screenshot-dot yel"></span>
+          <span class="screenshot-dot grn"></span>
+          <span class="screenshot-title">LookUp — AI Study Assistant</span>
+        </div>
+        <!-- TO ADD: replace this div with <img src="screenshots/hero.png" alt="LookUp app screenshot" style="width:100%;display:block;"> -->
+        <div class="screenshot-placeholder">
+          <div class="placeholder-icon">✦</div>
+          <span class="placeholder-text">Screenshot coming soon</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ── Features ──────────────────────────────────────────────────────────── -->
+  <section class="section container" id="features">
+    <div class="centered">
+      <div class="section-label fade-up">Features</div>
+      <h2 class="section-title fade-up">Everything you need to study smarter</h2>
+      <p class="section-sub fade-up">One extension. Zero extra setup. Just install, capture, and ask.</p>
+    </div>
+    <div class="features-grid">
+
+      <div class="feature-card fade-up">
+        <div class="feature-icon">📸</div>
+        <div class="feature-title">Screenshot Capture</div>
+        <div class="feature-desc">Capture any tab instantly. Ask the AI to explain diagrams, slides, PDFs, or anything on your screen.</div>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-icon">🎙️</div>
+        <div class="feature-title">Audio Transcription</div>
+        <div class="feature-desc">Record your lecture or voice note and get an instant transcript powered by Whisper — then ask questions about it.</div>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-icon">💬</div>
+        <div class="feature-title">AI Chat</div>
+        <div class="feature-desc">Multi-turn conversations with Llama 4. Attach files, images, and code — all in one thread with full history.</div>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-icon">📝</div>
+        <div class="feature-title">Smart Notes</div>
+        <div class="feature-desc">Save any AI response as a note. Browse, search, and revisit your knowledge base from the built-in dashboard.</div>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-icon">🃏</div>
+        <div class="feature-title">Flashcard Mode</div>
+        <div class="feature-desc">Ask LookUp to turn any topic into interactive flashcards. Flip, review, and test yourself — all in-browser.</div>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-icon">🧠</div>
+        <div class="feature-title">Quiz Generation</div>
+        <div class="feature-desc">One click to convert any material into a quiz with reveal-on-demand answers. Perfect for exam prep.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ── How it works ───────────────────────────────────────────────────────── -->
+  <section class="section container" id="how-it-works">
+    <div class="centered">
+      <div class="section-label fade-up">How it works</div>
+      <h2 class="section-title fade-up">Three steps to your AI tutor</h2>
+      <p class="section-sub fade-up">No account. No server. Just load unpacked in Chrome and you're ready.</p>
+    </div>
+    <div class="steps">
+      <div class="step fade-up">
+        <div class="step-num">1</div>
+        <h3>Install the extension</h3>
+        <p>Download the zip from GitHub, unpack it, and load it in Chrome — takes under a minute. Enter your free Groq API key and you're live.</p>
+      </div>
+      <div class="step fade-up">
+        <div class="step-num">2</div>
+        <h3>Capture your content</h3>
+        <p>Screenshot any tab, paste an image, drop a file, or record your voice. LookUp understands text, visuals, and audio equally.</p>
+      </div>
+      <div class="step fade-up">
+        <div class="step-num">3</div>
+        <h3>Ask anything</h3>
+        <p>Type your question. Get a clear explanation, a quiz, flashcards, or a structured summary — instantly, using state-of-the-art AI.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ── Demo ───────────────────────────────────────────────────────────────── -->
+  <section class="section container centered" id="demo">
+    <div class="section-label fade-up">Demo</div>
+    <h2 class="section-title fade-up">See it in action</h2>
+    <p class="section-sub fade-up">A quick walkthrough of the capture → chat → save workflow.</p>
+    <div class="demo-frame fade-up">
+      <!-- TO ADD: replace this div with <img src="demo/demo.gif" alt="LookUp demo"> or a <video> tag -->
+      <div class="demo-placeholder">
+        <div class="placeholder-icon">▶</div>
+        <span class="placeholder-text">Demo GIF coming soon</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ── Tech stack ─────────────────────────────────────────────────────────── -->
+  <section class="section container centered" id="tech">
+    <div class="section-label fade-up">Tech stack</div>
+    <h2 class="section-title fade-up">Built with modern tools</h2>
+    <p class="section-sub fade-up">Fast, private, and entirely client-side — no backend required.</p>
+    <div class="tech-grid fade-up">
+      <span class="tech-chip"><span class="tech-chip-dot"></span>Chrome MV3 Extension</span>
+      <span class="tech-chip"><span class="tech-chip-dot"></span>Groq AI (llama-4-scout)</span>
+      <span class="tech-chip"><span class="tech-chip-dot"></span>Whisper Large v3 Turbo</span>
+      <span class="tech-chip"><span class="tech-chip-dot"></span>React 18</span>
+      <span class="tech-chip"><span class="tech-chip-dot"></span>Vite</span>
+      <span class="tech-chip"><span class="tech-chip-dot"></span>Tailwind CSS</span>
+      <span class="tech-chip"><span class="tech-chip-dot"></span>IndexedDB</span>
+      <span class="tech-chip"><span class="tech-chip-dot"></span>SSE Streaming</span>
+      <span class="tech-chip"><span class="tech-chip-dot"></span>Node.js + Express (Classic Mode)</span>
+      <span class="tech-chip"><span class="tech-chip-dot"></span>Next.js (Dashboard)</span>
+      <span class="tech-chip"><span class="tech-chip-dot"></span>SQLite (Classic Mode)</span>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ── CTA band ───────────────────────────────────────────────────────────── -->
+  <section class="section container cta-band">
+    <div class="cta-inner fade-up">
+      <h2>Ready to study smarter?</h2>
+      <p>LookUp is free and open source. Get started in under a minute — no account needed.</p>
+      <div class="cta-btns">
+        <a class="btn-primary" href="https://github.com/NimrodNetzer/lookUp" target="_blank" rel="noopener">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          Get LookUp on GitHub
+        </a>
+        <a class="btn-secondary" href="https://www.linkedin.com/in/nimrod-netzer-8360b8294/" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+          </svg>
+          Connect on LinkedIn
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Footer ─────────────────────────────────────────────────────────────── -->
+  <footer>
+    <div class="footer-inner">
+      <span class="footer-logo">✦ LookUp</span>
+      <span class="footer-copy">Built by Nimrod Netzer · Open Source</span>
+      <div class="footer-links">
+        <a class="footer-link" href="https://github.com/NimrodNetzer/lookUp" target="_blank" rel="noopener">GitHub</a>
+        <a class="footer-link" href="https://www.linkedin.com/in/nimrod-netzer-8360b8294/" target="_blank" rel="noopener">LinkedIn</a>
+      </div>
+    </div>
+  </footer>
+
+</div><!-- /page -->
+
+<script>
+  // Scroll-triggered fade-in
+  const observer = new IntersectionObserver(
+    (entries) => entries.forEach(e => { if (e.isIntersecting) e.target.classList.add("visible"); }),
+    { threshold: 0.12 }
+  );
+  document.querySelectorAll(".fade-up").forEach(el => observer.observe(el));
+</script>
+</body>
+</html>

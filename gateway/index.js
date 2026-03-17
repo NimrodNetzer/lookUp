@@ -131,12 +131,17 @@ async function updateNoteFrontmatter(filename, updates) {
   let content = await fs.readFile(filepath, "utf-8");
   for (const [key, value] of Object.entries(updates)) {
     const regex = new RegExp(`^${key}:.*$`, "m");
-    const newLine = `${key}: "${String(value).replace(/"/g, '\\"')}"`;
-    if (regex.test(content)) {
-      content = content.replace(regex, newLine);
+    // Boolean false (or string "false") → remove the field entirely
+    if (value === false || value === "false") {
+      content = content.replace(new RegExp(`\n?^${key}:.*$`, "m"), "");
     } else {
-      // insert before closing --- of frontmatter
-      content = content.replace(/^(---\n[\s\S]*?)(\n---)/m, `$1\n${newLine}$2`);
+      const newLine = `${key}: "${String(value).replace(/"/g, '\\"')}"`;
+      if (regex.test(content)) {
+        content = content.replace(regex, newLine);
+      } else {
+        // insert before closing --- of frontmatter
+        content = content.replace(/^(---\n[\s\S]*?)(\n---)/m, `$1\n${newLine}$2`);
+      }
     }
   }
   await fs.writeFile(filepath, content, "utf-8");
@@ -301,12 +306,14 @@ app.get("/notes", async (_req, res) => {
         const modeMatch     = content.match(/^mode:\s*"(.+)"/m);
         const courseMatch   = content.match(/^course:\s*"(.+)"/m);
         const folderIdMatch = content.match(/^folder_id:\s*"?(\d+)"?/m);
+        const pinnedMatch   = content.match(/^pinned:\s*"?(true)"?/m);
         return {
           filename,
           title:     titleMatch?.[1],
           mode:      modeMatch?.[1],
           course:    courseMatch?.[1],
           folder_id: folderIdMatch ? parseInt(folderIdMatch[1]) : undefined,
+          pinned:    !!pinnedMatch,
           size:      stat.size,
           modified:  stat.mtime,
         };
@@ -588,7 +595,7 @@ app.patch("/notes/:filename", async (req, res) => {
   if (!filename.endsWith(".md") || filename.includes("..")) {
     return res.status(400).json({ error: "Invalid filename" });
   }
-  const allowed = ["course", "title", "folder_id"];
+  const allowed = ["course", "title", "folder_id", "pinned"];
   const updates = Object.fromEntries(
     Object.entries(req.body).filter(([k]) => allowed.includes(k))
   );
