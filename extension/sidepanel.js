@@ -33,6 +33,8 @@ const avOptAudio       = document.getElementById("avOptAudio");
 const avOptMic         = document.getElementById("avOptMic");
 const moreBtn          = document.getElementById("moreBtn");
 const moreDropdown     = document.getElementById("moreDropdown");
+const infoBtn          = document.getElementById("infoBtn");
+const infoDropdown     = document.getElementById("infoDropdown");
 const winSubMenu       = document.getElementById("winSubMenu");
 const winCurrentLabel  = document.getElementById("winCurrentLabel");
 const moreWinItem      = document.getElementById("moreWinItem");
@@ -58,8 +60,6 @@ let selectedText        = "";
 let sessionFrames       = [];
 let inSession           = false;
 let targetWindowId      = null; // null = sidepanel's own window (default)
-let mediaRecorder       = null;
-let audioChunks         = [];
 let timerInterval       = null;
 let recSeconds          = 0;
 let activeConversationId = null;
@@ -151,13 +151,29 @@ async function refreshUsageDisplay() {
 
 moreBtn.addEventListener("click", (e) => {
   e.stopPropagation();
+  infoDropdown.classList.remove("open");
+  infoBtn.classList.remove("open");
   const open = moreDropdown.classList.toggle("open");
   moreBtn.classList.toggle("open", open);
-  if (open) { refreshWindowPicker(); refreshUsageDisplay(); }
+  if (open) refreshWindowPicker();
+});
+infoBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  moreDropdown.classList.remove("open");
+  moreBtn.classList.remove("open");
+  winSubMenu.classList.remove("open");
+  moreWinItem.classList.remove("expanded");
+  searchInput.value = "";
+  renderSearchResults([]);
+  const open = infoDropdown.classList.toggle("open");
+  infoBtn.classList.toggle("open", open);
+  if (open) refreshUsageDisplay();
 });
 document.addEventListener("click", () => {
   moreDropdown.classList.remove("open");
   moreBtn.classList.remove("open");
+  infoDropdown.classList.remove("open");
+  infoBtn.classList.remove("open");
   winSubMenu.classList.remove("open");
   moreWinItem.classList.remove("expanded");
   // Clear inline search when dropdown closes
@@ -165,9 +181,10 @@ document.addEventListener("click", () => {
   renderSearchResults([]);
 });
 moreDropdown.addEventListener("click", (e) => e.stopPropagation());
+infoDropdown.addEventListener("click", (e) => e.stopPropagation());
 document.addEventListener("keydown", (e) => {
   // Shift+S — trigger capture (only when input is not focused)
-  if (e.shiftKey && e.key === "S" && !captureBtn.disabled && !mediaRecorder &&
+  if (e.shiftKey && e.key === "S" && !captureBtn.disabled && !audioBar?.classList.contains("active") &&
       document.activeElement !== titleInput) {
     e.preventDefault();
     captureBtn.click();
@@ -259,12 +276,21 @@ async function openNoteInSidepanel(note) {
   if (!full) return;
   moreDropdown.classList.remove("open");
   moreBtn.classList.remove("open");
+
+  // Create a new conversation tab named after the note
+  const conv = await Conversations.create(full.title ?? note.filename);
+  await loadConversations();
+  await switchConversation(conv.id);
+
   const cards = full.cards ?? (() => { try { return JSON.parse(full.content); } catch { return null; } })();
   if (Array.isArray(cards) && cards[0]?.front !== undefined) {
     showFlashcards(cards, full.title, full.mode);
   } else {
     showResult(full.content, full.title, full.mode);
   }
+
+  // Cache the rendered content so switching away and back restores it
+  tabResults.set(conv.id, resultArea.innerHTML);
 }
 
 async function openNoteInDashboard(filename) {
@@ -322,7 +348,7 @@ document.addEventListener("contextmenu", (e) => { if (!e.target.closest(".search
 // ── Mode dropdown ────────────────────────────────────────────────────────────
 modeTrigger.addEventListener("click", (e) => {
   e.stopPropagation();
-  if (mediaRecorder) return;
+  if (audioBar?.classList.contains("active")) return;
   const isOpen = modeDropdown.classList.toggle("open");
   modeTrigger.classList.toggle("open", isOpen);
 });
@@ -335,7 +361,7 @@ document.addEventListener("click", () => {
 dropdownItems.forEach((item) => {
   item.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (mediaRecorder) return;
+    if (audioBar?.classList.contains("active")) return;
 
     selectedMode = item.dataset.mode;
     chrome.storage.local.set({ savedMode: selectedMode });
@@ -560,6 +586,7 @@ async function sendChatMessage() {
     }
 
     loadConversations();
+    refreshUsageDisplay();
   } catch (err) { showError(err.message); }
   titleInput.disabled = false;
   chatSendBtn.disabled = false;
@@ -822,6 +849,27 @@ async function initMode() {
 }
 
 
+// Restore recording UI if a background recording was already running before the panel opened
+async function restoreRecordingState() {
+  const state = await sendMessageSafe({ type: "getRecordingState" }).catch(() => null);
+  if (!state) return;
+  const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+  recSeconds = elapsed;
+  const m = Math.floor(elapsed / 60);
+  const s = String(elapsed % 60).padStart(2, "0");
+  recTimer.textContent = `${m}:${s}`;
+  const label = state.label || (state.source === "mic" ? "Recording microphone…" : "Recording tab audio…");
+  document.getElementById("audioBarLabel").textContent = label;
+  audioBar.classList.add("active");
+  captureBtn.disabled = true;
+  timerInterval = setInterval(() => {
+    recSeconds++;
+    const mm = Math.floor(recSeconds / 60);
+    const ss = String(recSeconds % 60).padStart(2, "0");
+    recTimer.textContent = `${mm}:${ss}`;
+  }, 1000);
+}
+
 // Show overlay if not configured, otherwise boot normally
 async function initSetup() {
   await initLang();
@@ -830,6 +878,7 @@ async function initSetup() {
   if (configured) {
     setupOverlay.classList.add("hidden");
     await loadActiveConversation();
+    await restoreRecordingState();
   }
   // If not configured, overlay stays visible — loadActiveConversation runs after save
 }
@@ -1157,6 +1206,79 @@ async function loadActiveConversation() {
       resultArea.scrollTop = resultArea.scrollHeight;
     }
   } catch (err) { console.error(err); }
+
+  // Process any screenshot that was captured via the Alt+Shift+C shortcut
+  await processPendingCapture();
+  // Process any text sent via right-click "Explain with LookUp"
+  await processPendingExplain();
+}
+
+async function processPendingCapture() {
+  const { pendingCapture } = await chrome.storage.local.get("pendingCapture");
+  if (!pendingCapture) return;
+  await chrome.storage.local.remove("pendingCapture");
+  // Stale captures (>2 min) are discarded — user has moved on
+  if (Date.now() - pendingCapture.ts > 120_000) return;
+
+  showSpinner("Processing shortcut capture…");
+  try {
+    const mimeType = "image/jpeg";
+    const base64 = pendingCapture.dataUrl.split(",")[1];
+    const raw = await analyzeScreenshot(base64, mimeType, selectedMode);
+    refreshUsageDisplay();
+
+    let markdown = raw;
+    let cards = null;
+    if (selectedMode === "flashcard") {
+      try {
+        const jsonStr = raw.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+        cards = JSON.parse(jsonStr);
+      } catch { cards = [{ front: "Parse error", back: raw }]; }
+      markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
+    }
+
+    const noteTitle = pendingCapture.tabTitle || selectedMode;
+    const saved = await saveNote({ title: noteTitle, mode: selectedMode, markdown, cards });
+    await Messages.append(activeConversationId, "user", `📸 Screenshot (${selectedMode})`);
+    await Messages.append(activeConversationId, "assistant", selectedMode === "flashcard" ? JSON.stringify(cards) : markdown);
+
+    const history = await Messages.listByConversation(activeConversationId);
+    if (history.length <= 2) {
+      const tabTitle = extractTopic(markdown, noteTitle);
+      await Conversations.rename(activeConversationId, tabTitle.slice(0, 60));
+      loadConversations();
+    }
+
+    if (cards) showFlashcards(cards, saved.title, selectedMode);
+    else showResult(markdown, saved.title, selectedMode);
+  } catch (err) { showError(err.message); }
+}
+
+async function processPendingExplain() {
+  const { pendingExplain } = await chrome.storage.local.get("pendingExplain");
+  if (!pendingExplain) return;
+  await chrome.storage.local.remove("pendingExplain");
+  // Stale (>2 min) — discard
+  if (Date.now() - pendingExplain.ts > 120_000) return;
+
+  const text = pendingExplain.text;
+  showSpinner("Explaining selection…");
+  try {
+    const raw = await analyzeText(text, "explain");
+    refreshUsageDisplay();
+
+    const noteTitle = text.slice(0, 60);
+    const saved = await saveNote({ title: noteTitle, mode: "explain", markdown: raw, cards: null });
+    await Messages.append(activeConversationId, "user", `📝 Explain: "${text.slice(0, 80)}…"`);
+    await Messages.append(activeConversationId, "assistant", raw);
+
+    const history = await Messages.listByConversation(activeConversationId);
+    if (history.length <= 2) {
+      await Conversations.rename(activeConversationId, noteTitle);
+      loadConversations();
+    }
+    showResult(raw, saved.title, "explain");
+  } catch (err) { showError(err.message); }
 }
 
 // ── Service worker keep-alive ────────────────────────────────────────────────
@@ -1471,29 +1593,47 @@ sessionFinish.addEventListener("click", async () => {
   captureBtn.disabled = false;
 });
 
+// ── Recording IDB helpers (reads from offscreen.js's lookup-recording DB) ────
+const RECORDING_DB = "lookup-recording";
+let _rdb = null;
+
+function openRecordingDB() {
+  if (_rdb) return Promise.resolve(_rdb);
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(RECORDING_DB, 1);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains("chunks")) db.createObjectStore("chunks", { autoIncrement: true });
+      if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta");
+    };
+    req.onsuccess = (e) => { _rdb = e.target.result; res(_rdb); };
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function readAllChunks() {
+  const db = await openRecordingDB();
+  return new Promise((res, rej) => {
+    const t = db.transaction(["chunks", "meta"], "readonly");
+    const buffers = [];
+    t.objectStore("chunks").openCursor().onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (cursor) { buffers.push(cursor.value); cursor.continue(); }
+    };
+    let blobType = "audio/webm";
+    const metaReq = t.objectStore("meta").get("blobType");
+    metaReq.onsuccess = () => { if (metaReq.result) blobType = metaReq.result; };
+    t.oncomplete = () => res({ buffers, blobType });
+    t.onerror = () => rej(t.error);
+  });
+}
+
 // ── Audio capture ───────────────────────────────────────────────────────────
 async function startAudioCapture() {
   captureBtn.disabled = true;
   try {
-    const { streamId, error } = await sendMessageSafe({ type: "getTabCaptureStreamId" });
-    if (error) throw new Error(error);
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } },
-      video: false,
-    });
-
-    // route audio to speakers so user can still hear the tab
-    const audioCtx = new AudioContext();
-    const source = audioCtx.createMediaStreamSource(stream);
-    source.connect(audioCtx.destination);
-    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-    mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); audioCtx.close(); finishAudio(); };
-
-    audioChunks = [];
-    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
-    mediaRecorder.start(1000);
-
+    const resp = await sendMessageSafe({ type: "startRecording", source: "tab", label: "Recording tab audio…" });
+    if (!resp?.ok) throw new Error(resp?.error ?? "Could not start recording");
     recSeconds = 0;
     document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
     audioBar.classList.add("active");
@@ -1503,34 +1643,28 @@ async function startAudioCapture() {
       const s = String(recSeconds % 60).padStart(2, "0");
       recTimer.textContent = `${m}:${s}`;
     }, 1000);
-
   } catch (err) {
     const isChromePage = err.message.includes("not been invoked") || err.message.includes("cannot be captured") || err.message.includes("activeTab");
     showError(isChromePage
       ? "Can't record audio on this page. Navigate to a regular website first."
       : err.message);
-    resetAudioState();
+    captureBtn.disabled = false;
   }
 }
 
-// Reset all audio recording state without processing
+// Reset audio UI without processing (e.g. on navigation to restricted page)
 function resetAudioState() {
-  if (mediaRecorder && mediaRecorder.state !== "inactive") {
-    mediaRecorder.onstop = null; // prevent finishAudio from running
-    mediaRecorder.stop();
-  }
-  mediaRecorder = null;
-  audioChunks = [];
   clearInterval(timerInterval);
   audioBar.classList.remove("active");
   document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
   recTimer.textContent = "0:00";
   captureBtn.disabled = false;
+  sendMessageSafe({ type: "stopRecording" }).catch(() => {});
 }
 
 // Stop recording if user navigates to a chrome:// page while recording
 chrome.tabs.onActivated.addListener(() => {
-  if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+  if (!audioBar.classList.contains("active")) return;
   chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
     if (!tab) return;
     if (!tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://")) {
@@ -1552,78 +1686,98 @@ micPermGrantBtn.addEventListener("click", () => {
   micPermBanner.classList.remove("active");
 });
 
-// Listen for the result from mic-permission.html (sent via chrome.runtime.sendMessage)
+// Listen for messages from background (recording events) and mic-permission.html
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "micPermissionResult") {
     if (!msg.granted) {
       showError("Microphone blocked. Enable it at: chrome://settings/content/microphone");
     }
     micPermGrantBtn.disabled = false;
+    return;
+  }
+  if (msg.type === "recordingDone") {
+    // Offscreen doc finished — process the audio that was stored in IDB
+    document.getElementById(SPINNER_ID)?.remove();
+    showSpinner("Transcribing audio with Whisper…");
+    finishAudio();
+    return;
+  }
+  if (msg.type === "recordingError") {
+    clearInterval(timerInterval);
+    audioBar.classList.remove("active");
+    recTimer.textContent = "0:00";
+    captureBtn.disabled = false;
+    showError(msg.error ?? "Recording failed.");
+    return;
+  }
+  if (msg.type === "pendingCapture") {
+    processPendingCapture();
+    return;
+  }
+  if (msg.type === "pendingExplain") {
+    processPendingExplain();
   }
 });
 
 // ── Microphone capture ───────────────────────────────────────────────────────
 async function startMicCapture() {
   captureBtn.disabled = true;
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-  } catch (err) {
+  // Check permission state first — if not granted, trigger the permission flow
+  const permState = await navigator.permissions.query({ name: "microphone" }).catch(() => ({ state: "unknown" }));
+  if (permState.state === "denied") {
     captureBtn.disabled = false;
-    if (err.name === "NotAllowedError" || err.message.toLowerCase().includes("dismiss") || err.message.toLowerCase().includes("denied")) {
-      const permState = await navigator.permissions.query({ name: "microphone" }).catch(() => ({ state: "unknown" }));
-      if (permState.state === "denied") {
-        showError("Microphone blocked. Enable it at: chrome://settings/content/microphone");
-      } else {
-        // Show inline banner — clicking "Allow" triggers getUserMedia with a real user gesture
-        micPermBanner.classList.add("active");
-        micPermGrantBtn.disabled = false;
-      }
-    } else {
-      showError(err.message);
-    }
+    showError("Microphone blocked. Enable it at: chrome://settings/content/microphone");
     return;
   }
-  const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg";
-
-  audioChunks = [];
-  mediaRecorder = new MediaRecorder(stream, { mimeType });
-  mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
-  mediaRecorder.onstop = () => {
-    stream.getTracks().forEach(t => t.stop());
-    finishAudio();
-  };
-  mediaRecorder.start(1000);
-
-  recSeconds = 0;
-  document.getElementById("audioBarLabel").textContent = "Recording microphone…";
-  audioBar.classList.add("active");
-  timerInterval = setInterval(() => {
-    recSeconds++;
-    const m = Math.floor(recSeconds / 60);
-    const s = String(recSeconds % 60).padStart(2, "0");
-    recTimer.textContent = `${m}:${s}`;
-  }, 1000);
+  if (permState.state !== "granted") {
+    // Not yet granted — open permission helper page so user can allow it
+    captureBtn.disabled = false;
+    micPermBanner.classList.add("active");
+    micPermGrantBtn.disabled = false;
+    return;
+  }
+  // Permission is granted — delegate recording to the offscreen document
+  try {
+    const resp = await sendMessageSafe({ type: "startRecording", source: "mic", label: "Recording microphone…" });
+    if (!resp?.ok) throw new Error(resp?.error ?? "Could not start recording");
+    recSeconds = 0;
+    document.getElementById("audioBarLabel").textContent = "Recording microphone…";
+    audioBar.classList.add("active");
+    timerInterval = setInterval(() => {
+      recSeconds++;
+      const m = Math.floor(recSeconds / 60);
+      const s = String(recSeconds % 60).padStart(2, "0");
+      recTimer.textContent = `${m}:${s}`;
+    }, 1000);
+  } catch (err) {
+    captureBtn.disabled = false;
+    showError(err.message);
+  }
 }
 
 stopAudio.addEventListener("click", () => {
-  if (mediaRecorder?.state !== "inactive") mediaRecorder.stop();
   clearInterval(timerInterval);
   audioBar.classList.remove("active");
   document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
   showSpinner("Transcribing audio with Whisper…");
+  sendMessageSafe({ type: "stopRecording" }).catch(() => {});
+  // finishAudio() is called when background sends back "recordingDone"
 });
-
 
 async function finishAudio() {
   try {
-    const blob = new Blob(audioChunks, { type: "audio/webm" });
+    // Read chunks from the dedicated recording IndexedDB written by offscreen.js
+    const { buffers, blobType } = await readAllChunks();
+    if (buffers.length === 0) throw new Error("No audio data recorded.");
+
+    const chunks = buffers.map(buf => new Blob([buf], { type: blobType }));
+    const blob = new Blob(chunks, { type: blobType });
     const userNote = titleInput.value.trim();
     if (userNote) titleInput.value = "";
 
     const audioMode = `audio-${selectedMode}`;
-    let { markdown } = await transcribeAndSummarize(blob, selectedMode, userNote, audioChunks);
-    refreshUsageDisplay(); // token count updated by chatCompletion inside transcribeAndSummarize
+    let { markdown } = await transcribeAndSummarize(blob, selectedMode, userNote, chunks);
+    refreshUsageDisplay();
 
     const noteTitle = userNote || "Recording";
     let finalMarkdown = markdown;
@@ -1645,7 +1799,6 @@ async function finishAudio() {
       showResult(finalMarkdown, saved.title, audioMode);
     }
   } catch (err) { showError(err.message); }
-  mediaRecorder = null;
   captureBtn.disabled = false;
 }
 

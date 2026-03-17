@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import CosmicBg from "./CosmicBg.jsx";
 import { Conversations, Messages, Notes } from "../storage.js";
-import { chatStream } from "../groq-client.js";
+import { chatStream, chatStreamRich } from "../groq-client.js";
 
-// ── Lightweight markdown renderer (same as original chat page) ────────────────
+// ── Lightweight markdown renderer ─────────────────────────────────────────────
 function renderMd(raw) {
   let h = raw
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -86,22 +86,92 @@ function AiContent({ content }) {
   return <div className="msg-ai-body" dangerouslySetInnerHTML={{ __html: renderMd(content) }} />;
 }
 
+// ── File helpers ──────────────────────────────────────────────────────────────
+const IMAGE_EXTS = /\.(png|jpe?g|webp|gif)$/i;
+const TEXT_EXTS  = /\.(txt|md|csv|json|js|ts|jsx|tsx|html|css|py|java|c|cpp|h|rs|go|rb|php|sh|yaml|yml|xml|toml)$/i;
+const IMAGE_TYPES = ["image/png","image/jpeg","image/webp","image/gif"];
+
+function readAsBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = e => res(e.target.result.split(",")[1]);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+function readAsText(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = e => res(e.target.result);
+    r.onerror = rej;
+    r.readAsText(file);
+  });
+}
+
+async function processFile(file) {
+  const isImage = IMAGE_TYPES.includes(file.type) || IMAGE_EXTS.test(file.name);
+  const isText  = !isImage && (file.type.startsWith("text/") || TEXT_EXTS.test(file.name));
+  if (isImage) {
+    const base64 = await readAsBase64(file);
+    return { id: `${Date.now()}-${Math.random()}`, name: file.name, mimeType: file.type || "image/png", base64, isImage: true };
+  }
+  if (isText) {
+    const textContent = await readAsText(file);
+    return { id: `${Date.now()}-${Math.random()}`, name: file.name, isText: true, textContent };
+  }
+  return null; // unsupported
+}
+
+// ── Mode prompts (for first-message structured output) ────────────────────────
+const MODES = [
+  { key: "chat",      label: "Chat" },
+  { key: "summary",   label: "Summary" },
+  { key: "explain",   label: "Explain" },
+  { key: "quiz",      label: "Quiz" },
+  { key: "flashcard", label: "Flashcard" },
+];
+
+function buildModePrefix(mode) {
+  if (mode === "chat") return "";
+  const map = {
+    summary:   "Produce a structured study summary with an Overview paragraph and Key Concepts bullet list:\n\n",
+    explain:   "Explain this as a patient tutor — start with why the topic exists, walk concepts in order, give a real-world analogy, end with 'The key insight:':\n\n",
+    quiz:      "Generate a quiz to test real understanding. Format each question as:\n**Q1.** [Question]\n**Answer:** [5–60 words]\n\n",
+    flashcard: "Generate flashcards. Return ONLY a valid JSON array, no markdown fences:\n[{\"front\":\"Question\",\"back\":\"Answer\"}]\n\n",
+  };
+  return map[mode] ?? "";
+}
+
 // ── Main chat page ────────────────────────────────────────────────────────────
 export default function ChatPage() {
-  const [conversations, setConversations] = useState([]);
-  const [activeId,      setActiveId]      = useState(null);
-  const [messages,      setMessages]      = useState([]);
-  const [input,         setInput]         = useState("");
-  const [loading,       setLoading]       = useState(false);
-  const [renamingId,    setRenamingId]    = useState(null);
-  const [renameVal,     setRenameVal]     = useState("");
-  const [ctxMenu,       setCtxMenu]       = useState(null);
-  const [copiedIdx,     setCopiedIdx]     = useState(null);
-  const [sidebarOpen,   setSidebarOpen]   = useState(true);
+  const [conversations,  setConversations]  = useState([]);
+  const [activeId,       setActiveId]       = useState(null);
+  const [messages,       setMessages]       = useState([]);
+  const [input,          setInput]          = useState("");
+  const [loading,        setLoading]        = useState(false);
+  const [renamingId,     setRenamingId]     = useState(null);
+  const [renameVal,      setRenameVal]      = useState("");
+  const [ctxMenu,        setCtxMenu]        = useState(null);
+  const [copiedIdx,      setCopiedIdx]      = useState(null);
+  const [sidebarOpen,    setSidebarOpen]    = useState(true);
+  const [searchQuery,    setSearchQuery]    = useState("");
+
+  // Attachment state
+  const [attachedFiles,  setAttachedFiles]  = useState([]);
+
+  // Drag-and-drop state
+  const [dragActive,     setDragActive]     = useState(false);
+  const dragCounter                         = useRef(0);
+
+  // Input bar dropdown
+  const [dropdownOpen,   setDropdownOpen]   = useState(false);
+  const [activeMode,     setActiveMode]     = useState("chat");
+  const dropdownRef                         = useRef(null);
 
   const bottomRef   = useRef(null);
   const textareaRef = useRef(null);
   const renameRef   = useRef(null);
+  const fileInputRef = useRef(null);
 
   // ── Load conversations ──────────────────────────────────────────────────────
   const loadConversations = useCallback(async () => {
@@ -118,7 +188,7 @@ export default function ChatPage() {
     } catch {}
   }, []);
 
-  // ── Init: load active conversation ─────────────────────────────────────────
+  // ── Init ────────────────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       await loadConversations();
@@ -131,10 +201,8 @@ export default function ChatPage() {
           if (convs.length > 0) {
             await switchConversation(convs[0].id);
           } else {
-            // Create first conversation
             const c = await Conversations.create("New Conversation");
-            setActiveId(c.id);
-            setMessages([]);
+            setActiveId(c.id); setMessages([]);
             await Conversations.setActive(c.id);
             await loadConversations();
           }
@@ -146,6 +214,7 @@ export default function ChatPage() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
   useEffect(() => { if (renamingId !== null) renameRef.current?.focus(); }, [renamingId]);
 
+  // Close context menu on outside click
   useEffect(() => {
     if (!ctxMenu) return;
     const close = () => setCtxMenu(null);
@@ -153,43 +222,152 @@ export default function ChatPage() {
     return () => document.removeEventListener("click", close);
   }, [ctxMenu]);
 
-  // ── Send message ────────────────────────────────────────────────────────────
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const close = (e) => { if (!dropdownRef.current?.contains(e.target)) setDropdownOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [dropdownOpen]);
+
+  // Paste images anywhere on the page
+  useEffect(() => {
+    async function onPaste(e) {
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const imageItem = items.find(i => i.kind === "file" && i.type.startsWith("image/"));
+      if (!imageItem) return;
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      const processed = await processFile(file);
+      if (processed) setAttachedFiles(prev => [...prev, processed]);
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, []);
+
+  // ── File handling ────────────────────────────────────────────────────────────
+  async function handleFiles(fileList) {
+    const results = await Promise.all(Array.from(fileList).map(processFile));
+    const valid = results.filter(Boolean);
+    if (valid.length) setAttachedFiles(prev => [...prev, ...valid]);
+  }
+
+  function removeAttachment(id) {
+    setAttachedFiles(prev => prev.filter(f => f.id !== id));
+  }
+
+  // ── Drag-and-drop on whole page ─────────────────────────────────────────────
+  function onDragEnter(e) {
+    e.preventDefault();
+    dragCounter.current += 1;
+    if (dragCounter.current === 1) setDragActive(true);
+  }
+  function onDragLeave(e) {
+    e.preventDefault();
+    dragCounter.current -= 1;
+    if (dragCounter.current === 0) setDragActive(false);
+  }
+  function onDragOver(e) { e.preventDefault(); }
+  function onDrop(e) {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setDragActive(false);
+    if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
+  }
+
+  // ── Capture current tab ─────────────────────────────────────────────────────
+  async function captureCurrentTab() {
+    setDropdownOpen(false);
+    try {
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 85 });
+      const base64 = dataUrl.split(",")[1];
+      setAttachedFiles(prev => [...prev, {
+        id: `${Date.now()}-cap`,
+        name: "screenshot.jpg",
+        mimeType: "image/jpeg",
+        base64,
+        isImage: true,
+      }]);
+    } catch (err) {
+      console.error("Capture failed:", err);
+    }
+  }
+
+  // ── Send message ─────────────────────────────────────────────────────────────
   async function send() {
     const text = input.trim();
-    if (!text || loading || !activeId) return;
+    if ((!text && attachedFiles.length === 0) || loading || !activeId) return;
     setInput("");
     setLoading(true);
 
-    // Optimistically append user message
-    setMessages((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: "" }]);
+    const imageFiles = attachedFiles.filter(f => f.isImage);
+    const textFiles  = attachedFiles.filter(f => f.isText);
+    setAttachedFiles([]);
+
+    // Build the effective text: user typed text + text file contents
+    const fileContext = textFiles.map(f =>
+      `\n\n[File: ${f.name}]\n${f.textContent}`
+    ).join("");
+    const modePrefix = messages.length === 0 ? buildModePrefix(activeMode) : "";
+    const effectiveText = modePrefix + (text || "") + fileContext;
+
+    // In-memory message for display (includes attachment metadata)
+    const userDisplayMsg = {
+      role: "user",
+      content: text || (imageFiles.length ? "" : textFiles.map(f => f.name).join(", ")),
+      _images: imageFiles,
+      _fileNames: textFiles.map(f => f.name),
+    };
+
+    setMessages((prev) => [...prev, userDisplayMsg, { role: "assistant", content: "" }]);
 
     try {
-      // Persist user message
-      await Messages.append(activeId, "user", text);
+      await Messages.append(activeId, "user", effectiveText || "(image)");
 
-      // Build history for the API (exclude the empty assistant placeholder)
-      const history = await Messages.listByConversation(activeId);
-      const apiMessages = history.map((m) => ({ role: m.role, content: m.content }));
-
-      // Stream the response
       let fullResponse = "";
-      for await (const delta of chatStream(apiMessages)) {
-        fullResponse += delta;
-        setMessages((prev) => {
-          const copy = [...prev];
-          copy[copy.length - 1] = { role: "assistant", content: fullResponse };
-          return copy;
-        });
+
+      if (imageFiles.length > 0) {
+        // Build rich message array: history as text + current message with images
+        const history = await Messages.listByConversation(activeId);
+        // All messages except the one we just appended (last)
+        const historyMsgs = history.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+        const imageContent = imageFiles.map(f => ({
+          type: "image_url",
+          image_url: { url: `data:${f.mimeType};base64,${f.base64}` },
+        }));
+        const richUserMsg = {
+          role: "user",
+          content: [...imageContent, { type: "text", text: effectiveText || "What is in this image?" }],
+        };
+        for await (const delta of chatStreamRich([...historyMsgs, richUserMsg])) {
+          fullResponse += delta;
+          setMessages((prev) => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { role: "assistant", content: fullResponse };
+            return copy;
+          });
+        }
+      } else {
+        // Text-only: normal chatStream
+        const history = await Messages.listByConversation(activeId);
+        const apiMessages = history.map(m => ({ role: m.role, content: m.content }));
+        for await (const delta of chatStream(apiMessages)) {
+          fullResponse += delta;
+          setMessages((prev) => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { role: "assistant", content: fullResponse };
+            return copy;
+          });
+        }
       }
 
-      // Persist the complete assistant message
       await Messages.append(activeId, "assistant", fullResponse);
 
-      // Auto-title the conversation after first exchange
+      // Auto-title
       const convs = await Conversations.list();
       const conv  = convs.find((c) => c.id === activeId);
       if (conv && conv.title === "New Conversation") {
-        const title = text.slice(0, 48) + (text.length > 48 ? "…" : "");
+        const title = (text || "Image").slice(0, 48) + ((text?.length ?? 0) > 48 ? "…" : "");
         await Conversations.rename(activeId, title);
         await loadConversations();
       }
@@ -214,8 +392,7 @@ export default function ChatPage() {
   async function newConversation() {
     try {
       const c = await Conversations.create("New Conversation");
-      setActiveId(c.id);
-      setMessages([]);
+      setActiveId(c.id); setMessages([]); setAttachedFiles([]);
       await Conversations.setActive(c.id);
       await loadConversations();
     } catch {}
@@ -267,23 +444,61 @@ export default function ChatPage() {
     setCtxMenu({ x: e.clientX, y: e.clientY, id, title });
   }
 
-  const lastMsg = messages[messages.length - 1];
+  function openCaptureWindow() {
+    window.open(
+      chrome.runtime.getURL("sidepanel.html"),
+      "lookupCapture",
+      "width=420,height=680,resizable=yes,scrollbars=yes"
+    );
+  }
+
+  const filteredConversations = searchQuery.trim()
+    ? conversations.filter(c => (c.title ?? "").toLowerCase().includes(searchQuery.toLowerCase()))
+    : conversations;
+
+  const lastMsg   = messages[messages.length - 1];
   const showTyping = loading && (lastMsg?.role !== "assistant" || lastMsg?.content === "");
 
   return (
     <>
       <CosmicBg variant="dark" />
-      <div className="chat-page">
+      <div
+        className="chat-page"
+        onDragEnter={onDragEnter}
+        onDragLeave={onDragLeave}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+      >
 
-        {/* ── Sidebar ─────────────────────────────────────────────────── */}
+        {/* ── Drag overlay ──────────────────────────────────────────── */}
+        {dragActive && (
+          <div className="chat-drag-overlay">
+            <div className="chat-drag-hint">Drop files or images here</div>
+          </div>
+        )}
+
+        {/* ── Sidebar ───────────────────────────────────────────────── */}
         <aside className={`chat-sidebar${sidebarOpen ? "" : " collapsed"}`}>
           <div className="chat-sidebar-top">
             <span className="chat-sidebar-logo">LookUp</span>
-            <button className="chat-new-btn" onClick={newConversation} title="New conversation">+</button>
+            <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+              <button className="chat-new-btn" onClick={openCaptureWindow} title="Open capture window">⊞</button>
+              <button className="chat-new-btn" onClick={newConversation}   title="New conversation">+</button>
+            </div>
+          </div>
+
+          {/* Search */}
+          <div className="chat-search-wrap">
+            <input
+              className="chat-search"
+              placeholder="Search conversations…"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
           </div>
 
           <div className="chat-conv-list">
-            {conversations.map((conv) =>
+            {filteredConversations.map((conv) =>
               renamingId === conv.id ? (
                 <div key={conv.id} className="chat-conv-item active">
                   <input
@@ -326,7 +541,7 @@ export default function ChatPage() {
           </div>
         </aside>
 
-        {/* ── Main panel ──────────────────────────────────────────────── */}
+        {/* ── Main panel ────────────────────────────────────────────── */}
         <div className="chat-main">
           <button
             className="chat-toggle-btn"
@@ -350,7 +565,30 @@ export default function ChatPage() {
             {messages.map((m, i) =>
               m.role === "user" ? (
                 <div key={i} className="msg-user">
-                  <div className="msg-user-bubble">{m.content}</div>
+                  <div className="msg-user-bubble">
+                    {/* Image thumbnails */}
+                    {m._images?.length > 0 && (
+                      <div className="msg-user-imgs">
+                        {m._images.map((img, ii) => (
+                          <img
+                            key={ii}
+                            src={`data:${img.mimeType};base64,${img.base64}`}
+                            alt={img.name}
+                            className="msg-user-thumb"
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {/* File name chips */}
+                    {m._fileNames?.length > 0 && (
+                      <div className="msg-user-chips">
+                        {m._fileNames.map((name, fi) => (
+                          <span key={fi} className="msg-user-chip">📄 {name}</span>
+                        ))}
+                      </div>
+                    )}
+                    {m.content && <span>{m.content}</span>}
+                  </div>
                 </div>
               ) : m.content === "" ? null : (
                 <div key={i} className="msg-ai">
@@ -375,26 +613,90 @@ export default function ChatPage() {
             <div ref={bottomRef} />
           </div>
 
+          {/* ── Input bar ───────────────────────────────────────────── */}
           <div className="chat-input-bar">
+
+            {/* Attachment preview strip */}
+            {attachedFiles.length > 0 && (
+              <div className="chat-attach-preview">
+                {attachedFiles.map(f => (
+                  <div key={f.id} className="chat-attach-item">
+                    {f.isImage
+                      ? <img src={`data:${f.mimeType};base64,${f.base64}`} alt={f.name} className="chat-attach-thumb" />
+                      : <span className="chat-attach-icon">📄</span>
+                    }
+                    <span className="chat-attach-name">{f.name}</span>
+                    <button className="chat-attach-remove" onClick={() => removeAttachment(f.id)}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="chat-input-wrap">
+
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,text/*,.json,.md,.csv,.js,.ts,.jsx,.tsx,.py,.java,.c,.cpp,.h,.rs,.go"
+                style={{ display: "none" }}
+                onChange={e => { handleFiles(e.target.files); e.target.value = ""; }}
+              />
+
+              {/* Dropdown menu button */}
+              <div className="chat-dropdown-wrap" ref={dropdownRef}>
+                <button
+                  className="chat-dropdown-btn"
+                  onClick={() => setDropdownOpen(o => !o)}
+                  title="Options"
+                >
+                  ⋯
+                </button>
+                {dropdownOpen && (
+                  <div className="chat-dropdown-menu">
+                    <div className="chat-dropdown-section">Mode</div>
+                    {MODES.map(m => (
+                      <button
+                        key={m.key}
+                        className={`chat-dropdown-item${activeMode === m.key ? " active" : ""}`}
+                        onClick={() => { setActiveMode(m.key); setDropdownOpen(false); }}
+                      >
+                        {activeMode === m.key ? "✓ " : "   "}{m.label}
+                      </button>
+                    ))}
+                    <div className="chat-dropdown-divider" />
+                    <button className="chat-dropdown-item" onClick={captureCurrentTab}>
+                      📷 Capture tab
+                    </button>
+                    <button className="chat-dropdown-item" onClick={() => { fileInputRef.current?.click(); setDropdownOpen(false); }}>
+                      📎 Attach file
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <textarea
                 ref={textareaRef}
                 className="chat-textarea"
-                placeholder="Ask a question..."
+                placeholder={activeMode === "chat" ? "Ask a question…" : `${MODES.find(m=>m.key===activeMode)?.label} mode — type or drop content…`}
                 rows={1}
                 value={input}
                 onChange={(e) => { setInput(e.target.value); autoResize(); }}
                 onKeyDown={handleKey}
               />
-              <button className="chat-send" onClick={send} disabled={loading || !input.trim()} aria-label="Send">
+              <button className="chat-send" onClick={send} disabled={loading || (!input.trim() && attachedFiles.length === 0)} aria-label="Send">
                 ↑
               </button>
             </div>
-            <p className="chat-hint">Enter to send · Shift+Enter for new line</p>
+            <p className="chat-hint">
+              {activeMode !== "chat" && <span className="chat-mode-badge">{MODES.find(m=>m.key===activeMode)?.label}</span>}
+              Enter to send · Shift+Enter for new line
+            </p>
           </div>
         </div>
 
-        {/* ── Context menu ────────────────────────────────────────────── */}
+        {/* ── Context menu ──────────────────────────────────────────── */}
         {ctxMenu && (
           <div className="chat-ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
             <button className="chat-ctx-item" onClick={() => { setRenamingId(ctxMenu.id); setRenameVal(ctxMenu.title); setCtxMenu(null); }}>

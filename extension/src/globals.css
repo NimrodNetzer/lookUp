@@ -215,6 +215,110 @@
   color: #a7f3d0; font-size: 13.5px; line-height: 1.6;
 }
 
+/* ── Drag overlay ─────────────────────────────────────────────────────────── */
+.chat-drag-overlay {
+  position: fixed; inset: 0; z-index: 9000;
+  background: rgba(10,10,20,0.72);
+  border: 2px dashed rgba(124,106,245,0.6);
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.chat-drag-hint {
+  color: #c0b8ff; font-size: 18px; font-weight: 600;
+  background: rgba(124,106,245,0.15); padding: 16px 32px;
+  border-radius: 14px; border: 1px solid rgba(124,106,245,0.35);
+}
+
+/* ── Conversation search ──────────────────────────────────────────────────── */
+.chat-search-wrap { padding: 0 10px 8px; flex-shrink: 0; }
+.chat-search {
+  width: 100%; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px; padding: 6px 10px; color: #aaa; font-size: 12px; outline: none;
+  transition: border-color 0.15s;
+}
+.chat-search::placeholder { color: #444; }
+.chat-search:focus { border-color: rgba(124,106,245,0.45); color: #ddd; }
+
+/* ── Attachment preview strip ─────────────────────────────────────────────── */
+.chat-attach-preview {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 8px 12px 6px; border-bottom: 1px solid rgba(124,106,245,0.1);
+}
+.chat-attach-item {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(124,106,245,0.08); border: 1px solid rgba(124,106,245,0.22);
+  border-radius: 10px; padding: 4px 8px 4px 4px; max-width: 200px;
+}
+.chat-attach-thumb {
+  width: 36px; height: 36px; object-fit: cover;
+  border-radius: 7px; flex-shrink: 0;
+}
+.chat-attach-icon { font-size: 22px; flex-shrink: 0; line-height: 1; }
+.chat-attach-name {
+  font-size: 11px; color: #9d8cff; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 110px;
+}
+.chat-attach-remove {
+  background: none; border: none; color: #555; cursor: pointer;
+  font-size: 11px; padding: 0 2px; line-height: 1; flex-shrink: 0;
+  transition: color 0.15s;
+}
+.chat-attach-remove:hover { color: #f87171; }
+
+/* ── User message attachments ─────────────────────────────────────────────── */
+.msg-user-imgs {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
+}
+.msg-user-thumb {
+  max-width: 200px; max-height: 160px; border-radius: 10px;
+  object-fit: cover; border: 1px solid rgba(255,255,255,0.12);
+}
+.msg-user-chips {
+  display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px;
+}
+.msg-user-chip {
+  background: rgba(255,255,255,0.1); border-radius: 8px;
+  padding: 3px 8px; font-size: 11px; color: #d0caff;
+}
+
+/* ── Input bar dropdown ───────────────────────────────────────────────────── */
+.chat-dropdown-wrap { position: relative; flex-shrink: 0; }
+.chat-dropdown-btn {
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+  color: #555; font-size: 16px; cursor: pointer; display: flex;
+  align-items: center; justify-content: center; transition: background 0.15s, color 0.15s, border-color 0.15s;
+  letter-spacing: 1px;
+}
+.chat-dropdown-btn:hover { background: rgba(124,106,245,0.15); border-color: rgba(124,106,245,0.4); color: #9d8cff; }
+.chat-dropdown-menu {
+  position: absolute; bottom: calc(100% + 8px); left: 0;
+  background: #16162a; border: 1px solid rgba(124,106,245,0.25);
+  border-radius: 12px; padding: 6px; min-width: 160px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5); z-index: 100;
+}
+.chat-dropdown-section {
+  font-size: 10px; color: #444; text-transform: uppercase;
+  letter-spacing: 0.8px; padding: 4px 10px 2px;
+}
+.chat-dropdown-divider { border-top: 1px solid rgba(255,255,255,0.06); margin: 5px 0; }
+.chat-dropdown-item {
+  display: block; width: 100%; text-align: left; padding: 7px 12px;
+  background: none; border: none; color: #777; font-size: 12.5px;
+  cursor: pointer; border-radius: 8px; transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+.chat-dropdown-item:hover { background: rgba(124,106,245,0.12); color: #c0b8ff; }
+.chat-dropdown-item.active { color: #9d8cff; font-weight: 600; }
+
+/* ── Mode badge in hint row ───────────────────────────────────────────────── */
+.chat-mode-badge {
+  display: inline-block; background: rgba(124,106,245,0.18);
+  border: 1px solid rgba(124,106,245,0.35); color: #9d8cff;
+  font-size: 10px; border-radius: 5px; padding: 1px 6px; margin-right: 6px;
+  vertical-align: middle;
+}
+
 @layer base {
   * {
     box-sizing: border-box;

@@ -9,7 +9,10 @@
     "tabs",
     "sidePanel",
     "tabCapture",
-    "storage"
+    "offscreen",
+    "storage",
+    "notifications",
+    "contextMenus"
   ],
 
   "host_permissions": [
@@ -27,6 +30,12 @@
         "default": "Alt+S"
       },
       "description": "Open LookUp side panel"
+    },
+    "capture-screen": {
+      "suggested_key": {
+        "default": "Alt+Shift+C"
+      },
+      "description": "Capture current tab with LookUp"
     }
   },
 
