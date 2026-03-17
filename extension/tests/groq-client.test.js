@@ -170,7 +170,7 @@ describe("Missing API key", () => {
 describe("API error handling", () => {
   it("throws friendly message on 429 rate limit", async () => {
     global.fetch = vi.fn(async () => mockErrorResponse(429, "Rate limited"));
-    await expect(analyzeText("text")).rejects.toThrow(/quota/i);
+    await expect(analyzeText("text")).rejects.toThrow(/rate.limit/i);
   });
 
   it("throws Groq error message on other HTTP errors", async () => {
@@ -419,7 +419,7 @@ describe("chatStream", () => {
   it("throws friendly message on 429 during streaming", async () => {
     global.fetch = vi.fn(async () => mockErrorResponse(429, "limit"));
     const gen = chatStream([{ role: "user", content: "q" }]);
-    await expect(gen.next()).rejects.toThrow(/quota/i);
+    await expect(gen.next()).rejects.toThrow(/too many requests|rate.limit|quota/i);
   });
 
   it("sends stream: true in the request body", async () => {

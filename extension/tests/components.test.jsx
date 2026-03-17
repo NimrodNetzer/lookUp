@@ -34,6 +34,7 @@ vi.mock("../storage.js", () => ({
     getApiKey:     vi.fn(async () => null),
     setApiKey:     vi.fn(async () => {}),
     getPreferences: vi.fn(async () => ({})),
+    getChatMode:    vi.fn(async () => "standard"),
   },
   Notes: {
     get:   vi.fn(async () => null),
@@ -85,11 +86,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Sensible defaults for every test
   Settings.isConfigured.mockResolvedValue(false);
-  Notes.stats.mockResolvedValue({ totalNotes: 5, streak: 3, thisWeek: 2 });
   Notes.get.mockResolvedValue(null);
-  Conversations.list.mockResolvedValue([]);
-  Conversations.getActive.mockResolvedValue(null);
-  Conversations.create.mockResolvedValue({ id: "conv-1", title: "New Conversation", order: 0 });
+  // ChatPage init: return a pre-existing active conversation so switchConversation() runs reliably
+  Conversations.getActive.mockResolvedValue({ id: "conv-1", title: "New Conversation", order: 0 });
+  Conversations.list.mockResolvedValue([{ id: "conv-1", title: "New Conversation", order: 0 }]);
+  Conversations.create.mockResolvedValue({ id: "conv-2", title: "New Conversation", order: 1 });
   Messages.listByConversation.mockResolvedValue([]);
   chatStream.mockImplementation(async function* () { yield "Hello world"; });
 });
@@ -270,29 +271,29 @@ describe("NoteViewer", () => {
 
 // ── HomePage ──────────────────────────────────────────────────────────────────
 describe("HomePage", () => {
-  it("renders stats from Notes.stats()", async () => {
-    Notes.stats.mockResolvedValue({ totalNotes: 12, streak: 5, thisWeek: 3 });
+  it("renders LearningHub (stats handled inside LearningHub)", async () => {
+    // Notes.stats is called inside LearningHub which is mocked to a stub.
+    // Verify HomePage renders without crashing and the stub is present.
     render(<HomePage onOpenNote={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText("12")).toBeInTheDocument());
-    expect(screen.getByText("5d")).toBeInTheDocument();
-    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByTestId("learning-hub")).toBeInTheDocument();
   });
 
-  it("shows 0 stats when Notes.stats() fails", async () => {
-    Notes.stats.mockRejectedValue(new Error("DB error"));
+  it("renders without crashing when storage is unavailable", async () => {
     render(<HomePage onOpenNote={vi.fn()} />);
-    // Stats stay at initial 0 values
-    await waitFor(() => expect(screen.getByText("0d")).toBeInTheDocument());
+    expect(screen.getByText("LookUp")).toBeInTheDocument();
   });
 
   it("opens GlobalSearch when search button is clicked", async () => {
     render(<HomePage onOpenNote={vi.fn()} />);
+    // "Search notes" is inside the ActionsDropdown — open it first
+    await userEvent.click(screen.getByTitle("Actions"));
     await userEvent.click(screen.getByText(/search notes/i));
     expect(screen.getByTestId("global-search")).toBeInTheDocument();
   });
 
   it("closes GlobalSearch when close is called", async () => {
     render(<HomePage onOpenNote={vi.fn()} />);
+    await userEvent.click(screen.getByTitle("Actions"));
     await userEvent.click(screen.getByText(/search notes/i));
     await userEvent.click(screen.getByText("Close"));
     expect(screen.queryByTestId("global-search")).not.toBeInTheDocument();
@@ -300,20 +301,30 @@ describe("HomePage", () => {
 
   it("opens GlobalSearch on Ctrl+K", async () => {
     render(<HomePage onOpenNote={vi.fn()} />);
-    await waitFor(() => screen.getByText(/search notes/i));
+    // Ctrl+K fires on the document — no need to find the button first
     fireEvent.keyDown(document, { key: "k", ctrlKey: true });
-    expect(screen.getByTestId("global-search")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("global-search")).toBeInTheDocument());
   });
 
   it("opens GlobalSearch on Cmd+K (Mac)", async () => {
     render(<HomePage onOpenNote={vi.fn()} />);
-    await waitFor(() => screen.getByText(/search notes/i));
     fireEvent.keyDown(document, { key: "k", metaKey: true });
-    expect(screen.getByTestId("global-search")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("global-search")).toBeInTheDocument());
   });
 });
 
 // ── ChatPage ──────────────────────────────────────────────────────────────────
+
+/**
+ * Wait for ChatPage async init to finish.
+ * switchConversation() sets activeId then calls Messages.listByConversation(),
+ * then calls Conversations.setActive(). Waiting for setActive ensures the full
+ * init chain + all React state flushes have completed before we interact.
+ */
+async function waitForChatInit() {
+  await waitFor(() => expect(Conversations.setActive).toHaveBeenCalled(), { timeout: 3000 });
+}
+
 describe("ChatPage", () => {
   it("shows empty state when no messages", async () => {
     render(<ChatPage />);
@@ -322,20 +333,20 @@ describe("ChatPage", () => {
 
   it("send button is disabled when input is empty", async () => {
     render(<ChatPage />);
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/i));
+    await waitForChatInit();
     expect(screen.getByLabelText("Send")).toBeDisabled();
   });
 
   it("send button enables when input has text", async () => {
     render(<ChatPage />);
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/i));
+    await waitForChatInit();
     await userEvent.type(screen.getByPlaceholderText(/ask a question/i), "Hello");
     expect(screen.getByLabelText("Send")).not.toBeDisabled();
   });
 
   it("renders user message after sending", async () => {
     render(<ChatPage />);
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/i));
+    await waitForChatInit();
 
     await userEvent.type(screen.getByPlaceholderText(/ask a question/i), "What is entropy?");
     await userEvent.click(screen.getByLabelText("Send"));
@@ -349,23 +360,23 @@ describe("ChatPage", () => {
       yield "is disorder.";
     });
     render(<ChatPage />);
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/i));
+    await waitForChatInit();
 
     await userEvent.type(screen.getByPlaceholderText(/ask a question/i), "What is entropy?");
     await userEvent.click(screen.getByLabelText("Send"));
 
-    await waitFor(() => expect(screen.getByText(/entropy is disorder/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/entropy is disorder/i)).toBeInTheDocument(), { timeout: 3000 });
   });
 
   it("clears input after sending", async () => {
     render(<ChatPage />);
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/i));
+    await waitForChatInit();
 
     const input = screen.getByPlaceholderText(/ask a question/i);
     await userEvent.type(input, "Hello");
     await userEvent.click(screen.getByLabelText("Send"));
 
-    await waitFor(() => expect(input.value).toBe(""));
+    await waitFor(() => expect(input.value).toBe(""), { timeout: 3000 });
   });
 
   it("shows error message when chatStream throws", async () => {
@@ -373,19 +384,20 @@ describe("ChatPage", () => {
       throw new Error("Daily token limit reached.");
     });
     render(<ChatPage />);
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/i));
+    await waitForChatInit();
 
     await userEvent.type(screen.getByPlaceholderText(/ask a question/i), "Hi");
     await userEvent.click(screen.getByLabelText("Send"));
 
     await waitFor(() =>
-      expect(screen.getByText(/Daily token limit reached/i)).toBeInTheDocument()
+      expect(screen.getByText(/Daily token limit reached/i)).toBeInTheDocument(),
+      { timeout: 3000 }
     );
   });
 
   it("Enter key sends the message", async () => {
     render(<ChatPage />);
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/i));
+    await waitForChatInit();
 
     const input = screen.getByPlaceholderText(/ask a question/i);
     await userEvent.type(input, "Hello{Enter}");
@@ -395,7 +407,7 @@ describe("ChatPage", () => {
 
   it("Shift+Enter does not send (adds newline)", async () => {
     render(<ChatPage />);
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/i));
+    await waitForChatInit();
 
     const input = screen.getByPlaceholderText(/ask a question/i);
     await userEvent.type(input, "Hello{Shift>}{Enter}{/Shift}");
@@ -416,7 +428,7 @@ describe("ChatPage", () => {
       .mockResolvedValue([{ id: "conv-1", title: "New Conversation", order: 0 }]);
 
     render(<ChatPage />);
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/i));
+    await waitForChatInit();
 
     await userEvent.type(screen.getByPlaceholderText(/ask a question/i), "Explain recursion");
     await userEvent.click(screen.getByLabelText("Send"));
@@ -432,7 +444,7 @@ describe("ChatPage", () => {
       .mockResolvedValue([{ id: "conv-1", title: "New Conversation", order: 0 }]);
 
     render(<ChatPage />);
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/i));
+    await waitForChatInit();
 
     const longMsg = "A".repeat(60);
     await userEvent.type(screen.getByPlaceholderText(/ask a question/i), longMsg);

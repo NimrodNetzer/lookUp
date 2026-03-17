@@ -245,6 +245,15 @@ moreChatBtn.addEventListener("click", () => {
   moreDropdown.classList.remove("open"); moreBtn.classList.remove("open");
   chrome.tabs.create({ url: chrome.runtime.getURL("built/chat.html") });
 });
+document.getElementById("moreFullscreenBtn").addEventListener("click", () => {
+  moreDropdown.classList.remove("open"); moreBtn.classList.remove("open");
+  chrome.windows.create({
+    url: chrome.runtime.getURL("sidepanel.html"),
+    type: "popup",
+    width: 420,
+    height: 800
+  });
+});
 
 langOptEN.addEventListener("click", async () => {
   if (_lang === "en") return;
@@ -619,16 +628,7 @@ async function sendChatMessage() {
       const mdBody = lastCard?.querySelector(".md-body");
       if (mdBody) {
         mdBody.outerHTML = renderQuiz(reply);
-        lastCard.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
-          btn.dataset.bound = "1";
-          btn.addEventListener("click", () => {
-            const el = document.getElementById(btn.dataset.answerId);
-            if (!el) return;
-            const hidden = el.style.display === "none";
-            el.style.display = hidden ? "block" : "none";
-            btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
-          });
-        });
+        // No listener attachment needed — delegated listener on resultArea handles all quiz btns
       }
     }
 
@@ -1176,22 +1176,24 @@ async function renameConvTab(id, title) {
 }
 
 function reattachResultListeners() {
-  resultArea.querySelectorAll(".quiz-reveal-btn").forEach((btn) => {
-    btn.dataset.bound = "1";
-    btn.addEventListener("click", () => {
-      const el = document.getElementById(btn.dataset.answerId);
-      if (!el) return;
-      const hidden = el.style.display === "none";
-      el.style.display = hidden ? "block" : "none";
-      btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
-    });
-  });
+  // No-op — quiz/flashcard listeners are now delegated on resultArea and never need reattachment
 }
 
-// Single delegated listener — survives innerHTML replacement
+// Single delegated listener — survives any innerHTML replacement
 resultArea.addEventListener("click", (e) => {
+  // Flashcard flip
   const fc = e.target.closest(".flashcard");
   if (fc && resultArea.contains(fc)) fc.classList.toggle("flipped");
+
+  // Quiz show/hide answer
+  const btn = e.target.closest(".quiz-reveal-btn");
+  if (btn) {
+    const el = document.getElementById(btn.dataset.answerId);
+    if (!el) return;
+    const hidden = el.style.display === "none";
+    el.style.display = hidden ? "block" : "none";
+    btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+  }
 });
 
 function renderAllMessages(messages) {
@@ -2034,21 +2036,7 @@ function showResult(markdown, title, mode) {
     <div class="result-card">
       ${resultHeadline(mode, title)}
       ${bodyHtml}
-    </div>`,
-    () => {
-      if (mode === "quiz") {
-        resultArea.querySelectorAll(".quiz-reveal-btn:not([data-bound])").forEach((btn) => {
-          btn.dataset.bound = "1";
-          btn.addEventListener("click", () => {
-            const el2 = document.getElementById(btn.dataset.answerId);
-            if (!el2) return;
-            const hidden = el2.style.display === "none";
-            el2.style.display = hidden ? "block" : "none";
-            btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
-          });
-        });
-      }
-    }
+    </div>`
   );
 }
 
@@ -2171,53 +2159,17 @@ function renderQuiz(markdown) {
   return html || `<div class="md-body" dir="${bidiDir(markdown)}">${renderMarkdown(markdown)}</div>`;
 }
 
-// ── Math renderer ────────────────────────────────────────────────────────────
-const MATH_SYMBOLS = {
-  '\\alpha':'α','\\beta':'β','\\gamma':'γ','\\delta':'δ','\\epsilon':'ε',
-  '\\varepsilon':'ε','\\zeta':'ζ','\\eta':'η','\\theta':'θ','\\vartheta':'ϑ',
-  '\\iota':'ι','\\kappa':'κ','\\lambda':'λ','\\mu':'μ','\\nu':'ν','\\xi':'ξ',
-  '\\pi':'π','\\varpi':'ϖ','\\rho':'ρ','\\varrho':'ϱ','\\sigma':'σ',
-  '\\varsigma':'ς','\\tau':'τ','\\upsilon':'υ','\\phi':'φ','\\varphi':'φ',
-  '\\chi':'χ','\\psi':'ψ','\\omega':'ω',
-  '\\Gamma':'Γ','\\Delta':'Δ','\\Theta':'Θ','\\Lambda':'Λ','\\Xi':'Ξ',
-  '\\Pi':'Π','\\Sigma':'Σ','\\Upsilon':'Υ','\\Phi':'Φ','\\Psi':'Ψ','\\Omega':'Ω',
-  '\\cup':'∪','\\cap':'∩','\\in':'∈','\\notin':'∉','\\ni':'∋',
-  '\\subset':'⊂','\\subseteq':'⊆','\\supset':'⊃','\\supseteq':'⊇',
-  '\\emptyset':'∅','\\varnothing':'∅','\\setminus':'∖','\\complement':'∁',
-  '\\leq':'≤','\\geq':'≥','\\neq':'≠','\\approx':'≈','\\equiv':'≡',
-  '\\sim':'∼','\\simeq':'≃','\\cong':'≅','\\ll':'≪','\\gg':'≫','\\propto':'∝',
-  '\\rightarrow':'→','\\leftarrow':'←','\\Rightarrow':'⇒','\\Leftarrow':'⇐',
-  '\\leftrightarrow':'↔','\\Leftrightarrow':'⟺','\\to':'→','\\gets':'←',
-  '\\uparrow':'↑','\\downarrow':'↓','\\mapsto':'↦',
-  '\\forall':'∀','\\exists':'∃','\\nexists':'∄','\\neg':'¬','\\lnot':'¬',
-  '\\land':'∧','\\wedge':'∧','\\lor':'∨','\\vee':'∨',
-  '\\top':'⊤','\\bot':'⊥','\\vdash':'⊢','\\models':'⊨',
-  '\\cdot':'·','\\times':'×','\\div':'÷','\\pm':'±','\\mp':'∓',
-  '\\oplus':'⊕','\\otimes':'⊗','\\circ':'∘','\\bullet':'•',
-  '\\infty':'∞','\\partial':'∂','\\nabla':'∇','\\sqrt':'√',
-  '\\ldots':'…','\\cdots':'⋯','\\vdots':'⋮','\\ddots':'⋱',
-  '\\langle':'⟨','\\rangle':'⟩','\\lfloor':'⌊','\\rfloor':'⌋',
-  '\\lceil':'⌈','\\rceil':'⌉','\\{':'{','\\}':'}','\\|':'‖',
-};
-
-function renderMath(expr) {
-  let s = expr;
-  s = s.replace(/\\begin\{cases\}([\s\S]*?)\\end\{cases\}/g, (_, body) => {
-    const lines = body.split(/\\\\/).map(l => renderMath(l.trim())).filter(Boolean);
-    return lines.join('<br>');
-  });
-  s = s.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)');
-  s = s.replace(/\\text\{([^}]*)\}/g, '$1');
-  s = s.replace(/\\math\w+\{([^}]*)\}/g, '$1');
-  for (const [cmd, sym] of Object.entries(MATH_SYMBOLS)) {
-    s = s.split(cmd).join(sym);
+// ── Math renderer (KaTeX) ─────────────────────────────────────────────────────
+function renderMath(expr, displayMode = false) {
+  if (typeof katex === 'undefined') {
+    // KaTeX not loaded yet — return escaped fallback
+    return expr.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
-  s = s.replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>');
-  s = s.replace(/\^([A-Za-z0-9])/g, '<sup>$1</sup>');
-  s = s.replace(/_\{([^}]+)\}/g, '<sub>$1</sub>');
-  s = s.replace(/_([A-Za-z0-9])/g, '<sub>$1</sub>');
-  s = s.replace(/\\([A-Za-z]+)/g, '$1');
-  return s;
+  try {
+    return katex.renderToString(expr, { displayMode, throwOnError: false, output: 'html' });
+  } catch {
+    return expr.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
 }
 
 // ── Markdown renderer ────────────────────────────────────────────────────────
@@ -2234,31 +2186,25 @@ function renderMarkdown(raw) {
 
   text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
     const i = blocks.length;
-    blocks.push(`<div class="math-block">${renderMath(math.trim())}</div>`);
+    blocks.push(`<div class="math-block">${renderMath(math.trim(), true)}</div>`);
     return `\x00B${i}\x00`;
   });
 
   text = text.replace(/\$([^$\n]+?)\$/g, (_, math) => {
     const i = blocks.length;
-    blocks.push(`<span class="math-inline">${renderMath(math.trim())}</span>`);
+    blocks.push(`<span class="math-inline">${renderMath(math.trim(), false)}</span>`);
     return `\x00B${i}\x00`;
   });
 
   text = text.replace(/\\begin\{cases\}([\s\S]*?)\\end\{cases\}/g, (_, body) => {
     const i = blocks.length;
-    const lines = body.split(/\\\\/).map(l => renderMath(l.trim())).filter(Boolean);
-    blocks.push(`<div class="math-block">${lines.join('<br>')}</div>`);
+    blocks.push(`<div class="math-block">${renderMath(`\\begin{cases}${body}\\end{cases}`, true)}</div>`);
     return `\x00B${i}\x00`;
   });
 
   text = text
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-  for (const [cmd, sym] of Object.entries(MATH_SYMBOLS)) {
-    text = text.split(cmd).join(sym);
-  }
-  text = text.replace(/\\([A-Za-z]+)/g, '$1');
 
   text = text.replace(/`([^`\n]+)`/g, (_, c) => {
     const i = blocks.length;

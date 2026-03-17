@@ -182,24 +182,25 @@
       perspective: 600px; cursor: pointer;
       border-radius: 8px; margin-top: 2px;
       border: 1px solid rgba(124,106,245,0.15);
-      overflow: hidden;
     }
     .usage-inner {
-      position: relative; width: 100%;
+      position: relative; width: 100%; min-height: 90px;
       transition: transform 0.45s cubic-bezier(.4,0,.2,1);
       transform-style: preserve-3d;
+      background: rgba(124,106,245,0.06); border-radius: 8px;
     }
     .usage-widget.flipped .usage-inner { transform: rotateY(180deg); }
     .usage-face {
       backface-visibility: hidden; -webkit-backface-visibility: hidden;
       border-radius: 8px; padding: 8px 8px 6px;
-      background: rgba(124,106,245,0.06);
+      background: transparent;
     }
     .usage-face.usage-back {
-      position: absolute; top: 0; left: 0; width: 100%; box-sizing: border-box;
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%; box-sizing: border-box;
       transform: rotateY(180deg);
       background: rgba(94,234,212,0.07);
-      display: flex; flex-direction: column; gap: 7px;
+      display: flex; flex-direction: column; gap: 4px;
+      justify-content: center; overflow: hidden;
     }
     .usage-row {
       display: flex; justify-content: space-between; align-items: center;
@@ -232,18 +233,18 @@
       font-size: 9px; color: #444; text-align: right; margin-top: 3px; user-select: none;
     }
     .usage-back-title {
-      font-size: 11px; font-weight: 700; color: #5eead4;
+      font-size: 10.5px; font-weight: 700; color: #5eead4;
     }
     .usage-back-body {
-      font-size: 10.5px; color: #a0a0b8; line-height: 1.5;
+      font-size: 10px; color: #a0a0b8; line-height: 1.4;
     }
     .usage-back-body b { color: #c0b8ff; }
     .usage-groq-btn {
       display: block; text-align: center; text-decoration: none;
       background: linear-gradient(135deg, rgba(94,234,212,0.12), rgba(124,106,245,0.12));
       border: 1px solid rgba(94,234,212,0.35);
-      border-radius: 7px; padding: 7px 10px;
-      font-size: 11px; font-weight: 700; color: #5eead4;
+      border-radius: 6px; padding: 5px 10px;
+      font-size: 10.5px; font-weight: 700; color: #5eead4;
       transition: background 0.15s, border-color 0.15s;
     }
     .usage-groq-btn:hover { background: rgba(94,234,212,0.22); border-color: rgba(94,234,212,0.55); }
@@ -1057,6 +1058,7 @@
     .setup-save-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     .setup-error { font-size: 11px; color: #f87171; margin-top: 8px; text-align: center; min-height: 16px; }
   </style>
+  <link rel="stylesheet" href="vendor/katex.min.css">
 </head>
 <body>
 
@@ -1067,13 +1069,9 @@
     <div class="header-actions">
       <button class="btn-info" id="infoBtn" title="Usage &amp; settings">ℹ</button>
       <div class="info-dropdown" id="infoDropdown">
-        <!-- Inline search -->
-        <div class="more-search-wrap">
-          <span class="more-search-icon">🔍</span>
-          <input class="more-search-input" id="searchInput" type="text" placeholder="Search notes…" autocomplete="off" />
-        </div>
-        <div class="more-search-results" id="searchResults">
-          <p class="more-search-empty" id="searchEmpty"></p>
+        <!-- Open full screen -->
+        <div class="more-item" id="moreFullscreenBtn">
+          <span class="more-icon">⛶</span> Open full screen
         </div>
         <div class="more-divider"></div>
         <!-- Language -->
@@ -1106,15 +1104,8 @@
             <!-- BACK: upgrade info -->
             <div class="usage-face usage-back">
               <div class="usage-back-title">⚡ Need more tokens?</div>
-              <div class="usage-back-body">
-                LookUp runs on <b>Groq's free tier</b> — 500k tokens/day at no cost.<br>
-                For heavier use, upgrade your Groq account directly.
-              </div>
-              <a class="usage-groq-btn" href="https://console.groq.com" target="_blank">
-                Upgrade on Groq →
-              </a>
-              <div class="usage-back-note">Your key · your data · no middleman</div>
-              <div class="usage-flip-hint" style="text-align:left">‹ back</div>
+              <div class="usage-back-body">Free tier: <b>500k/day</b> via Groq. Need more? Upgrade your account.</div>
+              <a class="usage-groq-btn" href="https://console.groq.com" target="_blank">Upgrade on Groq →</a>
             </div>
           </div>
         </div>
@@ -1125,6 +1116,15 @@
       </div>
       <button class="btn-more" id="moreBtn" title="More options">⋯</button>
       <div class="more-dropdown" id="moreDropdown">
+        <!-- Inline search -->
+        <div class="more-search-wrap">
+          <span class="more-search-icon">🔍</span>
+          <input class="more-search-input" id="searchInput" type="text" placeholder="Search notes…" autocomplete="off" />
+        </div>
+        <div class="more-search-results" id="searchResults">
+          <p class="more-search-empty" id="searchEmpty"></p>
+        </div>
+        <div class="more-divider"></div>
         <!-- Primary actions -->
         <div class="more-primary">
           <div class="more-primary-btn" id="moreDashboard">
@@ -1362,6 +1362,7 @@
   </div>
 
   <script src="vendor/pdf.min.js"></script>
+  <script src="vendor/katex.min.js"></script>
   <script type="module" src="sidepanel.js"></script>
 </body>
 </html>

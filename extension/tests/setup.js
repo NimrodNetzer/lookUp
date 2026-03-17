@@ -21,6 +21,10 @@ global.chrome = {
         for (const k of keyList) chromeStore.delete(k);
       },
     },
+    onChanged: {
+      addListener:    () => {},
+      removeListener: () => {},
+    },
   },
   runtime: { getURL: (path) => `chrome-extension://test-id/${path}` },
 };

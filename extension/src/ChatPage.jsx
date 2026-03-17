@@ -184,11 +184,12 @@ async function processFile(file) {
 
 // ── Mode prompts (for first-message structured output) ────────────────────────
 const MODES = [
-  { key: "chat",      label: "Chat" },
-  { key: "summary",   label: "Summary" },
-  { key: "explain",   label: "Explain" },
-  { key: "quiz",      label: "Quiz" },
-  { key: "flashcard", label: "Flashcard" },
+  { key: "chat",      label: "Chat",      emoji: "💬" },
+  { key: "summary",   label: "Summary",   emoji: "📄" },
+  { key: "explain",   label: "Explain",   emoji: "📖" },
+  { key: "quiz",      label: "Quiz",      emoji: "❓" },
+  { key: "flashcard", label: "Flashcard", emoji: "🃏" },
+  { key: "voice",     label: "Voice",     emoji: "🎙" },
 ];
 
 function buildModePrefix(mode) {
@@ -215,6 +216,10 @@ export default function ChatPage() {
   const [copiedIdx,      setCopiedIdx]      = useState(null);
   const [sidebarOpen,    setSidebarOpen]    = useState(true);
   const [searchQuery,    setSearchQuery]    = useState("");
+  const [noteResults,    setNoteResults]    = useState([]);
+  const [pinnedNotes,    setPinnedNotes]    = useState([]); // notes opened from search, shown as sidebar tabs
+  const [noteCtxMenu,    setNoteCtxMenu]    = useState(null); // { x, y, note }
+  const searchRef                           = useRef(null);
 
   // Attachment state (manual drag/paste/file)
   const [attachedFiles,  setAttachedFiles]  = useState([]);
@@ -229,10 +234,6 @@ export default function ChatPage() {
   const mediaRecRef                         = useRef(null);
   const audioChunksRef                      = useRef([]);
 
-  // Note-attach picker state
-  const [notePickerOpen, setNotePickerOpen] = useState(false);
-  const [noteList,       setNoteList]       = useState([]);
-  const [noteSearch,     setNoteSearch]     = useState("");
 
   // Persistent mode (saved to storage)
   const [activeMode,     setActiveModeState] = useState("chat");
@@ -304,13 +305,32 @@ export default function ChatPage() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
   useEffect(() => { if (renamingId !== null) renameRef.current?.focus(); }, [renamingId]);
 
-  // Close context menu on outside click
+  // Close context menus on outside click
   useEffect(() => {
-    if (!ctxMenu) return;
-    const close = () => setCtxMenu(null);
+    if (!ctxMenu && !noteCtxMenu) return;
+    const close = () => { setCtxMenu(null); setNoteCtxMenu(null); };
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
-  }, [ctxMenu]);
+  }, [ctxMenu, noteCtxMenu]);
+
+  // Search notes whenever query changes
+  useEffect(() => {
+    if (!searchQuery.trim()) { setNoteResults([]); return; }
+    Notes.search(searchQuery).then(setNoteResults).catch(() => setNoteResults([]));
+  }, [searchQuery]);
+
+  // Close search results on outside click
+  useEffect(() => {
+    if (!searchQuery.trim()) return;
+    function onDocClick(e) {
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setSearchQuery("");
+        setNoteResults([]);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [searchQuery]);
 
   // Paste images anywhere on the page
   useEffect(() => {
@@ -357,8 +377,8 @@ export default function ChatPage() {
     if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
   }
 
-  // ── Voice recording ──────────────────────────────────────────────────────────
-  async function toggleRecording() {
+  // ── Voice recording (active when mode === "voice") ───────────────────────────
+  async function startVoiceAndSend() {
     if (recording) {
       mediaRecRef.current?.stop();
       return;
@@ -375,7 +395,11 @@ export default function ChatPage() {
         try {
           const blob = new Blob(audioChunksRef.current, { type: rec.mimeType || "audio/webm" });
           const text = await transcribeOnly(blob);
-          if (text) setInput(prev => prev ? `${prev} ${text}` : text);
+          if (text) {
+            // Auto-send the transcribed text
+            setInput(text);
+            setTimeout(() => send(text), 0);
+          }
         } catch (err) {
           console.error("Transcription failed:", err);
         } finally {
@@ -390,29 +414,62 @@ export default function ChatPage() {
     }
   }
 
-  // ── Note attach picker ───────────────────────────────────────────────────────
-  async function openNotePicker() {
+  // ── Note attach (from sidebar search result) ─────────────────────────────────
+  // Pin note as sidebar tab and open it as a conversation
+  async function pinNote(note) {
+    setSearchQuery("");
+    setNoteResults([]);
+
+    let convId = note.conversation_id;
+
+    if (convId) {
+      // Verify the conversation still exists
+      const existing = await Conversations.get(convId).catch(() => null);
+      if (!existing) convId = null;
+    }
+
+    if (!convId) {
+      // Create a new conversation named after the note
+      const conv = await Conversations.create(note.title || note.filename).catch(() => null);
+      if (!conv) return;
+      convId = conv.id;
+      // Link the note to this new conversation so future clicks work
+      await Notes.updateMeta(note.filename, { conversation_id: convId }).catch(() => {});
+      await loadConversations();
+    }
+
+    // Add to pinned list with resolved convId
+    setPinnedNotes(prev => {
+      const without = prev.filter(n => n.filename !== note.filename);
+      return [...without, { ...note, conversation_id: convId }];
+    });
+
+    await switchConversation(convId);
+  }
+
+
+  async function renameNote(note) {
+    const newTitle = window.prompt("Rename note:", note.title || note.filename);
+    if (!newTitle?.trim()) return;
     try {
-      const notes = await Notes.list();
-      setNoteList(notes);
-      setNoteSearch("");
-      setNotePickerOpen(true);
+      await Notes.updateMeta(note.filename, { title: newTitle.trim() });
+      // Refresh search results
+      if (searchQuery.trim()) setNoteResults(await Notes.search(searchQuery));
     } catch {}
   }
 
-  async function attachNote(note) {
+  async function deleteNote(note) {
+    if (!window.confirm(`Delete "${note.title || note.filename}"?`)) return;
     try {
-      const full = await Notes.get(note.filename);
-      if (!full) return;
-      const asFile = {
-        id: `note-${note.filename}`,
-        name: note.title || note.filename,
-        isText: true,
-        textContent: full.content,
-      };
-      setAttachedFiles(prev => [...prev.filter(f => f.id !== asFile.id), asFile]);
-      setNotePickerOpen(false);
+      await Notes.delete(note.filename);
+      setNoteResults(prev => prev.filter(n => n.filename !== note.filename));
+      setPinnedNotes(prev => prev.filter(n => n.filename !== note.filename));
     } catch {}
+  }
+
+  function openNoteCtxMenu(e, note) {
+    e.preventDefault();
+    setNoteCtxMenu({ x: e.clientX, y: e.clientY, note });
   }
 
   // ── Capture source card ──────────────────────────────────────────────────────
@@ -443,8 +500,8 @@ export default function ChatPage() {
   }
 
   // ── Send message ─────────────────────────────────────────────────────────────
-  async function send() {
-    const text = input.trim();
+  async function send(overrideText) {
+    const text = (overrideText ?? input).trim();
     if ((!text && attachedFiles.length === 0 && !captureSource) || loading || !activeId) return;
     setInput("");
     setLoading(true);
@@ -621,9 +678,6 @@ export default function ChatPage() {
     );
   }
 
-  const filteredConversations = searchQuery.trim()
-    ? conversations.filter(c => (c.title ?? "").toLowerCase().includes(searchQuery.toLowerCase()))
-    : conversations;
 
   const lastMsg   = messages[messages.length - 1];
   const showTyping = loading && (lastMsg?.role !== "assistant" || lastMsg?.content === "");
@@ -656,18 +710,50 @@ export default function ChatPage() {
             </div>
           </div>
 
-          {/* Search */}
-          <div className="chat-search-wrap">
+          {/* Search notes */}
+          <div className="chat-search-wrap" ref={searchRef}>
             <input
               className="chat-search"
-              placeholder="Search conversations…"
+              placeholder="Search notes…"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
             />
+
+            {/* Note search results — dropdown inside search wrapper */}
+            {searchQuery.trim() && (
+              <div className="chat-note-results">
+                {noteResults.length === 0
+                  ? <div className="chat-note-results-empty">No notes found</div>
+                  : noteResults.map(n => (
+                      <button
+                        key={n.filename}
+                        className="chat-note-result-item"
+                        onClick={() => pinNote(n)}
+                        onContextMenu={e => openNoteCtxMenu(e, n)}
+                        title="Click to open · Right-click for more"
+                      >
+                        <span className="chat-note-result-title">{n.title || n.filename}</span>
+                      </button>
+                    ))
+                }
+              </div>
+            )}
           </div>
 
           <div className="chat-conv-list">
-            {filteredConversations.map((conv) =>
+            {/* Pinned notes — identical appearance to conversation tabs */}
+            {pinnedNotes.map(note => (
+              <button
+                key={note.filename}
+                className={`chat-conv-item${note.conversation_id === activeId ? " active" : ""}`}
+                onClick={() => note.conversation_id && switchConversation(note.conversation_id)}
+                onContextMenu={e => openNoteCtxMenu(e, note)}
+                title={note.title || note.filename}
+              >
+                <span className="chat-conv-label">{note.title || note.filename}</span>
+              </button>
+            ))}
+            {conversations.map((conv) =>
               renamingId === conv.id ? (
                 <div key={conv.id} className="chat-conv-item active">
                   <input
@@ -700,32 +786,31 @@ export default function ChatPage() {
 
           {/* ── Bottom: capture + mode ──────────────────────────────── */}
           <div className="chat-sidebar-bottom">
-            {/* Mode dropdown — only visible when capture is active */}
-            {captureSource && (
-              <div className="chat-mode-select">
-                <button
-                  className="chat-mode-trigger"
-                  onClick={() => setModeDropOpen(o => !o)}
-                  title="Select output mode"
-                >
-                  <span>{MODES.find(m => m.key === activeMode)?.label ?? "Chat"}</span>
-                  <span className="chat-mode-trigger-arrow">{modeDropOpen ? "▴" : "▾"}</span>
-                </button>
-                {modeDropOpen && (
-                  <div className="chat-mode-dropdown">
-                    {MODES.map(m => (
-                      <button
-                        key={m.key}
-                        className={`chat-mode-opt${activeMode === m.key ? " active" : ""}`}
-                        onClick={() => { setActiveMode(m.key); setModeDropOpen(false); }}
-                      >
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Mode dropdown — only when a capture source is active */}
+            {captureSource && <div className="chat-mode-select">
+              <button
+                className="chat-mode-trigger"
+                onClick={() => setModeDropOpen(o => !o)}
+                title="Select mode"
+              >
+                <span>{(() => { const m = MODES.find(m => m.key === activeMode); return m ? `${m.emoji} ${m.label}` : "💬 Chat"; })()}</span>
+                <span className="chat-mode-trigger-arrow">{modeDropOpen ? "▴" : "▾"}</span>
+              </button>
+              {modeDropOpen && (
+                <div className="chat-mode-dropdown">
+                  {MODES.map(m => (
+                    <button
+                      key={m.key}
+                      className={`chat-mode-opt${activeMode === m.key ? " active" : ""}`}
+                      onClick={() => { setActiveMode(m.key); setModeDropOpen(false); }}
+                    >
+                      <span className="chat-mode-opt-emoji">{m.emoji}</span>
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>}
 
             {/* Compact capture source button */}
             <div className="chat-cap-row">
@@ -860,35 +945,6 @@ export default function ChatPage() {
               </div>
             )}
 
-            {/* Note picker popup */}
-            {notePickerOpen && (
-              <div className="chat-note-picker">
-                <div className="chat-note-picker-header">
-                  <span>Attach a note</span>
-                  <button className="chat-note-picker-close" onClick={() => setNotePickerOpen(false)}>✕</button>
-                </div>
-                <input
-                  className="chat-note-picker-search"
-                  placeholder="Search notes…"
-                  value={noteSearch}
-                  onChange={e => setNoteSearch(e.target.value)}
-                  autoFocus
-                />
-                <div className="chat-note-picker-list">
-                  {noteList
-                    .filter(n => !noteSearch || (n.title ?? "").toLowerCase().includes(noteSearch.toLowerCase()))
-                    .map(n => (
-                      <button key={n.filename} className="chat-note-picker-item" onClick={() => attachNote(n)}>
-                        <span className="chat-note-picker-title">{n.title || n.filename}</span>
-                        <span className="chat-note-picker-date">{new Date(n.createdAt).toLocaleDateString()}</span>
-                      </button>
-                    ))
-                  }
-                  {noteList.length === 0 && <div className="chat-note-picker-empty">No notes saved yet</div>}
-                </div>
-              </div>
-            )}
-
             <div className="chat-input-wrap">
               <input
                 ref={fileInputRef}
@@ -898,53 +954,68 @@ export default function ChatPage() {
                 style={{ display: "none" }}
                 onChange={e => { handleFiles(e.target.files); e.target.value = ""; }}
               />
-              {/* 📎 attach file */}
-              <button
-                className="chat-attach-btn"
-                onClick={() => fileInputRef.current?.click()}
-                title="Attach file"
-              >📎</button>
-              {/* 📓 attach note */}
-              <button
-                className="chat-attach-btn"
-                onClick={() => notePickerOpen ? setNotePickerOpen(false) : openNotePicker()}
-                title="Attach a saved note"
-              >📓</button>
-              {/* 🎙 voice input */}
-              <button
-                className={`chat-attach-btn${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
-                onClick={toggleRecording}
-                title={recording ? "Stop recording" : transcribing ? "Transcribing…" : "Voice input"}
-                disabled={transcribing}
-              >{transcribing ? "…" : recording ? "⏹" : "🎙"}</button>
+              {/* 📎 attach file — hidden in voice mode */}
+              {activeMode !== "voice" && (
+                <button
+                  className="chat-attach-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Attach file"
+                >📎</button>
+              )}
 
-              <textarea
-                ref={textareaRef}
-                className="chat-textarea"
-                placeholder="Ask a question…"
-                rows={1}
-                value={input}
-                onChange={(e) => { setInput(e.target.value); autoResize(); }}
-                onKeyDown={handleKey}
-              />
-              <button
-                className="chat-send"
-                onClick={send}
-                disabled={loading || (!input.trim() && attachedFiles.length === 0 && !captureSource)}
-                aria-label="Send"
-              >↑</button>
+              {activeMode === "voice" ? (
+                /* Voice mode: full-width mic button */
+                <button
+                  className={`chat-voice-main${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
+                  onClick={startVoiceAndSend}
+                  disabled={transcribing || loading}
+                  title={recording ? "Stop & send" : transcribing ? "Transcribing…" : "Tap to record"}
+                >
+                  {transcribing ? "✦ Transcribing…" : recording ? "⏹ Stop & send" : "🎙 Tap to record"}
+                </button>
+              ) : (
+                <>
+                  <textarea
+                    ref={textareaRef}
+                    className="chat-textarea"
+                    placeholder="Ask a question…"
+                    rows={1}
+                    value={input}
+                    onChange={(e) => { setInput(e.target.value); autoResize(); }}
+                    onKeyDown={handleKey}
+                  />
+                  <button
+                    className="chat-send"
+                    onClick={send}
+                    disabled={loading || (!input.trim() && attachedFiles.length === 0 && !captureSource)}
+                    aria-label="Send"
+                  >↑</button>
+                </>
+              )}
             </div>
             <p className="chat-hint">Enter to send · Shift+Enter for new line</p>
           </div>
         </div>
 
-        {/* ── Context menu ──────────────────────────────────────────── */}
+        {/* ── Conversation context menu ──────────────────────────────── */}
         {ctxMenu && (
           <div className="chat-ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
             <button className="chat-ctx-item" onClick={() => { setRenamingId(ctxMenu.id); setRenameVal(ctxMenu.title); setCtxMenu(null); }}>
               Rename
             </button>
             <button className="chat-ctx-item chat-ctx-delete" onClick={() => { deleteConversation(ctxMenu.id); setCtxMenu(null); }}>
+              Delete
+            </button>
+          </div>
+        )}
+
+        {/* ── Note context menu ──────────────────────────────────────── */}
+        {noteCtxMenu && (
+          <div className="chat-ctx-menu" style={{ left: noteCtxMenu.x, top: noteCtxMenu.y }} onClick={(e) => e.stopPropagation()}>
+            <button className="chat-ctx-item" onClick={() => { renameNote(noteCtxMenu.note); setNoteCtxMenu(null); }}>
+              Rename
+            </button>
+            <button className="chat-ctx-item chat-ctx-delete" onClick={() => { deleteNote(noteCtxMenu.note); setNoteCtxMenu(null); }}>
               Delete
             </button>
           </div>
