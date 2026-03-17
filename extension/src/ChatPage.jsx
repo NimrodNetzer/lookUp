@@ -364,6 +364,8 @@ export default function ChatPage() {
       _fileNames: textFiles.map(f => f.name),
     };
 
+    // Snapshot current history BEFORE state update (used for API call below)
+    const prevMessages = messages;
     setMessages((prev) => [...prev, userDisplayMsg, { role: "assistant", content: "" }]);
 
     try {
@@ -372,10 +374,8 @@ export default function ChatPage() {
       let fullResponse = "";
 
       if (imageFiles.length > 0) {
-        // Build rich message array: history as text + current message with images
-        const history = await Messages.listByConversation(activeId);
-        // All messages except the one we just appended (last)
-        const historyMsgs = history.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+        // Use in-memory history (no DB re-fetch) — strip display-only fields
+        const historyMsgs = prevMessages.map(m => ({ role: m.role, content: m.content }));
         const imageContent = imageFiles.map(f => ({
           type: "image_url",
           image_url: { url: `data:${f.mimeType};base64,${f.base64}` },
@@ -393,9 +393,11 @@ export default function ChatPage() {
           });
         }
       } else {
-        // Text-only: normal chatStream
-        const history = await Messages.listByConversation(activeId);
-        const apiMessages = history.map(m => ({ role: m.role, content: m.content }));
+        // Use in-memory history + new user message (no DB re-fetch)
+        const apiMessages = [
+          ...prevMessages.map(m => ({ role: m.role, content: m.content })),
+          { role: "user", content: effectiveText },
+        ];
         for await (const delta of chatStream(apiMessages)) {
           fullResponse += delta;
           setMessages((prev) => {

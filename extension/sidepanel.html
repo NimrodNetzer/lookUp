@@ -789,6 +789,27 @@
     .flashcard.flipped .flashcard-back  { opacity: 1; transform: rotateY(0deg);   }
     .card-hint { font-size: 10px; color: #333; text-align: center; margin-top: 4px; }
 
+    /* ── AUDIO INPUT TOGGLE ─────────────────── */
+    .audio-input-toggle {
+      display: none; gap: 5px; padding: 0 2px 6px;
+    }
+    .audio-input-toggle.visible { display: flex; }
+    .ait-btn {
+      flex: 1; padding: 5px 0; font-size: 11px; font-family: inherit;
+      border-radius: 9px; border: 1px solid rgba(124,106,245,0.22);
+      background: rgba(20,20,32,0.6); color: #666;
+      cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .ait-btn.active {
+      background: rgba(124,106,245,0.18); color: #c0b8ff;
+      border-color: rgba(124,106,245,0.5);
+    }
+    .ait-hint {
+      font-size: 10px; color: #555; text-align: center;
+      padding: 0 2px 4px; display: none;
+    }
+    .ait-hint.visible { display: block; }
+
     /* ── CHAT INPUT BAR ──────────────────────── */
     .chat-input-bar {
       flex-shrink: 0; padding: 8px 8px 12px;
@@ -1198,6 +1219,12 @@
   <!-- CHAT INPUT BAR (bottom) -->
   <div class="chat-input-bar">
     <div class="attach-preview" id="attachPreview"></div>
+    <!-- shown only in audio mode -->
+    <div class="audio-input-toggle" id="audioInputToggle">
+      <button class="ait-btn active" id="aitChat">💬 Chat</button>
+      <button class="ait-btn" id="aitInstructions">🎙 Instructions</button>
+    </div>
+    <div class="ait-hint" id="aitHint">Will send with the recording when you stop</div>
     <div class="chat-input-wrap">
       <button class="attach-btn" id="attachBtn" title="Attach image or file">＋</button>
       <input type="file" id="attachFileInput" accept="image/*,.pdf,.pptx,.ppt,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.yaml,.yml" multiple style="display:none" />

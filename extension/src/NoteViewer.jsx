@@ -153,15 +153,18 @@ export default function NoteViewer({ filename, onBack }) {
     setSaving(true);
     try {
       await Notes.save(filename, {
-        title:     editTitle.trim() || note.title,
-        mode:      note.mode,
-        folder_id: note.folder_id ?? null,
-        tags:      note.tags ?? [],
-        createdAt: note.createdAt,
+        title:           editTitle.trim() || note.title,
+        mode:            note.mode,
+        folder_id:       note.folder_id ?? null,
+        tags:            note.tags ?? [],
+        createdAt:       note.createdAt,
+        conversation_id: note.conversation_id ?? undefined,
       }, editContent);
       const updated = await Notes.get(filename);
       setNote(updated);
       setEditing(false);
+      // Notify other open views (LearningHub, TodayStrip) that this note changed
+      try { new BroadcastChannel("lookup-data").postMessage({ type: "notes-updated" }); } catch {}
     } catch {}
     setSaving(false);
   }

@@ -320,6 +320,7 @@ export const Notes = {
       createdAt: meta.createdAt ?? now,
       updatedAt: now,
       modified: now,
+      ...(meta.conversation_id != null && { conversation_id: meta.conversation_id }),
       ...(cards !== null && { cards }),
     };
     await req2p(t.store("notes").put(record));
@@ -388,7 +389,7 @@ export const Notes = {
       .join("\n\n---\n\n");
     const merged = await Notes.save(
       newFilename,
-      { title: newTitle, type: "note", createdAt: Date.now() },
+      { title: newTitle, mode: "chat", createdAt: Date.now() },
       combined
     );
     await Promise.all(filenames.map((f) => Notes.delete(f)));

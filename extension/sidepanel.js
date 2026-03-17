@@ -11,6 +11,10 @@ const sessionFinish    = document.getElementById("sessionFinish");
 const sessionCancel    = document.getElementById("sessionCancel");
 const audioBar         = document.getElementById("audioBar");
 const stopAudio        = document.getElementById("stopAudio");
+const audioInputToggle = document.getElementById("audioInputToggle");
+const aitChat          = document.getElementById("aitChat");
+const aitInstructions  = document.getElementById("aitInstructions");
+const aitHint          = document.getElementById("aitHint");
 const recTimer         = document.getElementById("recTimer");
 const resultArea       = document.getElementById("resultArea");
 const statusDot        = document.getElementById("statusDot");
@@ -55,6 +59,8 @@ const micPermDismiss   = document.getElementById("micPermDismiss");
 
 // --- State ---
 let selectedMode        = "summary";
+let audioInputMode      = "chat"; // "chat" | "instructions"
+let _pendingAudioNote   = "";    // snapshotted at stop-click so DOM changes can't lose it
 
 let selectedText        = "";
 let sessionFrames       = [];
@@ -364,6 +370,11 @@ dropdownItems.forEach((item) => {
     if (audioBar?.classList.contains("active")) return;
 
     selectedMode = item.dataset.mode;
+    if (selectedMode !== "audio") {
+      audioInputMode = "chat";
+      aitChat.classList.add("active");
+      aitInstructions.classList.remove("active");
+    }
     chrome.storage.local.set({ savedMode: selectedMode });
 
     modeTrigger.querySelector(".mode-icon").textContent = item.dataset.icon;
@@ -457,6 +468,8 @@ function isScreenReference(msg) {
 
 // ── Shared chat send logic ────────────────────────────────────────────────────
 async function sendChatMessage() {
+  // In instructions mode while recording is active — block send, instructions go with the audio
+  if (audioInputMode === "instructions" && audioBar?.classList.contains("active")) return;
   const message = titleInput.value.trim();
   if (!message && attachedFiles.length === 0) { captureBtn.click(); return; }
 
@@ -1637,6 +1650,7 @@ async function startAudioCapture() {
     recSeconds = 0;
     document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
     audioBar.classList.add("active");
+    if (audioInputMode === "instructions") aitHint.classList.add("visible");
     timerInterval = setInterval(() => {
       recSeconds++;
       const m = Math.floor(recSeconds / 60);
@@ -1645,10 +1659,16 @@ async function startAudioCapture() {
     }, 1000);
   } catch (err) {
     const isChromePage = err.message.includes("not been invoked") || err.message.includes("cannot be captured") || err.message.includes("activeTab");
-    showError(isChromePage
-      ? "Can't record audio on this page. Navigate to a regular website first."
-      : err.message);
-    captureBtn.disabled = false;
+    if (isChromePage) {
+      // Tab audio is blocked on this page — auto-fall back to mic
+      avOptMic.classList.add("active");
+      avOptAudio.classList.remove("active");
+      chrome.storage.local.set({ savedAudioSrc: "mic" });
+      startMicCapture();
+    } else {
+      showError(err.message);
+      captureBtn.disabled = false;
+    }
   }
 }
 
@@ -1743,6 +1763,7 @@ async function startMicCapture() {
     recSeconds = 0;
     document.getElementById("audioBarLabel").textContent = "Recording microphone…";
     audioBar.classList.add("active");
+    if (audioInputMode === "instructions") aitHint.classList.add("visible");
     timerInterval = setInterval(() => {
       recSeconds++;
       const m = Math.floor(recSeconds / 60);
@@ -1756,8 +1777,12 @@ async function startMicCapture() {
 }
 
 stopAudio.addEventListener("click", () => {
+  // Snapshot instructions NOW before anything can clear the input
+  _pendingAudioNote = audioInputMode === "instructions" ? titleInput.value.trim() : "";
+  if (_pendingAudioNote) titleInput.value = "";
   clearInterval(timerInterval);
   audioBar.classList.remove("active");
+  aitHint.classList.remove("visible");
   document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
   showSpinner("Transcribing audio with Whisper…");
   sendMessageSafe({ type: "stopRecording" }).catch(() => {});
@@ -1772,8 +1797,8 @@ async function finishAudio() {
 
     const chunks = buffers.map(buf => new Blob([buf], { type: blobType }));
     const blob = new Blob(chunks, { type: blobType });
-    const userNote = titleInput.value.trim();
-    if (userNote) titleInput.value = "";
+    const userNote = _pendingAudioNote;
+    _pendingAudioNote = "";
 
     const audioMode = `audio-${selectedMode}`;
     let { markdown } = await transcribeAndSummarize(blob, selectedMode, userNote, chunks);
@@ -1825,11 +1850,34 @@ function resetCaptureBtn() {
 
 function updateInputPlaceholder() {
   if (selectedMode === "audio") {
-    titleInput.placeholder = "Instructions for AI, e.g. 'explain deeply' or 'just transcribe'…";
+    audioInputToggle.classList.add("visible");
+    if (audioInputMode === "instructions") {
+      titleInput.placeholder = "Write instructions for the audio…";
+    } else {
+      titleInput.placeholder = "Ask about this screen…";
+    }
   } else {
+    audioInputToggle.classList.remove("visible");
+    aitHint.classList.remove("visible");
     titleInput.placeholder = "Ask about this screen…";
   }
 }
+
+aitChat.addEventListener("click", () => {
+  audioInputMode = "chat";
+  aitChat.classList.add("active");
+  aitInstructions.classList.remove("active");
+  aitHint.classList.remove("visible");
+  updateInputPlaceholder();
+});
+
+aitInstructions.addEventListener("click", () => {
+  audioInputMode = "instructions";
+  aitInstructions.classList.add("active");
+  aitChat.classList.remove("active");
+  aitHint.classList.toggle("visible", audioBar?.classList.contains("active"));
+  updateInputPlaceholder();
+});
 
 function appendCard(htmlStr, afterInsert) {
   document.getElementById(SPINNER_ID)?.remove();

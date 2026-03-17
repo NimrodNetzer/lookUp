@@ -120,12 +120,22 @@ async function chatCompletion(key, messages, temperature = 0.4) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    if (res.status === 429) throw new Error("Daily token limit reached. Your quota resets every 24 hours — try again tomorrow, or upgrade at console.groq.com.");
+    if (res.status === 429) throw new Error(groq429Message(err));
     throw new Error(err.error?.message ?? `Groq API error ${res.status}`);
   }
   const data = await res.json();
   if (data.usage?.total_tokens) await TokenUsage.add(data.usage.total_tokens);
   return data.choices[0].message.content;
+}
+
+function groq429Message(err) {
+  const code = err?.error?.code ?? "";
+  const msg  = err?.error?.message ?? "";
+  if (code === "rate_limit_exceeded" || msg.toLowerCase().includes("rate limit"))
+    return "Rate limit hit — you're sending too fast or the request is too large. Wait a moment and try again.";
+  if (code === "tokens_per_day_exceeded" || msg.toLowerCase().includes("day"))
+    return "Daily token quota reached. Your quota resets every 24 hours — try again tomorrow, or upgrade at console.groq.com.";
+  return msg || "Too many requests — wait a moment and try again (Groq 429).";
 }
 
 async function* chatCompletionStream(key, messages, temperature = 0.6) {
@@ -136,7 +146,7 @@ async function* chatCompletionStream(key, messages, temperature = 0.6) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    if (res.status === 429) throw new Error("Daily token limit reached. Your quota resets every 24 hours — try again tomorrow, or upgrade at console.groq.com.");
+    if (res.status === 429) throw new Error(groq429Message(err));
     throw new Error(err.error?.message ?? `Groq API error ${res.status}`);
   }
 
