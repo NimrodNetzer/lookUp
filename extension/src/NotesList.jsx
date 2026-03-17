@@ -26,6 +26,72 @@ function flattenFolders(nodes, depth = 0) {
   return nodes.flatMap((n) => [{ folder: n, depth }, ...flattenFolders(n.children ?? [], depth + 1)]);
 }
 
+// ── Filter dropdown ───────────────────────────────────────────────────────────
+const FILTER_OPTIONS = [
+  { value: "today", label: "Today" },
+  { value: "week",  label: "This week" },
+  { value: "month", label: "This month" },
+  { value: "all",   label: "All time" },
+  { value: "range", label: "📅 Custom range" },
+];
+
+function FilterDropdown({ value, showRange, onChange, onToggleRange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const activeLabel = showRange
+    ? "📅 Custom range"
+    : (FILTER_OPTIONS.find((o) => o.value === value)?.label ?? "All time");
+
+  function handleSelect(opt) {
+    setOpen(false);
+    if (opt.value === "range") { onToggleRange(true); }
+    else { onToggleRange(false); onChange(opt.value); }
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={clsx(
+          "flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full border transition-colors",
+          open || showRange || value !== "all"
+            ? "bg-accent/20 border-accent/50 text-accent"
+            : "border-border text-muted hover:border-accent/40 hover:text-text"
+        )}
+      >
+        {activeLabel}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+          className={clsx("transition-transform duration-150", open ? "rotate-180" : "")}>
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute top-full mt-1.5 left-0 z-50 bg-surface border border-border rounded-xl shadow-2xl overflow-hidden min-w-[150px] py-1">
+          {FILTER_OPTIONS.map((opt) => {
+            const isActive = opt.value === "range" ? showRange : (!showRange && value === opt.value);
+            return (
+              <button key={opt.value} onClick={() => handleSelect(opt)}
+                className={clsx(
+                  "w-full text-left px-4 py-2 text-xs transition-colors",
+                  isActive ? "text-accent font-semibold bg-accent/10" : "text-text hover:bg-accent/10"
+                )}>
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Context menu ──────────────────────────────────────────────────────────────
 function ContextMenu({ note, x, y, folders, onClose, onStartRename, onAssign, onTogglePin }) {
   const [view, setView] = useState("menu");
@@ -300,19 +366,13 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote }) {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        {Object.entries(DATE_LABELS).map(([f, label]) => (
-          <button key={f} onClick={() => { setDateFilter(f); setShowRange(false); setRangeFrom(""); setRangeTo(""); }}
-            className={clsx("px-3 py-1 text-xs font-semibold rounded-full border transition-colors",
-              !showRange && dateFilter === f ? "bg-accent/20 border-accent/50 text-accent" : "border-border text-muted hover:border-accent/40 hover:text-text")}>
-            {label}
-          </button>
-        ))}
-        <button onClick={() => setShowRange((s) => !s)}
-          className={clsx("px-3 py-1 text-xs font-semibold rounded-full border transition-colors",
-            showRange ? "bg-accent/20 border-accent/50 text-accent" : "border-border text-muted hover:border-accent/40 hover:text-text")}>
-          📅 Range
-        </button>
+      <div className="flex items-center gap-2 mb-3">
+        <FilterDropdown
+          value={dateFilter}
+          showRange={showRange}
+          onChange={(f) => { setDateFilter(f); setRangeFrom(""); setRangeTo(""); }}
+          onToggleRange={(v) => { setShowRange(v); if (!v) { setRangeFrom(""); setRangeTo(""); } }}
+        />
         <button onClick={toggleSelectMode}
           className={clsx("px-3 py-1 text-xs font-semibold rounded-full border transition-colors",
             selectMode ? "bg-accent/20 border-accent/50 text-accent" : "border-border text-muted hover:border-accent/40 hover:text-text")}>

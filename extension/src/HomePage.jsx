@@ -1,27 +1,9 @@
 import { useEffect, useState } from "react";
-import { Notes } from "../storage.js";
 import LearningHub from "./LearningHub.jsx";
 import GlobalSearch from "./GlobalSearch.jsx";
 
-function StatPill({ icon, label, value }) {
-  return (
-    <div className="flex items-center gap-2 bg-surface border border-border rounded-xl px-4 py-2.5">
-      <span className="text-base leading-none">{icon}</span>
-      <div>
-        <p className="text-sm font-bold text-text leading-none">{value}</p>
-        <p className="text-xs text-muted mt-0.5">{label}</p>
-      </div>
-    </div>
-  );
-}
-
 export default function HomePage({ onOpenNote }) {
-  const [stats,       setStats]       = useState({ totalNotes: 0, streak: 0, thisWeek: 0 });
-  const [searchOpen,  setSearchOpen]  = useState(false);
-
-  useEffect(() => {
-    Notes.stats().then(setStats).catch(() => {});
-  }, []);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
     const handler = (e) => {
@@ -37,14 +19,14 @@ export default function HomePage({ onOpenNote }) {
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
-      <header className="mb-8 flex items-end gap-6">
+      <header className="mb-8 flex items-center gap-4">
         <div>
           <h1 className="text-3xl font-extrabold bg-gradient-to-r from-accent to-teal bg-clip-text text-transparent">
             LookUp
           </h1>
           <p className="text-muted text-sm mt-1">Your personal learning hub</p>
         </div>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto">
           <button
             onClick={() => setSearchOpen(true)}
             className="flex items-center gap-2 px-3 py-2 bg-surface border border-border rounded-xl text-sm text-muted hover:text-text hover:border-accent/40 transition-colors"
@@ -55,9 +37,6 @@ export default function HomePage({ onOpenNote }) {
             Search notes
             <span className="text-xs border border-border rounded px-1 py-0.5 font-mono opacity-60">⌘K</span>
           </button>
-          <StatPill icon="📚" label="Notes"  value={stats.totalNotes} />
-          <StatPill icon="🔥" label="Streak" value={`${stats.streak}d`} />
-          <StatPill icon="⚡" label="Week"   value={stats.thisWeek} />
         </div>
       </header>
 

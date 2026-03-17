@@ -310,6 +310,21 @@
 }
 .chat-dropdown-item:hover { background: rgba(124,106,245,0.12); color: #c0b8ff; }
 .chat-dropdown-item.active { color: #9d8cff; font-weight: 600; }
+.chat-dropdown-back {
+  background: none; border: none; color: #666; cursor: pointer; font-size: 12px;
+  padding: 0 4px 0 0; line-height: 1; transition: color 0.15s;
+}
+.chat-dropdown-back:hover { color: #9d8cff; }
+.chat-dropdown-hint {
+  font-size: 10px; color: #3a3a5c; padding: 0 10px 4px; line-height: 1.4;
+}
+.chat-dropdown-window { display: flex; align-items: center; gap: 8px; }
+.chat-dropdown-win-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: #3a3a6a; flex-shrink: 0;
+}
+.chat-dropdown-win-title {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px;
+}
 
 /* ── Mode badge in hint row ───────────────────────────────────────────────── */
 .chat-mode-badge {

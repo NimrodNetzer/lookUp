@@ -163,8 +163,12 @@ export default function ChatPage() {
   const [dragActive,     setDragActive]     = useState(false);
   const dragCounter                         = useRef(0);
 
-  // Input bar dropdown
+  // Input bar dropdown — capture wizard state machine
+  // captureStep: null | "pick-window" | "pick-action"
   const [dropdownOpen,   setDropdownOpen]   = useState(false);
+  const [captureStep,    setCaptureStep]    = useState(null);   // wizard step
+  const [captureWindows, setCaptureWindows] = useState([]);     // [{id, title}]
+  const [captureWinId,   setCaptureWinId]   = useState(null);  // selected windowId
   const [activeMode,     setActiveMode]     = useState("chat");
   const dropdownRef                         = useRef(null);
 
@@ -275,11 +279,47 @@ export default function ChatPage() {
     if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
   }
 
-  // ── Capture current tab ─────────────────────────────────────────────────────
-  async function captureCurrentTab() {
+  // ── Capture wizard ───────────────────────────────────────────────────────────
+  function closeDropdown() {
     setDropdownOpen(false);
+    setCaptureStep(null);
+    setCaptureWindows([]);
+    setCaptureWinId(null);
+  }
+
+  async function startCapture() {
     try {
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 85 });
+      const wins = await chrome.windows.getAll({ populate: true });
+      const normal = wins
+        .filter(w => w.type === "normal")
+        .map(w => ({
+          id: w.id,
+          title: w.tabs?.find(t => t.active)?.title ?? `Window ${w.id}`,
+          tabId: w.tabs?.find(t => t.active)?.id,
+        }));
+      if (normal.length <= 1) {
+        // Only one window — skip picker, go straight to action step
+        setCaptureWinId(normal[0]?.id ?? null);
+        setCaptureStep("pick-action");
+      } else {
+        setCaptureWindows(normal);
+        setCaptureStep("pick-window");
+      }
+    } catch (err) {
+      console.error("Could not list windows:", err);
+    }
+  }
+
+  function selectWindow(winId) {
+    setCaptureWinId(winId);
+    setCaptureStep("pick-action");
+  }
+
+  async function doCapture(mode) {
+    const winId = captureWinId;
+    closeDropdown();
+    try {
+      const dataUrl = await chrome.tabs.captureVisibleTab(winId, { format: "jpeg", quality: 85 });
       const base64 = dataUrl.split(",")[1];
       setAttachedFiles(prev => [...prev, {
         id: `${Date.now()}-cap`,
@@ -288,6 +328,11 @@ export default function ChatPage() {
         base64,
         isImage: true,
       }]);
+      if (mode !== "chat") {
+        setActiveMode(mode);
+        // Auto-send with mode prefix if user doesn't type anything
+      }
+      textareaRef.current?.focus();
     } catch (err) {
       console.error("Capture failed:", err);
     }
@@ -648,30 +693,57 @@ export default function ChatPage() {
               <div className="chat-dropdown-wrap" ref={dropdownRef}>
                 <button
                   className="chat-dropdown-btn"
-                  onClick={() => setDropdownOpen(o => !o)}
+                  onClick={() => { setDropdownOpen(o => !o); setCaptureStep(null); }}
                   title="Options"
                 >
                   ⋯
                 </button>
                 {dropdownOpen && (
                   <div className="chat-dropdown-menu">
-                    <div className="chat-dropdown-section">Mode</div>
-                    {MODES.map(m => (
-                      <button
-                        key={m.key}
-                        className={`chat-dropdown-item${activeMode === m.key ? " active" : ""}`}
-                        onClick={() => { setActiveMode(m.key); setDropdownOpen(false); }}
-                      >
-                        {activeMode === m.key ? "✓ " : "   "}{m.label}
+
+                    {/* ── Step: top level ─────────────────────────── */}
+                    {captureStep === null && (<>
+                      <button className="chat-dropdown-item" onClick={closeDropdown}>
+                        💬 Chat
                       </button>
-                    ))}
-                    <div className="chat-dropdown-divider" />
-                    <button className="chat-dropdown-item" onClick={captureCurrentTab}>
-                      📷 Capture tab
-                    </button>
-                    <button className="chat-dropdown-item" onClick={() => { fileInputRef.current?.click(); setDropdownOpen(false); }}>
-                      📎 Attach file
-                    </button>
+                      <div className="chat-dropdown-divider" />
+                      <button className="chat-dropdown-item" onClick={startCapture}>
+                        📷 Capture
+                      </button>
+                    </>)}
+
+                    {/* ── Step: pick window ───────────────────────── */}
+                    {captureStep === "pick-window" && (<>
+                      <div className="chat-dropdown-section">
+                        <button className="chat-dropdown-back" onClick={() => setCaptureStep(null)}>←</button>
+                        Select window
+                      </div>
+                      <div className="chat-dropdown-hint">Captures the active tab of each window</div>
+                      {captureWindows.map(w => (
+                        <button key={w.id} className="chat-dropdown-item chat-dropdown-window" onClick={() => selectWindow(w.id)}>
+                          <span className="chat-dropdown-win-dot" />
+                          <span className="chat-dropdown-win-title">{w.title}</span>
+                        </button>
+                      ))}
+                    </>)}
+
+                    {/* ── Step: pick action ───────────────────────── */}
+                    {captureStep === "pick-action" && (<>
+                      <div className="chat-dropdown-section">
+                        <button className="chat-dropdown-back" onClick={() => setCaptureStep(captureWindows.length > 1 ? "pick-window" : null)}>←</button>
+                        What to do with it?
+                      </div>
+                      <button className="chat-dropdown-item" onClick={() => doCapture("chat")}>
+                        💬 Chat about it
+                      </button>
+                      <div className="chat-dropdown-divider" />
+                      {MODES.filter(m => m.key !== "chat").map(m => (
+                        <button key={m.key} className="chat-dropdown-item" onClick={() => doCapture(m.key)}>
+                          {m.label}
+                        </button>
+                      ))}
+                    </>)}
+
                   </div>
                 )}
               </div>
