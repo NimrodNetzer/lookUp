@@ -11,6 +11,10 @@ const sessionFinish    = document.getElementById("sessionFinish");
 const sessionCancel    = document.getElementById("sessionCancel");
 const audioBar         = document.getElementById("audioBar");
 const stopAudio        = document.getElementById("stopAudio");
+const audioInputToggle = document.getElementById("audioInputToggle");
+const aitChat          = document.getElementById("aitChat");
+const aitInstructions  = document.getElementById("aitInstructions");
+const aitHint          = document.getElementById("aitHint");
 const recTimer         = document.getElementById("recTimer");
 const resultArea       = document.getElementById("resultArea");
 const statusDot        = document.getElementById("statusDot");
@@ -55,6 +59,8 @@ const micPermDismiss   = document.getElementById("micPermDismiss");
 
 // --- State ---
 let selectedMode        = "summary";
+let audioInputMode      = "chat"; // "chat" | "instructions"
+let _pendingAudioNote   = "";    // snapshotted at stop-click so DOM changes can't lose it
 
 let selectedText        = "";
 let sessionFrames       = [];
@@ -121,11 +127,30 @@ function applyLang() {
 // ── More-options dropdown ─────────────────────────────────────────────────────
 const DAILY_TOKEN_LIMIT = 500_000;
 
+// Live countdown interval handle — started when the info dropdown opens, cleared on close.
+let _usageCountdownInterval = null;
+
+function _updateResetHint() {
+  const usageResetHint = document.getElementById("usageResetHint");
+  if (!usageResetHint) return;
+  const now = new Date();
+  const msUntilMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
+  const hh = Math.floor(msUntilMidnight / 3600000);
+  const mm = Math.floor((msUntilMidnight % 3600000) / 60000);
+  usageResetHint.textContent = `Resets in ${hh}h ${mm}m`;
+}
+
+function _stopUsageCountdown() {
+  if (_usageCountdownInterval !== null) {
+    clearInterval(_usageCountdownInterval);
+    _usageCountdownInterval = null;
+  }
+}
+
 async function refreshUsageDisplay() {
   const usageCount   = document.getElementById("usageCount");
   const usageBarFill = document.getElementById("usageBarFill");
   const usageUpgrade = document.getElementById("usageUpgrade");
-  const usageResetHint = document.getElementById("usageResetHint");
   if (!usageCount) return;
 
   const { tokens } = await TokenUsage.get();
@@ -141,16 +166,13 @@ async function refreshUsageDisplay() {
 
   usageUpgrade.style.display = pct >= 0.85 ? "block" : "none";
 
-  // Show when the counter resets (midnight local time)
-  const now = new Date();
-  const msUntilMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
-  const hh = Math.floor(msUntilMidnight / 3600000);
-  const mm = Math.floor((msUntilMidnight % 3600000) / 60000);
-  usageResetHint.textContent = `Resets in ${hh}h ${mm}m`;
+  // Update reset hint immediately, then start live 1-minute countdown.
+  _updateResetHint();
 }
 
 moreBtn.addEventListener("click", (e) => {
   e.stopPropagation();
+  _stopUsageCountdown();
   infoDropdown.classList.remove("open");
   infoBtn.classList.remove("open");
   const open = moreDropdown.classList.toggle("open");
@@ -167,9 +189,17 @@ infoBtn.addEventListener("click", (e) => {
   renderSearchResults([]);
   const open = infoDropdown.classList.toggle("open");
   infoBtn.classList.toggle("open", open);
-  if (open) refreshUsageDisplay();
+  if (open) {
+    refreshUsageDisplay();
+    // Tick every 60s so the countdown stays accurate while the dropdown is open.
+    _stopUsageCountdown();
+    _usageCountdownInterval = setInterval(_updateResetHint, 60_000);
+  } else {
+    _stopUsageCountdown();
+  }
 });
 document.addEventListener("click", () => {
+  _stopUsageCountdown();
   moreDropdown.classList.remove("open");
   moreBtn.classList.remove("open");
   infoDropdown.classList.remove("open");
@@ -364,6 +394,11 @@ dropdownItems.forEach((item) => {
     if (audioBar?.classList.contains("active")) return;
 
     selectedMode = item.dataset.mode;
+    if (selectedMode !== "audio") {
+      audioInputMode = "chat";
+      aitChat.classList.add("active");
+      aitInstructions.classList.remove("active");
+    }
     chrome.storage.local.set({ savedMode: selectedMode });
 
     modeTrigger.querySelector(".mode-icon").textContent = item.dataset.icon;
@@ -457,6 +492,8 @@ function isScreenReference(msg) {
 
 // ── Shared chat send logic ────────────────────────────────────────────────────
 async function sendChatMessage() {
+  // In instructions mode while recording is active — block send, instructions go with the audio
+  if (audioInputMode === "instructions" && audioBar?.classList.contains("active")) return;
   const message = titleInput.value.trim();
   if (!message && attachedFiles.length === 0) { captureBtn.click(); return; }
 
@@ -1222,8 +1259,9 @@ async function processPendingCapture() {
 
   showSpinner("Processing shortcut capture…");
   try {
-    const mimeType = "image/jpeg";
-    const base64 = pendingCapture.dataUrl.split(",")[1];
+    // Downscale the shortcut capture (same as captureTab) — background.js stores
+    // full-resolution JPEG; resize to max 1280px longest side before sending to API.
+    const { base64, mimeType } = await resizeDataUrl(pendingCapture.dataUrl);
     const raw = await analyzeScreenshot(base64, mimeType, selectedMode);
     refreshUsageDisplay();
 
@@ -1299,30 +1337,40 @@ function sendMessageSafe(msg) {
   });
 }
 
-// ── Tab capture helper ──────────────────────────────────────────────────────
-// Uses null windowId (= current window) to avoid a tabs.query round-trip,
-// which would burn the user-gesture context before captureVisibleTab is called.
-async function captureTab() {
-  const dataUrl = await chrome.tabs.captureVisibleTab(targetWindowId, { format: "jpeg", quality: 85 });
-  // Downscale to max 960px wide — cuts image tokens ~75% with no visible quality loss for AI
+// ── Image resize helper ──────────────────────────────────────────────────────
+// Downscales a data URL to MAX_CAP px on the longest side, re-encodes as JPEG.
+// Used by both captureTab() and processPendingCapture() so all screenshot paths
+// go through the same resize before being sent to the Groq vision API.
+const MAX_CAP = 1280;
+
+function resizeDataUrl(dataUrl, quality = 0.85) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      const MAX_W = 960;
-      const scale = img.width > MAX_W ? MAX_W / img.width : 1;
+      const longest = Math.max(img.width, img.height);
+      const scale = longest > MAX_CAP ? MAX_CAP / longest : 1;
       const w = Math.round(img.width  * scale);
       const h = Math.round(img.height * scale);
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-      const resized = canvas.toDataURL("image/jpeg", 0.85);
-      const result = { base64: resized.replace(/^data:image\/jpeg;base64,/, ""), mimeType: "image/jpeg" };
-      _cachedScreenshot = result;
-      _cacheTs = Date.now();
-      resolve(result);
+      const resized = canvas.toDataURL("image/jpeg", quality);
+      resolve({ base64: resized.replace(/^data:image\/jpeg;base64,/, ""), mimeType: "image/jpeg" });
     };
     img.src = dataUrl;
   });
+}
+
+// ── Tab capture helper ──────────────────────────────────────────────────────
+// Uses null windowId (= current window) to avoid a tabs.query round-trip,
+// which would burn the user-gesture context before captureVisibleTab is called.
+async function captureTab() {
+  const dataUrl = await chrome.tabs.captureVisibleTab(targetWindowId, { format: "jpeg", quality: 85 });
+  // Downscale to max MAX_CAP px longest side — cuts image tokens vs. full HD with no AI quality loss
+  const result = await resizeDataUrl(dataUrl);
+  _cachedScreenshot = result;
+  _cacheTs = Date.now();
+  return result;
 }
 
 // ── Window picker ────────────────────────────────────────────────────────────
@@ -1637,6 +1685,7 @@ async function startAudioCapture() {
     recSeconds = 0;
     document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
     audioBar.classList.add("active");
+    if (audioInputMode === "instructions") aitHint.classList.add("visible");
     timerInterval = setInterval(() => {
       recSeconds++;
       const m = Math.floor(recSeconds / 60);
@@ -1645,10 +1694,16 @@ async function startAudioCapture() {
     }, 1000);
   } catch (err) {
     const isChromePage = err.message.includes("not been invoked") || err.message.includes("cannot be captured") || err.message.includes("activeTab");
-    showError(isChromePage
-      ? "Can't record audio on this page. Navigate to a regular website first."
-      : err.message);
-    captureBtn.disabled = false;
+    if (isChromePage) {
+      // Tab audio is blocked on this page — auto-fall back to mic
+      avOptMic.classList.add("active");
+      avOptAudio.classList.remove("active");
+      chrome.storage.local.set({ savedAudioSrc: "mic" });
+      startMicCapture();
+    } else {
+      showError(err.message);
+      captureBtn.disabled = false;
+    }
   }
 }
 
@@ -1743,6 +1798,7 @@ async function startMicCapture() {
     recSeconds = 0;
     document.getElementById("audioBarLabel").textContent = "Recording microphone…";
     audioBar.classList.add("active");
+    if (audioInputMode === "instructions") aitHint.classList.add("visible");
     timerInterval = setInterval(() => {
       recSeconds++;
       const m = Math.floor(recSeconds / 60);
@@ -1756,8 +1812,12 @@ async function startMicCapture() {
 }
 
 stopAudio.addEventListener("click", () => {
+  // Snapshot instructions NOW before anything can clear the input
+  _pendingAudioNote = audioInputMode === "instructions" ? titleInput.value.trim() : "";
+  if (_pendingAudioNote) titleInput.value = "";
   clearInterval(timerInterval);
   audioBar.classList.remove("active");
+  aitHint.classList.remove("visible");
   document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
   showSpinner("Transcribing audio with Whisper…");
   sendMessageSafe({ type: "stopRecording" }).catch(() => {});
@@ -1772,8 +1832,8 @@ async function finishAudio() {
 
     const chunks = buffers.map(buf => new Blob([buf], { type: blobType }));
     const blob = new Blob(chunks, { type: blobType });
-    const userNote = titleInput.value.trim();
-    if (userNote) titleInput.value = "";
+    const userNote = _pendingAudioNote;
+    _pendingAudioNote = "";
 
     const audioMode = `audio-${selectedMode}`;
     let { markdown } = await transcribeAndSummarize(blob, selectedMode, userNote, chunks);
@@ -1825,11 +1885,34 @@ function resetCaptureBtn() {
 
 function updateInputPlaceholder() {
   if (selectedMode === "audio") {
-    titleInput.placeholder = "Instructions for AI, e.g. 'explain deeply' or 'just transcribe'…";
+    audioInputToggle.classList.add("visible");
+    if (audioInputMode === "instructions") {
+      titleInput.placeholder = "Write instructions for the audio…";
+    } else {
+      titleInput.placeholder = "Ask about this screen…";
+    }
   } else {
+    audioInputToggle.classList.remove("visible");
+    aitHint.classList.remove("visible");
     titleInput.placeholder = "Ask about this screen…";
   }
 }
+
+aitChat.addEventListener("click", () => {
+  audioInputMode = "chat";
+  aitChat.classList.add("active");
+  aitInstructions.classList.remove("active");
+  aitHint.classList.remove("visible");
+  updateInputPlaceholder();
+});
+
+aitInstructions.addEventListener("click", () => {
+  audioInputMode = "instructions";
+  aitInstructions.classList.add("active");
+  aitChat.classList.remove("active");
+  aitHint.classList.toggle("visible", audioBar?.classList.contains("active"));
+  updateInputPlaceholder();
+});
 
 function appendCard(htmlStr, afterInsert) {
   document.getElementById(SPINNER_ID)?.remove();

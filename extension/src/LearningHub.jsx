@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Plus, Pencil, Trash2, Check, X, ChevronRight, MessageSquare } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, X, ChevronRight, MessageSquare, FilePlus, Pin, PinOff, FolderSymlink } from "lucide-react";
 import clsx from "clsx";
 import { Notes, Folders } from "../storage.js";
 import NotesList from "./NotesList.jsx";
@@ -64,6 +64,60 @@ function InlineInput({ initial = "", placeholder, onConfirm, onCancel }) {
       <button onClick={onCancel} className="text-muted hover:text-text shrink-0">
         <X className="w-3.5 h-3.5" />
       </button>
+    </div>
+  );
+}
+
+// ── New note modal ────────────────────────────────────────────────────────────
+function NewNoteModal({ onClose, onSaved }) {
+  const [title,   setTitle]   = useState("");
+  const [content, setContent] = useState("");
+  const [saving,  setSaving]  = useState(false);
+
+  async function handleSave() {
+    if (!title.trim() && !content.trim()) return;
+    setSaving(true);
+    try {
+      const ts   = new Date().toISOString().replace(/[:.]/g, "-");
+      const slug = (title.trim() || "note").toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 40);
+      await Notes.save(`${ts}_${slug}.md`, { title: title.trim() || "Untitled", mode: "chat" }, content);
+      onSaved();
+      onClose();
+    } catch {}
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <h2 className="text-sm font-bold text-text">New Note</h2>
+          <button onClick={onClose} className="text-muted hover:text-text transition-colors"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-5 flex flex-col gap-3">
+          <input
+            type="text" placeholder="Title…" value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+            autoFocus
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-muted outline-none focus:border-accent transition-colors"
+          />
+          <textarea
+            placeholder="Write your note… (markdown supported)"
+            value={content} onChange={(e) => setContent(e.target.value)}
+            rows={8}
+            onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-muted outline-none focus:border-accent transition-colors resize-none font-mono"
+          />
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-bg/40">
+          <button onClick={onClose} className="px-4 py-1.5 text-xs text-muted hover:text-text border border-border rounded-lg transition-colors">Cancel</button>
+          <button onClick={handleSave} disabled={saving || (!title.trim() && !content.trim())}
+            className="px-4 py-1.5 text-xs font-semibold bg-accent text-white rounded-lg hover:bg-accent/80 disabled:opacity-40 transition-colors">
+            {saving ? "Saving…" : "Save note"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -207,6 +261,73 @@ function FolderHeadline({ folder, showUnattached, activeType, visibleNotes, onDr
   );
 }
 
+// ── Strip context menu ────────────────────────────────────────────────────────
+function StripContextMenu({ note, x, y, folders, onClose, onTogglePin, onStartRename, onAssign }) {
+  const [view, setView] = useState("menu");
+  const ref = useRef(null);
+  const flatFolders = useMemo(() => flattenFolders(folders), [folders]);
+
+  useEffect(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) onClose(); }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  const [pos, setPos] = useState({ top: y, left: x });
+  useEffect(() => {
+    if (!ref.current) return;
+    const { width, height } = ref.current.getBoundingClientRect();
+    setPos({ top: Math.min(y, window.innerHeight - height - 8), left: Math.min(x, window.innerWidth - width - 8) });
+  }, [x, y, view]);
+
+  return (
+    <div ref={ref} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
+      className="bg-surface border border-border rounded-xl shadow-2xl overflow-hidden min-w-[190px]"
+      onContextMenu={(e) => e.preventDefault()}>
+      {view === "menu" ? (
+        <div className="py-1">
+          <button onClick={onTogglePin}
+            className="w-full text-left px-4 py-2.5 text-sm text-text hover:bg-accent/10 flex items-center gap-2.5 transition-colors">
+            {note.pinned ? <PinOff className="w-3.5 h-3.5 text-muted" /> : <Pin className="w-3.5 h-3.5 text-muted" />}
+            {note.pinned ? "Unpin" : "Pin to top"}
+          </button>
+          <button onClick={onStartRename}
+            className="w-full text-left px-4 py-2.5 text-sm text-text hover:bg-accent/10 flex items-center gap-2.5 transition-colors">
+            <Pencil className="w-3.5 h-3.5 text-muted" /> Rename
+          </button>
+          <button onClick={() => setView("folders")}
+            className="w-full text-left px-4 py-2.5 text-sm text-text hover:bg-accent/10 flex items-center gap-2.5 transition-colors">
+            <FolderSymlink className="w-3.5 h-3.5 text-muted" /> Assign to folder
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+            <button onClick={() => setView("menu")} className="text-muted hover:text-text text-sm px-0.5 transition-colors">←</button>
+            <span className="text-xs font-semibold text-muted uppercase tracking-widest">Assign to folder</span>
+          </div>
+          <div className="max-h-56 overflow-y-auto py-1">
+            <button onClick={() => onAssign(null)}
+              className={clsx("w-full text-left px-4 py-2 text-sm hover:bg-accent/10 transition-colors italic",
+                !note.folder_id ? "text-accent font-semibold" : "text-muted")}>
+              None (unattached)
+            </button>
+            {flatFolders.map(({ folder, depth }) => (
+              <button key={folder.id} onClick={() => onAssign(folder.id)}
+                style={{ paddingLeft: `${16 + depth * 14}px` }}
+                className={clsx("w-full text-left text-sm py-2 pr-3 hover:bg-accent/10 transition-colors flex items-center gap-1.5",
+                  note.folder_id === folder.id ? "text-accent font-semibold" : "text-text")}>
+                📁 {folder.name}
+              </button>
+            ))}
+            {flatFolders.length === 0 && <p className="text-xs text-muted px-4 py-3">No folders yet</p>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Today strip ───────────────────────────────────────────────────────────────
 const GROUP_COLORS = {
   summary:   "bg-accent/20 text-accent border-accent/30",
@@ -222,8 +343,11 @@ const GROUP_ICONS = {
   session: "📚", audio: "🎙️", chat: "💬",
 };
 
-function TodayStrip({ notes, onOpenNote }) {
-  const [open, setOpen] = useState(true);
+function TodayStrip({ notes, onOpenNote, folders, noteActions }) {
+  const [open,             setOpen]             = useState(true);
+  const [ctxMenu,          setCtxMenu]          = useState(null);
+  const [renamingFilename, setRenamingFilename] = useState(null);
+
   const todayNotes = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -246,23 +370,55 @@ function TodayStrip({ notes, onOpenNote }) {
       {open && (
         <div className="border-t border-border divide-y divide-border/50">
           {todayNotes.map((note) => {
-            const modeKey = !note.mode ? "summary" : note.mode.startsWith("audio") ? "audio" : note.mode;
-            const color = GROUP_COLORS[modeKey] ?? GROUP_COLORS.summary;
-            const icon  = GROUP_ICONS[modeKey]  ?? "📄";
-            const ts    = note.modified ?? note.updatedAt ?? note.createdAt;
+            const modeKey   = !note.mode ? "summary" : note.mode.startsWith("audio") ? "audio" : note.mode;
+            const color     = GROUP_COLORS[modeKey] ?? GROUP_COLORS.summary;
+            const icon      = GROUP_ICONS[modeKey]  ?? "📄";
+            const ts        = note.modified ?? note.updatedAt ?? note.createdAt;
+            const isRenaming = renamingFilename === note.filename;
             return (
-              <button key={note.filename} onClick={() => onOpenNote(note.filename)}
-                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface/40 transition-colors text-left">
+              <div key={note.filename}
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, note }); }}
+                className="group flex items-center gap-3 px-4 py-2.5 hover:bg-surface/40 transition-colors">
                 <span className={clsx("text-xs px-1.5 py-0.5 rounded border leading-none shrink-0", color)}>{icon}</span>
-                <span className="text-sm text-text truncate flex-1">{note.title ?? note.filename}</span>
-                {note.pinned && <span className="text-accent text-xs shrink-0">📌</span>}
-                <span className="text-xs text-muted shrink-0">
-                  {ts ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
-                </span>
-              </button>
+                {isRenaming ? (
+                  <InlineInput
+                    initial={note.title ?? note.filename}
+                    placeholder="Note title…"
+                    onConfirm={(title) => { noteActions.rename(note, title); setRenamingFilename(null); }}
+                    onCancel={() => setRenamingFilename(null)}
+                  />
+                ) : (
+                  <button className="flex-1 min-w-0 text-left" onClick={() => onOpenNote(note.filename)}>
+                    <span className="text-sm text-text truncate block">{note.title ?? note.filename}</span>
+                  </button>
+                )}
+                {!isRenaming && (
+                  <>
+                    {note.pinned && <span className="text-accent text-xs shrink-0">📌</span>}
+                    <span className="text-xs text-muted shrink-0">
+                      {ts ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+                    </span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); noteActions.delete(note); }}
+                      title="Delete"
+                      className="opacity-0 group-hover:opacity-100 text-muted hover:text-red-400 transition-all shrink-0">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
+              </div>
             );
           })}
         </div>
+      )}
+      {ctxMenu && (
+        <StripContextMenu
+          note={ctxMenu.note} x={ctxMenu.x} y={ctxMenu.y} folders={folders}
+          onClose={() => setCtxMenu(null)}
+          onTogglePin={() => { noteActions.togglePin(ctxMenu.note); setCtxMenu(null); }}
+          onStartRename={() => { setRenamingFilename(ctxMenu.note.filename); setCtxMenu(null); }}
+          onAssign={(folderId) => { noteActions.assign(ctxMenu.note, folderId); setCtxMenu(null); }}
+        />
       )}
     </div>
   );
@@ -277,6 +433,7 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
   const [addingFolder,    setAddingFolder]    = useState(false);
   const [showUnattached,  setShowUnattached]  = useState(false);
   const [toast,           setToast]           = useState(null);
+  const [newNoteOpen,     setNewNoteOpen]     = useState(false);
   const toastTimer = useRef(null);
 
   const fetchFolders = useCallback(async () => {
@@ -334,6 +491,13 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
   const folderPath     = useMemo(() => activeFolderId !== null ? getFolderPath(folders, activeFolderId) : [], [folders, activeFolderId]);
   const parentFolderId = folderPath.length >= 2 ? folderPath[folderPath.length - 2].id : null;
   const visibleNotes   = useMemo(() => activeType !== null ? showingNotes.filter((n) => getTypeKey(n.mode) === activeType) : showingNotes, [showingNotes, activeType]);
+
+  const noteActions = {
+    togglePin: async (note) => { try { await Notes.updateMeta(note.filename, { pinned: !note.pinned }); refresh(); } catch {} },
+    rename:    async (note, title) => { try { await Notes.updateMeta(note.filename, { title }); refresh(); } catch {} },
+    assign:    async (note, folderId) => { try { await Notes.updateMeta(note.filename, { folder_id: folderId }); refresh(); } catch {} },
+    delete:    async (note) => { try { await Notes.delete(note.filename); refresh(); } catch {} },
+  };
 
   function showToast(msg) {
     setToast(msg);
@@ -455,6 +619,10 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
             </nav>
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={() => setNewNoteOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white border border-accent rounded-lg transition-colors text-xs font-semibold hover:bg-accent/80">
+              <FilePlus className="w-3.5 h-3.5" /> New note
+            </button>
             <button onClick={() => setAddingFolder((v) => !v)}
               className={clsx("flex items-center gap-1.5 px-3 py-1.5 bg-surface border rounded-lg transition-colors text-xs font-semibold",
                 addingFolder ? "border-accent/50 text-accent" : "border-border text-muted hover:border-accent/50 hover:text-accent")}>
@@ -474,7 +642,9 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
           </div>
         )}
 
-        {activeFolderId === null && <TodayStrip notes={localNotes} onOpenNote={onOpenNote} />}
+        {activeFolderId === null && (
+          <TodayStrip notes={localNotes} onOpenNote={onOpenNote} folders={folders} noteActions={noteActions} />
+        )}
 
         {displayFolders.length > 0 && (
           <div>
@@ -524,6 +694,7 @@ export default function LearningHub({ onOpenNote, onOpenChat }) {
           )}
         </div>
       </main>
+      {newNoteOpen && <NewNoteModal onClose={() => setNewNoteOpen(false)} onSaved={refresh} />}
     </div>
   );
 }

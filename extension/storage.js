@@ -112,6 +112,15 @@ export const Settings = {
     return key != null && key.trim().length > 0;
   },
 
+  async getChatMode() {
+    const result = await chrome.storage.local.get("chatMode");
+    return result.chatMode ?? "chat";
+  },
+
+  async setChatMode(mode) {
+    await chrome.storage.local.set({ chatMode: mode });
+  },
+
   async getCommandLog() {
     const result = await chrome.storage.local.get("commandLog");
     return result.commandLog ?? [];
@@ -320,6 +329,7 @@ export const Notes = {
       createdAt: meta.createdAt ?? now,
       updatedAt: now,
       modified: now,
+      ...(meta.conversation_id != null && { conversation_id: meta.conversation_id }),
       ...(cards !== null && { cards }),
     };
     await req2p(t.store("notes").put(record));
@@ -388,7 +398,7 @@ export const Notes = {
       .join("\n\n---\n\n");
     const merged = await Notes.save(
       newFilename,
-      { title: newTitle, type: "note", createdAt: Date.now() },
+      { title: newTitle, mode: "chat", createdAt: Date.now() },
       combined
     );
     await Promise.all(filenames.map((f) => Notes.delete(f)));
