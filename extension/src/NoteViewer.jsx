@@ -1,9 +1,10 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { Notes } from "../storage.js";
+import { transcribeOnly } from "../groq-client.js";
 import FlashcardViewer from "./FlashcardViewer.jsx";
 
 const modeBadge = {
@@ -137,7 +138,81 @@ export default function NoteViewer({ filename, onBack }) {
   const [editTitle,   setEditTitle]   = useState("");
   const [editContent, setEditContent] = useState("");
   const [saving,      setSaving]      = useState(false);
-  const textareaRef = useRef(null);
+  const [menuOpen,    setMenuOpen]    = useState(false);
+  const [recState,    setRecState]    = useState("idle"); // idle | recording | transcribing
+  const [recSeconds,  setRecSeconds]  = useState(0);
+  const [recToast,    setRecToast]    = useState(null);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef        = useRef([]);
+  const timerRef         = useRef(null);
+  const menuRef          = useRef(null);
+  const textareaRef      = useRef(null);
+
+  useEffect(() => {
+    function handler(e) { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const stopTimer = useCallback(() => { clearInterval(timerRef.current); }, []);
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunksRef.current = [];
+      const mr = new MediaRecorder(stream);
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        stopTimer();
+        setRecState("transcribing");
+        try {
+          const blob       = new Blob(chunksRef.current, { type: "audio/webm" });
+          const transcript = await transcribeOnly(blob);
+          if (transcript?.trim()) {
+            const ts      = new Date().toLocaleString();
+            const append  = `\n\n---\n\n🎙 *Recorded — ${ts}*\n\n${transcript.trim()}`;
+            const current = (await Notes.get(filename))?.content ?? "";
+            await Notes.save(filename, {
+              title:           note.title,
+              mode:            note.mode,
+              folder_id:       note.folder_id ?? null,
+              tags:            note.tags ?? [],
+              createdAt:       note.createdAt,
+              conversation_id: note.conversation_id ?? undefined,
+            }, current + append);
+            const updated = await Notes.get(filename);
+            setNote(updated);
+            try { new BroadcastChannel("lookup-data").postMessage({ type: "notes-updated" }); } catch {}
+            setRecToast("✓ Recording appended to note");
+          } else {
+            setRecToast("No speech detected.");
+          }
+        } catch (err) {
+          setRecToast("Transcription failed: " + (err.message ?? "unknown error"));
+        }
+        setRecState("idle");
+        setRecSeconds(0);
+        setTimeout(() => setRecToast(null), 3500);
+      };
+      mediaRecorderRef.current = mr;
+      mr.start();
+      setRecState("recording");
+      setRecSeconds(0);
+      timerRef.current = setInterval(() => setRecSeconds((s) => s + 1), 1000);
+    } catch {
+      setRecToast("Microphone access denied.");
+      setTimeout(() => setRecToast(null), 3000);
+    }
+  }
+
+  function stopRecording() {
+    mediaRecorderRef.current?.stop();
+  }
+
+  function fmtTime(s) {
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
 
   useEffect(() => {
     if (!filename) { setNotFound(true); return; }
@@ -213,43 +288,31 @@ export default function NoteViewer({ filename, onBack }) {
 
   return (
     <main className="max-w-2xl mx-auto px-5 py-8">
+      {recToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-surface border border-border rounded-xl px-5 py-2.5 text-sm text-text shadow-lg pointer-events-none">
+          {recToast}
+        </div>
+      )}
       <div className="sticky top-0 z-20 -mx-5 px-5 py-3 mb-6 print:hidden pointer-events-none">
         <div className="flex items-center justify-between max-w-2xl mx-auto pointer-events-auto">
         <button onClick={onBack} className="text-sm text-accent hover:underline drop-shadow-sm">← Back to notes</button>
         <div className="flex items-center gap-2">
-          {note.mode === "chat" && !editing && (
-            <button
-              onClick={startEditing}
-              className="flex items-center gap-1.5 text-xs text-muted hover:text-accent border border-border hover:border-accent/40 px-3 py-1.5 rounded-lg transition-colors"
-              title="Edit note"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
-              Edit
+          {/* Active recording states — always visible */}
+          {recState === "recording" && (
+            <button onClick={stopRecording}
+              className="flex items-center gap-2 text-xs font-semibold text-pink-400 border border-pink-400/40 bg-pink-500/10 px-3 py-1.5 rounded-lg transition-colors hover:bg-pink-500/20">
+              <span className="w-2 h-2 rounded-full bg-pink-400 animate-pulse" />
+              {fmtTime(recSeconds)} · Stop
             </button>
           )}
-          {!editing && (
-            <>
-              <button
-                onClick={() => downloadNote(note, filename)}
-                className="text-xs text-muted hover:text-text border border-border hover:border-accent/40 px-3 py-1.5 rounded-lg transition-colors"
-                title="Download as Markdown"
-              >
-                ↓ Export .md
-              </button>
-              <button
-                onClick={() => window.print()}
-                className="flex items-center gap-1.5 text-xs text-muted hover:text-text border border-border hover:border-accent/40 px-3 py-1.5 rounded-lg transition-colors"
-                title="Export to PDF"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>
-                </svg>
-                Export PDF
-              </button>
-            </>
+          {recState === "transcribing" && (
+            <span className="flex items-center gap-1.5 text-xs text-muted border border-border px-3 py-1.5 rounded-lg">
+              <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+              Transcribing…
+            </span>
           )}
+
+          {/* Edit mode save/cancel */}
           {editing && (
             <>
               <button onClick={cancelEdit} className="text-xs text-muted hover:text-text border border-border px-3 py-1.5 rounded-lg transition-colors">
@@ -258,6 +321,57 @@ export default function NoteViewer({ filename, onBack }) {
               <button onClick={saveEdit} disabled={saving}
                 className="text-xs font-semibold bg-accent text-white px-3 py-1.5 rounded-lg hover:bg-accent/80 disabled:opacity-50 transition-colors">
                 {saving ? "Saving…" : "Save"}
+              </button>
+            </>
+          )}
+
+          {/* User-created note: single ⋯ dropdown */}
+          {note.mode === "chat" && !editing && recState === "idle" && (
+            <div ref={menuRef} className="relative">
+              <button onClick={() => setMenuOpen((v) => !v)}
+                className="flex items-center gap-1.5 text-xs text-muted hover:text-text border border-border hover:border-accent/40 px-3 py-1.5 rounded-lg transition-colors">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg>
+                Options
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-surface border border-border rounded-xl shadow-2xl overflow-hidden min-w-[170px]">
+                  <button onClick={() => { startRecording(); setMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-text hover:bg-pink-500/10 hover:text-pink-400 transition-colors">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><line x1="12" y1="19" x2="12" y2="23" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><line x1="8" y1="23" x2="16" y2="23" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                    Record mic
+                  </button>
+                  <button onClick={() => { startEditing(); setMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-text hover:bg-accent/10 transition-colors">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    Edit
+                  </button>
+                  <div className="border-t border-border/60 mx-1" />
+                  <button onClick={() => { downloadNote(note, filename); setMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-text hover:bg-accent/10 transition-colors">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Export .md
+                  </button>
+                  <button onClick={() => { window.print(); setMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-text hover:bg-accent/10 transition-colors">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                    Export PDF
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* AI-generated notes: just the two export buttons */}
+          {note.mode !== "chat" && !editing && (
+            <>
+              <button onClick={() => downloadNote(note, filename)}
+                className="text-xs text-muted hover:text-text border border-border hover:border-accent/40 px-3 py-1.5 rounded-lg transition-colors">
+                ↓ Export .md
+              </button>
+              <button onClick={() => window.print()}
+                className="flex items-center gap-1.5 text-xs text-muted hover:text-text border border-border hover:border-accent/40 px-3 py-1.5 rounded-lg transition-colors">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                Export PDF
               </button>
             </>
           )}

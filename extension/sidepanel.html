@@ -300,9 +300,11 @@
     /* ── CONVERSATION TABS ───────────────────── */
     .conv-tabs-wrap {
       position: relative; flex-shrink: 0;
+      display: flex; align-items: stretch;
       border-bottom: 1px solid rgba(124,106,245,0.1);
     }
     .conv-tabs {
+      flex: 1; min-width: 0;
       display: flex; align-items: center; gap: 3px;
       padding: 5px 6px;
       overflow-x: auto; scrollbar-width: none;
@@ -1057,6 +1059,30 @@
     .setup-save-btn:hover    { opacity: 0.88; }
     .setup-save-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     .setup-error { font-size: 11px; color: #f87171; margin-top: 8px; text-align: center; min-height: 16px; }
+
+    /* ── Focus mode ────────────────────────────────────────────────── */
+    body.focus-mode header,
+    body.focus-mode .conv-tabs-wrap,
+    body.focus-mode .toolbar,
+    body.focus-mode .av-toggle-row,
+    body.focus-mode .chat-input-bar {
+      display: none !important;
+    }
+    #focusModeBtn {
+      flex-shrink: 0; background: none; border: none;
+      color: #444; font-size: 14px; cursor: pointer;
+      padding: 0 12.5px 0 7px; align-self: stretch;
+      border-left: 1px solid rgba(124,106,245,0.1);
+      transition: color 0.15s;
+    }
+    #focusModeBtn:hover { color: #a99df7; }
+    #exitFocusBtn {
+      position: fixed; top: 8px; right: 8px; z-index: 999;
+      background: rgba(124,106,245,0.18); border: 1px solid rgba(124,106,245,0.3);
+      color: #a99df7; border-radius: 6px; padding: 3px 8px;
+      font-size: 12px; cursor: pointer; display: none;
+    }
+    body.focus-mode #exitFocusBtn { display: block; }
   </style>
   <link rel="stylesheet" href="vendor/katex.min.css">
 </head>
@@ -1151,6 +1177,7 @@
       <button class="conv-tab-new" id="newConvBtn" title="New conversation">＋</button>
     </div>
     <div class="tabs-arrow tabs-arrow-right" id="tabsArrowRight">›</div>
+    <button id="focusModeBtn" title="Focus mode">⤢</button>
   </div>
 
   <!-- TOOLBAR -->
@@ -1261,6 +1288,9 @@
     <span id="audioBarLabel" style="font-size:11px;color:#888">Recording tab audio…</span>
     <button class="stop-btn" id="stopAudio">Stop &amp; Transcribe</button>
   </div>
+
+  <!-- EXIT FOCUS MODE BUTTON (fixed top-right, only visible in focus mode) -->
+  <button id="exitFocusBtn" title="Exit focus mode">✕ Exit focus</button>
 
   <!-- RESULT -->
   <div class="result-area" id="resultArea">

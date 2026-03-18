@@ -122,11 +122,48 @@ function NewNoteModal({ onClose, onSaved }) {
   );
 }
 
+// ── Folder context menu ───────────────────────────────────────────────────────
+function FolderContextMenu({ x, y, onRename, onDelete, onClose }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState({ top: y, left: x });
+
+  useEffect(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) onClose(); }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const { width, height } = ref.current.getBoundingClientRect();
+    setPos({ top: Math.min(y, window.innerHeight - height - 8), left: Math.min(x, window.innerWidth - width - 8) });
+  }, [x, y]);
+
+  return (
+    <div ref={ref} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
+      className="bg-surface border border-border rounded-xl shadow-2xl overflow-hidden min-w-[150px]"
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}>
+      <div className="py-1">
+        <button onClick={onRename}
+          className="w-full text-left px-4 py-2.5 text-sm text-text hover:bg-accent/10 flex items-center gap-2.5 transition-colors">
+          <Pencil className="w-3.5 h-3.5 text-muted" /> Rename
+        </button>
+        <button onClick={onDelete}
+          className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-2.5 transition-colors">
+          <Trash2 className="w-3.5 h-3.5" /> Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Folder card ───────────────────────────────────────────────────────────────
 function FolderCard({ folder, noteCount, subfolderCount, onSelect, onDropNote, onRefresh, isSubfolder }) {
   const [dragOver,   setDragOver]   = useState(false);
   const [renaming,   setRenaming]   = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [ctxMenu,    setCtxMenu]    = useState(null);
 
   async function handleRename(name) {
     await Folders.rename(folder.id, name);
@@ -140,6 +177,7 @@ function FolderCard({ folder, noteCount, subfolderCount, onSelect, onDropNote, o
   return (
     <div
       onClick={() => !renaming && !confirming && onSelect(folder.id)}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY }); }}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.getData("text/plain"); if (f) onDropNote(f, folder.id); }}
@@ -194,6 +232,14 @@ function FolderCard({ folder, noteCount, subfolderCount, onSelect, onDropNote, o
             <button onClick={() => setConfirming(false)} className="px-3 py-1 text-xs text-muted hover:text-text border border-border rounded-lg transition-colors">Cancel</button>
           </div>
         </div>
+      )}
+      {ctxMenu && (
+        <FolderContextMenu
+          x={ctxMenu.x} y={ctxMenu.y}
+          onRename={() => { setRenaming(true); setCtxMenu(null); }}
+          onDelete={() => { setConfirming(true); setCtxMenu(null); }}
+          onClose={() => setCtxMenu(null)}
+        />
       )}
     </div>
   );
@@ -269,6 +315,8 @@ export default function LearningHub({ onOpenNote, actionsRef }) {
   const [localNotes,      setLocalNotes]      = useState([]);
   const [addingFolder,    setAddingFolder]    = useState(false);
   const [showUnattached,  setShowUnattached]  = useState(false);
+  const [showAllNotes,    setShowAllNotes]    = useState(false);
+  const [sidebarOpen,     setSidebarOpen]     = useState(false);
   const [toast,           setToast]           = useState(null);
   const [newNoteOpen,     setNewNoteOpen]     = useState(false);
   const toastTimer = useRef(null);
@@ -304,11 +352,19 @@ export default function LearningHub({ onOpenNote, actionsRef }) {
   const contextNotes     = useMemo(() => activeFolderId !== null ? localNotes.filter((n) => n.folder_id === activeFolderId) : unattachedNotes, [localNotes, unattachedNotes, activeFolderId]);
   const showingNotes     = useMemo(() => activeFolderId !== null && showUnattached ? unattachedNotes : contextNotes, [activeFolderId, showUnattached, unattachedNotes, contextNotes]);
 
+  const allTypeCounts = useMemo(() => {
+    const counts = {};
+    for (const n of localNotes) { const k = getTypeKey(n.mode); counts[k] = (counts[k] ?? 0) + 1; }
+    return counts;
+  }, [localNotes]);
+
   const contextTypeCounts = useMemo(() => {
     const counts = {};
     for (const n of showingNotes) { const k = getTypeKey(n.mode); counts[k] = (counts[k] ?? 0) + 1; }
     return counts;
   }, [showingNotes]);
+
+  const activeTypeCounts = showAllNotes ? allTypeCounts : contextTypeCounts;
 
   const notesPerFolder = useMemo(() => {
     const counts = {};
@@ -327,7 +383,8 @@ export default function LearningHub({ onOpenNote, actionsRef }) {
   const displayFolders = activeFolderId === null ? folders : (activeFolder?.children ?? []);
   const folderPath     = useMemo(() => activeFolderId !== null ? getFolderPath(folders, activeFolderId) : [], [folders, activeFolderId]);
   const parentFolderId = folderPath.length >= 2 ? folderPath[folderPath.length - 2].id : null;
-  const visibleNotes   = useMemo(() => activeType !== null ? showingNotes.filter((n) => getTypeKey(n.mode) === activeType) : showingNotes, [showingNotes, activeType]);
+  const baseNotes      = useMemo(() => showAllNotes ? localNotes : showingNotes, [showAllNotes, localNotes, showingNotes]);
+  const visibleNotes   = useMemo(() => activeType !== null ? baseNotes.filter((n) => getTypeKey(n.mode) === activeType) : baseNotes, [baseNotes, activeType]);
 
   // Expose actions to parent (homepage header dropdown)
   useEffect(() => {
@@ -370,41 +427,67 @@ export default function LearningHub({ onOpenNote, actionsRef }) {
       {/* Sidebar */}
       <aside className="w-52 flex-shrink-0 sticky top-8 flex flex-col gap-3">
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-border">
-            <span className="text-xs font-semibold text-muted uppercase tracking-widest">
-              {activeFolderId !== null ? "Filter" : "Unsorted"}
-            </span>
-          </div>
-          <div className="flex flex-col py-1">
+          {/* Tab pills — always visible */}
+          <div className="flex gap-1.5 p-2">
             <button
-              onClick={() => { setActiveType(null); setShowUnattached(false); }}
-              className={clsx("text-left px-4 py-2 text-xs transition-colors flex items-center justify-between",
-                activeType === null && !showUnattached ? "bg-accent/15 text-accent font-semibold" : "text-muted hover:text-text hover:bg-surface/60")}>
-              <span>{activeFolderId !== null ? "All notes" : "All unsorted"}</span>
-              <span className="text-[10px]">{contextNotes.length}</span>
+              onClick={() => { setShowAllNotes(true); setActiveType(null); setShowUnattached(false); }}
+              className={clsx("flex-1 flex flex-col items-center py-1.5 px-1 rounded-lg text-[11px] font-semibold transition-colors border",
+                showAllNotes
+                  ? "bg-accent/15 text-accent border-accent/40"
+                  : "text-muted border-border hover:text-text hover:border-accent/30")}>
+              <span className="text-base leading-none mb-0.5">📋</span>
+              <span>All</span>
+              <span className="text-[10px] font-normal opacity-70">{localNotes.length}</span>
             </button>
-            {TYPE_GROUPS.map(({ key, label, icon }) => {
-              const count = contextTypeCounts[key] ?? 0;
-              if (count === 0) return null;
-              return (
-                <button key={key} onClick={() => { setActiveType(activeType === key ? null : key); setShowUnattached(false); }}
-                  className={clsx("text-left px-4 py-2 text-xs transition-colors flex items-center gap-2",
-                    activeType === key && !showUnattached ? "bg-accent/15 text-accent font-semibold" : "text-muted hover:text-text hover:bg-surface/60")}>
-                  <span>{icon}</span>
-                  <span className="flex-1 truncate">{label}</span>
-                  <span className="text-[10px]">{count}</span>
-                </button>
-              );
-            })}
-            {activeFolderId !== null && (
-              <>
-                <div className="mx-3 my-1 border-t border-border/50" />
-                <SidebarDropTarget label="Unsorted" count={unattachedNotes.length} active={showUnattached}
-                  onClick={() => { setShowUnattached((v) => !v); setActiveType(null); }}
-                  onDrop={(filename) => handleDropNote(filename, -1)} />
-              </>
-            )}
+            <button
+              onClick={() => { setShowAllNotes(false); setActiveType(null); setShowUnattached(false); }}
+              className={clsx("flex-1 flex flex-col items-center py-1.5 px-1 rounded-lg text-[11px] font-semibold transition-colors border",
+                !showAllNotes
+                  ? "bg-accent/15 text-accent border-accent/40"
+                  : "text-muted border-border hover:text-text hover:border-accent/30")}>
+              <span className="text-base leading-none mb-0.5">📂</span>
+              <span>{activeFolderId !== null ? "Folder" : "Unsorted"}</span>
+              <span className="text-[10px] font-normal opacity-70">{contextNotes.length}</span>
+            </button>
           </div>
+
+          {/* Type breakdown — toggle with chevron */}
+          {Object.values(activeTypeCounts).some(Boolean) && (
+            <>
+              <button
+                onClick={() => setSidebarOpen((v) => !v)}
+                className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] text-muted hover:text-text transition-colors border-t border-border/50">
+                <span className="uppercase tracking-widest font-semibold">By type</span>
+                <ChevronRight className={clsx("w-3 h-3 transition-transform", sidebarOpen ? "rotate-90" : "")} />
+              </button>
+              {sidebarOpen && (
+                <div className="flex flex-col pb-1">
+                  {TYPE_GROUPS.map(({ key, label, icon }) => {
+                    const count = activeTypeCounts[key] ?? 0;
+                    if (count === 0) return null;
+                    return (
+                      <button key={key}
+                        onClick={() => { setActiveType(activeType === key ? null : key); setShowUnattached(false); }}
+                        className={clsx("text-left px-3 py-1.5 text-xs transition-colors flex items-center gap-2",
+                          activeType === key ? "bg-accent/15 text-accent font-semibold" : "text-muted hover:text-text hover:bg-surface/60")}>
+                        <span>{icon}</span>
+                        <span className="flex-1 truncate">{label}</span>
+                        <span className="text-[10px]">{count}</span>
+                      </button>
+                    );
+                  })}
+                  {activeFolderId !== null && (
+                    <>
+                      <div className="mx-3 my-1 border-t border-border/50" />
+                      <SidebarDropTarget label="Unsorted" count={unattachedNotes.length} active={showUnattached}
+                        onClick={() => { setShowUnattached((v) => !v); setActiveType(null); setShowAllNotes(false); }}
+                        onDrop={(filename) => handleDropNote(filename, -1)} />
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {folders.length > 0 && (

@@ -253,7 +253,7 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote, limit
   const [actionError,      setActionError]      = useState(null);
   const [ctxMenu,          setCtxMenu]          = useState(null);
   const [renamingFilename, setRenamingFilename] = useState(null);
-  const [expanded,         setExpanded]         = useState(false);
+  const [visibleCount,     setVisibleCount]     = useState(limit ?? Infinity);
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
@@ -296,8 +296,8 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote, limit
     return sorted;
   }, [notes, dateFilter, sortMode, rangeFrom, rangeTo, showRange]);
 
-  const displayedNotes = limit && !expanded ? sortedNotes.slice(0, limit) : sortedNotes;
-  const hiddenCount = limit && !expanded ? Math.max(0, sortedNotes.length - limit) : 0;
+  const displayedNotes = sortedNotes.slice(0, visibleCount);
+  const hiddenCount    = Math.max(0, sortedNotes.length - visibleCount);
 
   function toggleNote(filename) {
     setSelected((prev) => { const next = new Set(prev); if (next.has(filename)) next.delete(filename); else next.add(filename); return next; });
@@ -446,16 +446,16 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote, limit
 
       {hiddenCount > 0 && (
         <button
-          onClick={() => setExpanded(true)}
+          onClick={() => setVisibleCount((v) => v + 5)}
           className="mt-2 w-full flex items-center justify-center gap-2 py-2 text-xs text-muted hover:text-accent border border-dashed border-border/60 hover:border-accent/40 rounded-xl transition-colors"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           {hiddenCount} more note{hiddenCount !== 1 ? "s" : ""}
         </button>
       )}
-      {expanded && limit && sortedNotes.length > limit && (
+      {limit && visibleCount > limit && (
         <button
-          onClick={() => setExpanded(false)}
+          onClick={() => setVisibleCount(limit)}
           className="mt-2 w-full flex items-center justify-center gap-1 py-2 text-xs text-muted hover:text-text border border-dashed border-border/60 hover:border-border rounded-xl transition-colors"
         >
           Show less

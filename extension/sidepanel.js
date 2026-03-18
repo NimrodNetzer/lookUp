@@ -2288,3 +2288,17 @@ function renderMarkdown(raw) {
 
   return out.join('').replace(/\x00B(\d+)\x00/g, (_, i) => blocks[+i]);
 }
+
+// ── Focus mode ────────────────────────────────────────────────────────────────
+(function initFocusMode() {
+  const KEY = "focusMode";
+  function setFocus(on) {
+    document.body.classList.toggle("focus-mode", on);
+    chrome.storage.local.set({ [KEY]: on });
+  }
+  // Restore saved state
+  chrome.storage.local.get(KEY, r => { if (r && r[KEY]) document.body.classList.add("focus-mode"); });
+  document.getElementById("focusModeBtn").addEventListener("click", () => setFocus(true));
+  document.getElementById("exitFocusBtn").addEventListener("click",  () => setFocus(false));
+})();
+
