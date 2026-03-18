@@ -31,7 +31,7 @@ A study assistant with two modes:
 - **Key files**:
   - `extension/storage.js` — all DB operations (Notes, Conversations, Messages, Folders, Settings)
   - `extension/groq-client.js` — direct Groq API calls, `chatStream()` async generator for SSE streaming
-  - `extension/src/` — React components (App, ChatPage, HomePage, NotesList, etc.)
+  - `extension/src/` — React components (see layout section for full list)
   - `extension/vite.config.js` — multi-page build (dashboard.html + chat.html → `built/`)
 - **Build output**: `extension/built/` — do NOT edit manually, always rebuild via Vite
 - **Notes field**: uses `mode` (not `type`), `modified` alias alongside `updatedAt`
@@ -77,25 +77,39 @@ cd gateway && npm run test:watch # watch mode
 
 ### Extension tests (`extension/tests/`)
 ```bash
-cd extension && npm test         # run all tests once
-cd extension && npm run test:watch
+cd extension && npm test             # run all unit tests once
+cd extension && npm run test:watch   # watch mode
+cd extension && npm run test:e2e     # Playwright e2e tests
+cd extension && npm run test:e2e:ui  # Playwright interactive UI
 ```
 | File | What it covers |
 |------|----------------|
 | `storage.test.js` | IndexedDB + chrome.storage (fake-indexeddb mock) |
 | `groq-client.test.js` | API calls, chatStream(), token tracking |
 | `components.test.jsx` | React components (Vitest + jsdom) |
+| `components-extended.test.jsx` | Additional component tests |
 | `noteviewer-parsing.test.js` | Markdown + math rendering pipeline |
 | `security.test.js` | API key handling, XSS, input sanitisation |
 | `setup.js` | Shared mock setup (chrome APIs, fetch, IndexedDB) |
+
+### E2E tests (`extension/e2e/`)
+Uses **Playwright** (`playwright.config.js`). Tests run against the built extension.
+| File | What it covers |
+|------|----------------|
+| `chat.test.js` | Chat page flows |
+| `dashboard.test.js` | Dashboard page flows |
+| `fixtures.js` | Shared Playwright fixtures |
 
 ### Run all tests
 ```bash
 # Gateway
 cd gateway && npm test
 
-# Extension
+# Extension (unit)
 cd extension && npm test
+
+# Extension (e2e)
+cd extension && npm run test:e2e
 ```
 
 Always run tests after touching `groq-client.js`, `storage.js`, `sidepanel.js`, gateway routes, or `db.js`.
@@ -207,24 +221,44 @@ Note: no `.env` needed in dist anymore — first-run setup screen handles API ke
 ```
 extension/
   manifest.json
-  sidepanel.html / sidepanel.js   ← capture UI (screenshots, audio, text)
+  sidepanel.html / sidepanel.js   ← capture UI (screenshots, audio, text, zoom, focus mode)
   storage.js                      ← IndexedDB + chrome.storage.local
   groq-client.js                  ← direct Groq API, chatStream() generator
+  mic-permission.html / mic-permission.js   ← mic permission prompt page
+  pdf-viewer.html / pdf-viewer.js           ← in-extension PDF viewer
   src/                            ← React source (do not reference directly from manifest)
-    App.jsx, ChatPage.jsx, HomePage.jsx, NotesList.jsx, ...
+    App.jsx                       ← root + routing
+    ChatPage.jsx                  ← conversation/chat UI
+    HomePage.jsx                  ← main dashboard/home
+    NotesList.jsx                 ← notes list component
+    NoteViewer.jsx                ← note detail/viewer
+    LearningHub.jsx               ← learning hub page
+    CommandChat.jsx               ← command/quick chat
+    GlobalSearch.jsx              ← cross-note search
+    FlashcardViewer.jsx           ← flashcard review UI
+    CosmicBg.jsx                  ← background animation
+    chat-main.jsx                 ← Vite entry for chat.html
+    dashboard-main.jsx            ← Vite entry for dashboard.html
     globals.css
   dashboard.html / chat.html      ← Vite entry points
   vite.config.js / tailwind.config.js / postcss.config.js / package.json
+  playwright.config.js            ← Playwright e2e config
   vendor/                         ← third-party JS bundles (committed to git)
     katex.min.js / katex.min.css / fonts/   ← KaTeX math rendering
     jszip.min.js                  ← ZIP export
     pdf.min.js / pdf.worker.min.js          ← PDF.js
-  tests/                          ← Vitest test suite
+  tests/                          ← Vitest unit test suite
+  e2e/                            ← Playwright e2e tests
+    chat.test.js / dashboard.test.js / fixtures.js
   built/                          ← Vite output (gitignored, must build before loading)
     dashboard.html
     chat.html
     assets/
 ```
+
+### Sidepanel Features
+- **Zoom controls**: Ctrl+wheel, Ctrl+±, Ctrl+0. Persisted via `Settings.setPreferences({ sidepanelZoom })`. Steps defined in `ZOOM_STEPS` with `BASE_ZOOM = 0.9`.
+- **Focus mode**: toggle via `#focusModeBtn` / `#exitFocusBtn`. Stored in `chrome.storage.local`. Applies `body.classList.toggle("focus-mode")`.
 
 ## Things to Avoid
 - Do NOT use `pkg` (Vercel's original) — it's abandoned. Use `@yao-pkg/pkg`
@@ -245,6 +279,19 @@ All declared permissions are actively used. Key ones:
 - `"offscreen"` — mic recording via offscreen document
 - `<all_urls>` host permission — required for content script (text selection on all pages) + `captureVisibleTab` on any tab. Must be justified in Web Store listing.
 
+### Web-Accessible Resources
+- `mic-permission.html` / `mic-permission.js` — mic permission prompt (opened as a tab)
+- `pdf-viewer.html` / `pdf-viewer.js` — PDF viewer page (opened as a tab)
+
 ## Next Planned Work
 1. **Chrome Web Store publish**: submit `extension/` zip for review
 2. **Auto-update banner**: gateway checks GitHub Releases on startup, shows "Update available" in the dashboard
+
+## Recently Shipped Features
+- **Zoom controls** in sidepanel (Ctrl+wheel / Ctrl+± / Ctrl+0), persisted to preferences
+- **Focus mode** in sidepanel — hides non-essential UI for distraction-free reading
+- **Playwright e2e tests** (`extension/e2e/`) covering chat and dashboard flows
+- **PDF viewer** (`pdf-viewer.html/js`) — in-extension PDF rendering via PDF.js
+- **FlashcardViewer**, **LearningHub**, **CommandChat**, **GlobalSearch** — new React pages
+- **Feedback & usage tracking** in ChatMenuDropdown
+- **Portfolio/contact links** in footer and navigation

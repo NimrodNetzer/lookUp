@@ -7,6 +7,18 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+
+function InlineMath({ text }: { text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={{ p: ({ children }) => <span>{children}</span> }}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+}
 import FlashcardViewer from "../../components/FlashcardViewer";
 import CosmicBg from "../../components/CosmicBg";
 
@@ -61,12 +73,12 @@ function QuizViewer({ pairs }: { pairs: { q: string; a: string }[] }) {
         <div key={i} className="border border-border rounded-xl p-4 bg-surface">
           <p className="font-semibold text-text mb-3">
             <span className="text-muted text-xs font-bold uppercase mr-2">Q{i + 1}</span>
-            {p.q}
+            <InlineMath text={p.q} />
           </p>
           {revealed.has(i) ? (
             <div className="border-t border-border pt-3 mt-1">
               <p className="text-xs font-bold uppercase text-muted mb-1">Answer</p>
-              <p className="text-sm text-text">{p.a}</p>
+              <p className="text-sm text-text"><InlineMath text={p.a} /></p>
             </div>
           ) : (
             <button

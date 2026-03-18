@@ -55,7 +55,7 @@ function renderMd(raw) {
   const blocks = [];
 
   // 1. Stash fenced code blocks (with hljs highlighting)
-  let text = raw.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+  let text = (raw ?? "").replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
     const l = lang.trim();
     let highlighted;
     try {
@@ -156,7 +156,11 @@ function renderMd(raw) {
 function parseFlashcards(content) {
   try {
     const parsed = JSON.parse(content);
-    if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.front !== undefined) return parsed;
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      parsed.every(c => c && typeof c.front === "string" && typeof c.back === "string")
+    ) return parsed;
   } catch {}
   return null;
 }
@@ -672,7 +676,7 @@ export default function ChatPage() {
     const fileContext = textFiles.map(f =>
       `\n\n[File: ${f.name}]\n${f.textContent}`
     ).join("");
-    const modePrefix = messages.length === 0 ? buildModePrefix(activeMode) : "";
+    const modePrefix = buildModePrefix(activeMode);
     const effectiveText = modePrefix + (text || "") + fileContext;
 
     // In-memory message for display (includes attachment metadata)
@@ -931,8 +935,8 @@ export default function ChatPage() {
 
           {/* ── Bottom: capture + mode ──────────────────────────────── */}
           <div className="chat-sidebar-bottom">
-            {/* Mode dropdown — only when a capture source is active */}
-            {captureSource && <div className="chat-mode-select" ref={modeDropRef}>
+            {/* Mode dropdown — always visible */}
+            <div className="chat-mode-select" ref={modeDropRef}>
               <button
                 className="chat-mode-trigger"
                 onClick={() => setModeDropOpen(o => !o)}
@@ -955,7 +959,7 @@ export default function ChatPage() {
                   ))}
                 </div>
               )}
-            </div>}
+            </div>
 
             {/* Compact capture source button */}
             <div className="chat-cap-row">
@@ -1131,7 +1135,7 @@ export default function ChatPage() {
                   />
                   <button
                     className="chat-send"
-                    onClick={send}
+                    onClick={() => send()}
                     disabled={loading || (!input.trim() && attachedFiles.length === 0 && !captureSource)}
                     aria-label="Send"
                   >↑</button>

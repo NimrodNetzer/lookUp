@@ -1,8 +1,23 @@
 "use client";
 
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 
 interface Card { front: string; back: string; }
+
+function CardText({ text }: { text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={{ p: ({ children }) => <span>{children}</span> }}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+}
 
 export default function FlashcardViewer({ cards }: { cards: Card[] }) {
   const [flipped, setFlipped] = useState<Set<number>>(new Set());
@@ -48,8 +63,8 @@ export default function FlashcardViewer({ cards }: { cards: Card[] }) {
               onClick={() => toggle(i)}
             >
               <div className="flip-card-inner">
-                <div className="flip-card-front text-sm">{card.front}</div>
-                <div className="flip-card-back text-sm">{card.back}</div>
+                <div className="flip-card-front text-sm"><CardText text={card.front} /></div>
+                <div className="flip-card-back text-sm"><CardText text={card.back} /></div>
               </div>
             </div>
             <p className="text-center text-xs text-muted mt-1.5">

@@ -1,4 +1,20 @@
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
+
+function CardText({ text }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={{ p: ({ children }) => <span>{children}</span> }}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+}
 
 export default function FlashcardViewer({ cards }) {
   const [flipped,  setFlipped]  = useState(new Set());
@@ -41,10 +57,10 @@ export default function FlashcardViewer({ cards }) {
               onClick={() => toggle(i)}
             >
               <div className="flip-card-front bg-surface border border-border text-sm cursor-pointer">
-                {card.front}
+                <CardText text={card.front} />
               </div>
               <div className="flip-card-back bg-accent/10 border border-accent/30 text-sm cursor-pointer">
-                {card.back}
+                <CardText text={card.back} />
               </div>
             </div>
           </div>

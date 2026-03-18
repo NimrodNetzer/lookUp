@@ -229,7 +229,7 @@ export async function analyzeScreenshot(base64Image, mimeType = "image/png", mod
     prompt = `Create a quiz based on the content visible in this screenshot. Generate between 2 and 8 questions — fewer if the content is brief, more if there is a lot to test. Test real understanding (not just recall). Mix explanation, application, and comparison questions.\n\nFormat each question exactly like this:\n1. [Question]\n**Answer:** [5–60 words — concise but complete]\n\n2. [Question]\n**Answer:** [5–60 words]${langNote}`;
   } else if (mode === "flashcard") {
     const langNote = _responseLanguage === "he" ? "\n\nכתוב את הכרטיסיות בעברית." : "";
-    prompt = `Generate flashcards from this screenshot. Create between 2 and 8 flashcards — fewer if the content is brief, more if there is a lot of material. Return ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]${langNote}`;
+    prompt = `Generate flashcards from this screenshot. Create between 2 and 8 flashcards — fewer if the content is brief, more if there is a lot of material. Return ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer in 25 words or fewer"}]${langNote}`;
   }
 
   const maxTok = { summary: 800, explain: 1200, quiz: 1000, flashcard: 600 }[mode] ?? 800;
@@ -319,7 +319,7 @@ export async function analyzeText(selectedText, mode = "summary") {
     summary:   "Summarize and organize this text for a student, using your structured summary format:",
     explain:   "Explain this text in depth as a patient tutor — motivate the topic, walk through concepts, use analogies, close with the key insight:",
     quiz:      `Generate a ${quizQuestionCount(selectedText)}-question quiz based on this text, testing real understanding. Format each question as:\n1. [Question]\n**Answer:** [5–60 words — concise but complete]\n\n2. [Question]\n**Answer:** [...]\nNo lengthy paragraphs.${langNote}`,
-    flashcard: `Generate exactly ${flashcardCount(selectedText)} flashcards from this text.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]`,
+    flashcard: `Generate exactly ${flashcardCount(selectedText)} flashcards from this text.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer in 25 words or fewer"}]`,
   };
   const instruction = instructions[mode] ?? instructions.summary;
   const maxTok = { summary: 800, explain: 1200, quiz: 1000, flashcard: 600 }[mode] ?? 800;
@@ -444,7 +444,7 @@ export async function transcribeAndSummarize(audioBlob, mode = "summary", userNo
     summary:   `${modePrompts.summary}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
     explain:   `${modePrompts.explain}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
     quiz:      `Generate a ${n}-question quiz from this transcript testing real understanding. Mix explanation, application, and comparison questions.\n\nFormat each question exactly like this:\n1. [Question]\n**Answer:** [5–60 words — concise but complete]\n\n2. [Question]\n**Answer:** [...]${langNote}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
-    flashcard: `Generate exactly ${flashcardCount(transcript)} flashcards from this transcript.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
+    flashcard: `Generate exactly ${flashcardCount(transcript)} flashcards from this transcript.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer in 25 words or fewer"}]${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
   };
 
   const audioMaxTok = { summary: 800, explain: 1200, quiz: 1000, flashcard: 600 }[mode] ?? 800;
