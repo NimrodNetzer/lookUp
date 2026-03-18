@@ -1,6 +1,104 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import LearningHub from "./LearningHub.jsx";
 import GlobalSearch from "./GlobalSearch.jsx";
+
+// ── Chat menu dropdown (AI usage · Project info · Contact) ───────────────────
+function ChatMenuDropdown({ onClose }) {
+  const [section,  setSection]  = useState(null); // null | "usage" | "feedback"
+  const [message,  setMessage]  = useState("");
+  const ref = useRef(null);
+  const { tokens, resetIn } = useTokenUsage();
+
+  const pct      = Math.min(tokens / DAILY_LIMIT, 1);
+  const used     = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
+  const remaining = Math.max(0, DAILY_LIMIT - tokens);
+  const captures  = Math.floor(remaining / AVG_TOKENS_PER_CAPTURE);
+  const warn      = pct >= 0.9;
+  const mid       = pct >= 0.7;
+  const barColor  = warn ? "#ef4444" : mid ? "#f59e0b" : "#7c6af5";
+
+  useEffect(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) onClose(); }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  function handleSend() {
+    if (!message.trim()) return;
+    const subject = encodeURIComponent("LookUp — Feedback");
+    const body    = encodeURIComponent(message.trim());
+    window.open(`mailto:nimrodnetzer@gmail.com?subject=${subject}&body=${body}`);
+    onClose();
+  }
+
+  function toggle(s) { setSection((v) => v === s ? null : s); }
+
+  return (
+    <div ref={ref}
+      className="absolute right-0 top-full mt-1.5 z-50 bg-surface border border-border rounded-xl shadow-2xl overflow-hidden min-w-[210px]"
+      style={{ fontFamily: "inherit" }}>
+
+      {/* AI usage */}
+      <button onClick={() => toggle("usage")}
+        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-text hover:bg-accent/10 transition-colors">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        AI usage today
+        <span className="ml-auto text-[10px] font-semibold" style={{ color: barColor }}>{used}</span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={section === "usage" ? "rotate-180 transition-transform" : "transition-transform"}><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      {section === "usage" && (
+        <div className="px-4 pb-3 bg-bg/40">
+          <div className="h-1.5 w-full bg-bg rounded-full overflow-hidden mb-2">
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct * 100}%`, background: barColor }} />
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted">{used} / 500k</span>
+            <span style={{ color: barColor }}>~{captures} left</span>
+          </div>
+          <p className="text-[10px] text-muted mt-1">Resets in {formatReset(resetIn)}</p>
+          {warn && <p className="text-[10px] text-red-400 mt-1">Almost out of daily tokens!</p>}
+        </div>
+      )}
+
+      <div className="border-t border-border/60" />
+
+      {/* Project info */}
+      <a href="https://look-up-gold.vercel.app" target="_blank" rel="noreferrer"
+        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-text hover:bg-accent/10 transition-colors"
+        style={{ textDecoration: "none" }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        Project info
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml-auto opacity-40"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </a>
+
+      <div className="border-t border-border/60" />
+
+      {/* Feedback */}
+      <button onClick={() => toggle("feedback")}
+        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-text hover:bg-accent/10 transition-colors">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Contact us
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`ml-auto ${section === "feedback" ? "rotate-180 transition-transform" : "transition-transform"}`}><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      {section === "feedback" && (
+        <div className="px-3 pb-3 flex flex-col gap-2 bg-bg/40">
+          <textarea
+            autoFocus
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Your message…"
+            rows={2}
+            className="w-full bg-bg border border-border rounded-lg px-2.5 py-1.5 text-xs text-text placeholder:text-muted outline-none focus:border-accent transition-colors resize-none"
+          />
+          <button onClick={handleSend} disabled={!message.trim()}
+            className="self-end px-2.5 py-1 text-[11px] font-semibold bg-accent text-white rounded-md hover:bg-accent/80 disabled:opacity-40 transition-colors">
+            Send
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const DAILY_LIMIT = 500_000;
 const AVG_TOKENS_PER_CAPTURE = 2200;
@@ -38,10 +136,8 @@ function useTokenUsage() {
 }
 
 function ActionsDropdown({ onSearch, hubActionsRef }) {
-  const [open, setOpen]     = useState(false);
-  const [showTokens, setShowTokens] = useState(false);
+  const [open, setOpen] = useState(false);
   const ref = useRef(null);
-  const { tokens, resetIn } = useTokenUsage();
 
   useEffect(() => {
     function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
@@ -49,15 +145,7 @@ function ActionsDropdown({ onSearch, hubActionsRef }) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const pct = Math.min(tokens / DAILY_LIMIT, 1);
-  const used = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
-  const remaining = Math.max(0, DAILY_LIMIT - tokens);
-  const captures = Math.floor(remaining / AVG_TOKENS_PER_CAPTURE);
-  const warn = pct >= 0.9;
-  const mid  = pct >= 0.7;
-  const barColor = warn ? "#ef4444" : mid ? "#f59e0b" : "#7c6af5";
-
-  function close() { setOpen(false); setShowTokens(false); }
+  function close() { setOpen(false); }
 
   return (
     <div ref={ref} className="relative">
@@ -100,31 +188,6 @@ function ActionsDropdown({ onSearch, hubActionsRef }) {
             </button>
           </div>
 
-          <div className="border-t border-border">
-            <button
-              onClick={() => setShowTokens((v) => !v)}
-              className="w-full text-left flex items-center gap-3 px-4 py-2.5 text-sm text-muted hover:text-text hover:bg-accent/10 transition-colors"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-              AI usage today
-              <span className="ml-auto text-[10px] font-semibold" style={{ color: barColor }}>{used}</span>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={showTokens ? "rotate-180 transition-transform" : "transition-transform"}><polyline points="6 9 12 15 18 9"/></svg>
-            </button>
-
-            {showTokens && (
-              <div className="px-4 pb-3 bg-bg/40">
-                <div className="h-1.5 w-full bg-bg rounded-full overflow-hidden mb-2">
-                  <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct * 100}%`, background: barColor }} />
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted">{used} / 500k</span>
-                  <span style={{ color: barColor }}>~{captures} left</span>
-                </div>
-                <p className="text-[10px] text-muted mt-1.5">Resets in {formatReset(resetIn)}</p>
-                {warn && <p className="text-[10px] text-red-400 mt-1">Almost out of daily tokens!</p>}
-              </div>
-            )}
-          </div>
         </div>
       )}
     </div>
@@ -132,7 +195,8 @@ function ActionsDropdown({ onSearch, hubActionsRef }) {
 }
 
 export default function HomePage({ onOpenNote }) {
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchOpen,    setSearchOpen]    = useState(false);
+  const [feedbackOpen,  setFeedbackOpen]  = useState(false);
   const hubActionsRef = useRef(null);
 
   useEffect(() => {
@@ -157,15 +221,27 @@ export default function HomePage({ onOpenNote }) {
           <p className="text-muted text-sm mt-0.5">Your personal learning hub</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={openChat}
-            className="flex items-center gap-2 px-3 py-2 bg-surface border border-border rounded-xl text-sm text-muted hover:text-text hover:border-accent/40 transition-colors"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-            Chat
-          </button>
+          <div className="relative flex">
+            <button
+              onClick={openChat}
+              className="flex items-center gap-2 px-3 py-2 bg-surface border border-border rounded-l-xl text-sm text-muted hover:text-text hover:border-accent/40 transition-colors border-r-0"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              Chat
+            </button>
+            <button
+              onClick={() => setFeedbackOpen((v) => !v)}
+              title="Feedback"
+              className={`flex items-center px-2 py-2 bg-surface border border-border rounded-r-xl text-sm transition-colors ${feedbackOpen ? "text-accent border-accent/40" : "text-muted hover:text-text hover:border-accent/40"}`}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            {feedbackOpen && <ChatMenuDropdown onClose={() => setFeedbackOpen(false)} />}
+          </div>
           <ActionsDropdown onSearch={() => setSearchOpen(true)} hubActionsRef={hubActionsRef} />
         </div>
       </header>

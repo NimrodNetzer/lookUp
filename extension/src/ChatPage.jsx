@@ -345,6 +345,7 @@ export default function ChatPage() {
   // Persistent mode (saved to storage)
   const [activeMode,     setActiveModeState] = useState("chat");
   const [modeDropOpen,   setModeDropOpen]   = useState(false);
+  const modeDropRef = useRef(null);
 
   // Persistent capture source for this conversation
   // null = no capture | { winId, title } = a selected window
@@ -353,6 +354,7 @@ export default function ChatPage() {
   // Capture card picker state (shown inside the sidebar card)
   const [pickerOpen,     setPickerOpen]     = useState(false);
   const [pickerWindows,  setPickerWindows]  = useState([]);
+  const pickerRef = useRef(null);
 
   const bottomRef   = useRef(null);
   const textareaRef = useRef(null);
@@ -589,6 +591,30 @@ export default function ChatPage() {
     e.preventDefault();
     setNoteCtxMenu({ x: e.clientX, y: e.clientY, note });
   }
+
+  // Close mode dropdown when clicking outside
+  useEffect(() => {
+    if (!modeDropOpen) return;
+    function handleClickOutside(e) {
+      if (modeDropRef.current && !modeDropRef.current.contains(e.target)) {
+        setModeDropOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [modeDropOpen]);
+
+  // Close picker when clicking outside
+  useEffect(() => {
+    if (!pickerOpen) return;
+    function handleClickOutside(e) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setPickerOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [pickerOpen]);
 
   // ── Capture source card ──────────────────────────────────────────────────────
   async function openPicker() {
@@ -906,7 +932,7 @@ export default function ChatPage() {
           {/* ── Bottom: capture + mode ──────────────────────────────── */}
           <div className="chat-sidebar-bottom">
             {/* Mode dropdown — only when a capture source is active */}
-            {captureSource && <div className="chat-mode-select">
+            {captureSource && <div className="chat-mode-select" ref={modeDropRef}>
               <button
                 className="chat-mode-trigger"
                 onClick={() => setModeDropOpen(o => !o)}
@@ -951,7 +977,7 @@ export default function ChatPage() {
 
             {/* Window picker */}
             {pickerOpen && (
-              <div className="chat-capture-picker">
+              <div className="chat-capture-picker" ref={pickerRef}>
                 <div className="chat-capture-picker-hint">Captures the active tab</div>
                 <button className="chat-capture-picker-item none" onClick={clearCapture}>⊘ No capture</button>
                 {pickerWindows.map(w => (

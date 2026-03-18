@@ -184,7 +184,7 @@
       border: 1px solid rgba(124,106,245,0.15);
     }
     .usage-inner {
-      position: relative; width: 100%; min-height: 90px;
+      position: relative; width: 100%; min-height: 68px;
       transition: transform 0.45s cubic-bezier(.4,0,.2,1);
       transform-style: preserve-3d;
       background: rgba(124,106,245,0.06); border-radius: 8px;
@@ -1069,11 +1069,6 @@
     <div class="header-actions">
       <button class="btn-info" id="infoBtn" title="Usage &amp; settings">ℹ</button>
       <div class="info-dropdown" id="infoDropdown">
-        <!-- Open full screen -->
-        <div class="more-item" id="moreFullscreenBtn">
-          <span class="more-icon">⛶</span> Open full screen
-        </div>
-        <div class="more-divider"></div>
         <!-- Language -->
         <div class="more-item" id="moreLang">
           <span class="more-icon">🌐</span> Language
@@ -1081,6 +1076,11 @@
             <span class="lang-toggle-opt active" id="langOptEN">EN</span>
             <span class="lang-toggle-opt" id="langOptHE">עב</span>
           </div>
+        </div>
+        <div class="more-divider"></div>
+        <!-- Open full screen -->
+        <div class="more-item" id="moreFullscreenBtn">
+          <span class="more-icon">⛶</span> Open full screen
         </div>
         <div class="more-divider"></div>
         <!-- Token usage flip card -->
@@ -1103,16 +1103,11 @@
             </div>
             <!-- BACK: upgrade info -->
             <div class="usage-face usage-back">
-              <div class="usage-back-title">⚡ Need more tokens?</div>
               <div class="usage-back-body">Free tier: <b>500k/day</b> via Groq. Need more? Upgrade your account.</div>
               <a class="usage-groq-btn" href="https://console.groq.com" target="_blank">Upgrade on Groq →</a>
             </div>
           </div>
         </div>
-        <div class="more-divider"></div>
-        <a class="more-item" id="moreProjectInfo" href="https://look-up-gold.vercel.app" target="_blank" style="text-decoration:none;color:inherit;">
-          <span class="more-icon">🌐</span> Project info
-        </a>
       </div>
       <button class="btn-more" id="moreBtn" title="More options">⋯</button>
       <div class="more-dropdown" id="moreDropdown">
