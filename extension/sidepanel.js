@@ -1,6 +1,7 @@
 import { Settings, Conversations, Messages, Notes, TokenUsage } from "./storage.js";
 import { analyzeScreenshot, analyzeMulti, analyzeText, transcribeAndSummarize, chatStream, verifyApiKey, analyzeWithQuestionStream, setResponseLanguage } from "./groq-client.js";
 
+
 // --- DOM refs ---
 const convTabs         = document.getElementById("convTabs");
 const newConvBtn       = document.getElementById("newConvBtn");
@@ -250,9 +251,78 @@ document.getElementById("moreFullscreenBtn").addEventListener("click", () => {
   chrome.windows.create({
     url: chrome.runtime.getURL("sidepanel.html"),
     type: "popup",
-    width: 420,
-    height: 800
+    state: "maximized",
   });
+});
+
+// ── Sidepanel zoom controls ───────────────────────────────────────────────────
+const ZOOM_STEPS = [0.7, 0.8, 0.9, 0.95, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
+const ZOOM_DEFAULT = 4; // index of 1.0
+const BASE_ZOOM = 0.9; // baked-in base scale so "100%" feels like 90% browser zoom
+let _zoomIdx = ZOOM_DEFAULT;
+
+async function initZoom() {
+  const prefs = await Settings.getPreferences();
+  const saved = prefs.sidepanelZoom;
+  if (saved) {
+    _zoomIdx = ZOOM_STEPS.indexOf(saved);
+    if (_zoomIdx === -1) _zoomIdx = ZOOM_DEFAULT;
+    applyZoom();
+  }
+}
+
+function applyZoom() {
+  const z = ZOOM_STEPS[_zoomIdx];
+  const actualZoom = BASE_ZOOM * z;
+  document.documentElement.style.zoom = actualZoom;
+  // Compensate height so body always fills the full viewport after scaling
+  document.documentElement.style.height = `calc(100vh / ${actualZoom})`;
+  document.getElementById("zoomLabel").textContent = Math.round(z * 100) + "%";
+  document.getElementById("zoomOut").disabled = _zoomIdx === 0;
+  document.getElementById("zoomIn").disabled  = _zoomIdx === ZOOM_STEPS.length - 1;
+}
+
+document.getElementById("zoomIn").addEventListener("click", async (e) => {
+  e.stopPropagation();
+  if (_zoomIdx < ZOOM_STEPS.length - 1) {
+    _zoomIdx++;
+    applyZoom();
+    await Settings.setPreferences({ sidepanelZoom: ZOOM_STEPS[_zoomIdx] });
+  }
+});
+document.getElementById("zoomOut").addEventListener("click", async (e) => {
+  e.stopPropagation();
+  if (_zoomIdx > 0) {
+    _zoomIdx--;
+    applyZoom();
+    await Settings.setPreferences({ sidepanelZoom: ZOOM_STEPS[_zoomIdx] });
+  }
+});
+
+initZoom();
+
+// Intercept Ctrl+wheel and Ctrl+±/0 so browser zoom doesn't bypass our system
+window.addEventListener("wheel", (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  if (e.deltaY < 0 && _zoomIdx < ZOOM_STEPS.length - 1) { _zoomIdx++; }
+  else if (e.deltaY > 0 && _zoomIdx > 0)                 { _zoomIdx--; }
+  applyZoom();
+  Settings.setPreferences({ sidepanelZoom: ZOOM_STEPS[_zoomIdx] });
+}, { passive: false });
+
+window.addEventListener("keydown", (e) => {
+  if (!e.ctrlKey) return;
+  if (e.key === "=" || e.key === "+" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (_zoomIdx < ZOOM_STEPS.length - 1) { _zoomIdx++; applyZoom(); Settings.setPreferences({ sidepanelZoom: ZOOM_STEPS[_zoomIdx] }); }
+  } else if (e.key === "-" || e.key === "ArrowDown") {
+    e.preventDefault();
+    if (_zoomIdx > 0) { _zoomIdx--; applyZoom(); Settings.setPreferences({ sidepanelZoom: ZOOM_STEPS[_zoomIdx] }); }
+  } else if (e.key === "0") {
+    e.preventDefault();
+    _zoomIdx = ZOOM_DEFAULT; applyZoom(); Settings.setPreferences({ sidepanelZoom: ZOOM_STEPS[_zoomIdx] });
+  }
 });
 
 langOptEN.addEventListener("click", async () => {

@@ -30,7 +30,7 @@ function buildSystemPrompt() {
   if (_responseLanguage === "he") {
     return SYSTEM_PROMPT + "\n\nIMPORTANT: Respond entirely in Hebrew (עברית). All explanations, headings, bullet points, and text must be in Hebrew only.";
   }
-  return SYSTEM_PROMPT;
+  return SYSTEM_PROMPT + "\n\nIMPORTANT: Respond entirely in English, regardless of the language of any content shown.";
 }
 
 // ─── Auth helper ─────────────────────────────────────────────────────────────
@@ -223,12 +223,13 @@ export async function analyzeScreenshot(base64Image, mimeType = "image/png", mod
     prompt += "\n\nכתוב את כל התשובה בעברית בלבד.";
   }
 
-  // For quiz/flashcard: use a fixed count and send image directly — avoids a double API call
+  // For quiz/flashcard: send image directly — avoids a double API call; adapt count to visible content
   if (mode === "quiz") {
     const langNote = _responseLanguage === "he" ? "\n\nכתוב את השאלות והתשובות בעברית. שמור על הפורמט המדויק: מספר ונקודה לשאלה, ו-**Answer:** לתשובה." : "";
-    prompt = `Create a 5-question quiz testing real understanding (not just recall). Mix explanation, application, and comparison questions.\n\nFormat each question exactly like this:\n1. [Question]\n**Answer:** [5–60 words — concise but complete]\n\n2. [Question]\n**Answer:** [5–60 words]${langNote}`;
+    prompt = `Create a quiz based on the content visible in this screenshot. Generate between 2 and 8 questions — fewer if the content is brief, more if there is a lot to test. Test real understanding (not just recall). Mix explanation, application, and comparison questions.\n\nFormat each question exactly like this:\n1. [Question]\n**Answer:** [5–60 words — concise but complete]\n\n2. [Question]\n**Answer:** [5–60 words]${langNote}`;
   } else if (mode === "flashcard") {
-    prompt = `Generate 5 flashcards from this screenshot.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]`;
+    const langNote = _responseLanguage === "he" ? "\n\nכתוב את הכרטיסיות בעברית." : "";
+    prompt = `Generate flashcards from this screenshot. Create between 2 and 8 flashcards — fewer if the content is brief, more if there is a lot of material. Return ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]${langNote}`;
   }
 
   const maxTok = { summary: 800, explain: 1200, quiz: 1000, flashcard: 600 }[mode] ?? 800;

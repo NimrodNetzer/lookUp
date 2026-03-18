@@ -24,11 +24,11 @@
       font-family: Inter, system-ui, sans-serif;
       background: var(--bg);
       color: var(--text);
-      height: 100vh;
+      height: 100%;
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      font-size: 105%;
+      font-size: 100%;
     }
 
     /* ── FUTURISTIC BACKGROUND ───────────────── */
@@ -265,6 +265,14 @@
     }
     .lang-toggle-opt.active { background: rgba(124,106,245,0.4); color: #e0daff; }
     .more-divider { height: 1px; background: rgba(124,106,245,0.12); margin: 4px 0; }
+    .zoom-controls { display: flex; align-items: center; gap: 4px; margin-left: 6px; }
+    .zoom-btn {
+      background: rgba(124,106,245,0.15); border: none; color: #ccc;
+      width: 20px; height: 20px; border-radius: 5px; cursor: pointer;
+      font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center;
+    }
+    .zoom-btn:hover { background: rgba(124,106,245,0.35); color: #fff; }
+    .zoom-label { font-size: 10px; color: #888; min-width: 30px; text-align: center; }
 
     /* Inline mic permission banner */
     .mic-perm-banner {
@@ -1104,9 +1112,15 @@
           </div>
         </div>
         <div class="more-divider"></div>
-        <!-- Open full screen -->
-        <div class="more-item" id="moreFullscreenBtn">
-          <span class="more-icon">⛶</span> Open full screen
+        <!-- Open full screen + zoom controls -->
+        <div class="more-item more-item-win" id="moreFullscreenRow">
+          <span class="more-icon">⛶</span>
+          <span id="moreFullscreenBtn" style="flex:1;cursor:pointer;">Open full screen</span>
+          <div class="zoom-controls" id="zoomControls">
+            <button class="zoom-btn" id="zoomOut" title="Zoom out">−</button>
+            <span class="zoom-label" id="zoomLabel">100%</span>
+            <button class="zoom-btn" id="zoomIn" title="Zoom in">+</button>
+          </div>
         </div>
         <div class="more-divider"></div>
         <!-- Token usage flip card -->

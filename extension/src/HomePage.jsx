@@ -4,8 +4,8 @@ import GlobalSearch from "./GlobalSearch.jsx";
 
 // ── Chat menu dropdown (AI usage · Project info · Contact) ───────────────────
 function ChatMenuDropdown({ onClose }) {
-  const [section,  setSection]  = useState(null); // null | "usage" | "feedback"
-  const [message,  setMessage]  = useState("");
+  const [section,  setSection]  = useState(null); // null | "usage"
+
   const ref = useRef(null);
   const { tokens, resetIn } = useTokenUsage();
 
@@ -22,14 +22,6 @@ function ChatMenuDropdown({ onClose }) {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [onClose]);
-
-  function handleSend() {
-    if (!message.trim()) return;
-    const subject = encodeURIComponent("LookUp — Feedback");
-    const body    = encodeURIComponent(message.trim());
-    chrome.tabs.create({ url: `mailto:nimrodnetzer@gmail.com?subject=${subject}&body=${body}` });
-    onClose();
-  }
 
   function toggle(s) { setSection((v) => v === s ? null : s); }
 
@@ -73,29 +65,13 @@ function ChatMenuDropdown({ onClose }) {
 
       <div className="border-t border-border/60" />
 
-      {/* Feedback */}
-      <button onClick={() => toggle("feedback")}
+      {/* Contact */}
+      <button onClick={() => { chrome.tabs.create({ url: "https://nimrod-3d-portfolio.vercel.app/#contact" }); onClose(); }}
         className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-text hover:bg-accent/10 transition-colors">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         Contact us
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`ml-auto ${section === "feedback" ? "rotate-180 transition-transform" : "transition-transform"}`}><polyline points="6 9 12 15 18 9"/></svg>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml-auto opacity-40"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       </button>
-      {section === "feedback" && (
-        <div className="px-3 pb-3 flex flex-col gap-2 bg-bg/40">
-          <textarea
-            autoFocus
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Your message…"
-            rows={2}
-            className="w-full bg-bg border border-border rounded-lg px-2.5 py-1.5 text-xs text-text placeholder:text-muted outline-none focus:border-accent transition-colors resize-none"
-          />
-          <button onClick={handleSend} disabled={!message.trim()}
-            className="self-end px-2.5 py-1 text-[11px] font-semibold bg-accent text-white rounded-md hover:bg-accent/80 disabled:opacity-40 transition-colors">
-            Send
-          </button>
-        </div>
-      )}
     </div>
   );
 }
