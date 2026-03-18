@@ -34,14 +34,22 @@ function tryParseCards(content) {
   return null;
 }
 
+const QUIZ_ANSWER_RE = /\*\*(?:Answer|תשובה|A)[^*\n]*\*\*[:\s]*/i;
+
 function parseQuiz(content) {
+  // Mirror ChatPage QuizContent: try 3 split strategies so all AI formats are handled
+  let blocks = content.split(/\n[ \t]*---[ \t]*\n/).map(b => b.trim()).filter(Boolean);
+  if (blocks.length <= 1)
+    blocks = content.split(/\n+(?=\*\*Q\d)/).map(b => b.trim()).filter(Boolean);
+  if (blocks.length <= 1)
+    blocks = content.split(/\n\n+(?=\d+\.)/).map(b => b.trim()).filter(Boolean);
+
   const pairs = [];
-  // Covers: **Q1.** / **Q1:** / **Question 1.** / **1.**  +  **Answer:** / **A:** / **A.**
-  const regex = /\*\*(?:Q(?:uestion)?\s*\d+[.:]?|\d+\.)\*\*\s*([\s\S]*?)\n\*\*(?:Answer|A)[.:]\*\*\s*([\s\S]*?)(?=\n\*\*(?:Q(?:uestion)?\s*\d+[.:]?|\d+\.)\*\*|$)/gi;
-  let match;
-  while ((match = regex.exec(content)) !== null) {
-    const q = match[1].trim();
-    const a = match[2].trim();
+  for (const block of blocks) {
+    const match = QUIZ_ANSWER_RE.exec(block);
+    if (!match) continue;
+    const q = block.slice(0, match.index).trim().replace(/^\*?\*?Q?\d+[.)]\*?\*?\s*/i, "");
+    const a = block.slice(match.index + match[0].length).trim();
     if (q && a) pairs.push({ q, a });
   }
   return pairs.length > 0 ? pairs : null;
@@ -59,7 +67,7 @@ function QuizViewer({ pairs }) {
     <div className="flex flex-col gap-3">
       {pairs.map((p, i) => (
         <div key={i} className="chat-quiz-block">
-          <p style={{ fontSize: 17, lineHeight: 1.6, color: "#e8e8f0", margin: "0 0 10px" }}>
+          <p dir="auto" style={{ fontSize: 17, lineHeight: 1.6, color: "#e8e8f0", margin: "0 0 10px" }}>
             <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "#7c6af5", marginRight: 8, letterSpacing: "0.05em" }}>Q{i+1}</span>
             {p.q}
           </p>
@@ -70,7 +78,7 @@ function QuizViewer({ pairs }) {
             {revealed[i] ? "▼ Hide Answer" : "▶ Show Answer"}
           </button>
           {revealed[i] && (
-            <div className="chat-quiz-answer">{p.a}</div>
+            <div className="chat-quiz-answer" dir="auto">{p.a}</div>
           )}
         </div>
       ))}
@@ -115,7 +123,7 @@ function SectionContent({ text, showBadge }) {
       </article>
     </SectionBlock>
   ) : (
-    <article className="prose">
+    <article className="prose" dir="auto">
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{body}</ReactMarkdown>
     </article>
   );
@@ -381,7 +389,7 @@ export default function NoteViewer({ filename, onBack }) {
 
       <header className="mb-7">
         <div className="flex items-start gap-3 flex-wrap">
-          <h1 className="text-2xl font-extrabold text-text flex-1 leading-snug">
+          <h1 className="text-2xl font-extrabold text-text flex-1 leading-snug" dir="auto">
             {note.title ?? filename}
           </h1>
           <span className={`text-xs font-bold uppercase tracking-wide px-2 py-1 rounded-lg border shrink-0 ${badge.color}`}>

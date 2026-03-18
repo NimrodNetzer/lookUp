@@ -56,10 +56,10 @@ export default function FlashcardViewer({ cards }) {
               className={`flip-card w-full h-full${flipped.has(i) ? " flipped" : ""}`}
               onClick={() => toggle(i)}
             >
-              <div className="flip-card-front bg-surface border border-border text-sm cursor-pointer">
+              <div className="flip-card-front bg-surface border border-border text-sm cursor-pointer" dir="auto">
                 <CardText text={card.front} />
               </div>
-              <div className="flip-card-back bg-accent/10 border border-accent/30 text-sm cursor-pointer">
+              <div className="flip-card-back bg-accent/10 border border-accent/30 text-sm cursor-pointer" dir="auto">
                 <CardText text={card.back} />
               </div>
             </div>

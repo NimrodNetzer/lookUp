@@ -412,7 +412,7 @@ export default function NotesList({ notes, folders, onRefresh, onOpenNote, limit
                   <InlineRename note={note} onConfirm={(title) => handleRenameNote(note, title)} onCancel={() => setRenamingFilename(null)} />
                 ) : (
                   <button className="flex-1 min-w-0 text-left" onClick={!selectMode ? () => onOpenNote(note.filename) : undefined}>
-                    <p className="text-sm font-medium text-text truncate">
+                    <p className="text-sm font-medium text-text truncate" dir="auto">
                       {note.pinned && <span className="text-accent mr-1.5 text-xs">📌</span>}
                       {note.title ?? note.filename}
                     </p>

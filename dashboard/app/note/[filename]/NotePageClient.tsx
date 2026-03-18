@@ -46,13 +46,21 @@ function isCards(content: string): { front: string; back: string }[] | null {
   return null;
 }
 
+const QUIZ_ANSWER_RE = /\*\*(?:Answer|תשובה|A)[^*\n]*\*\*[:\s]*/i;
+
 function parseQuiz(content: string): { q: string; a: string }[] | null {
+  let blocks = content.split(/\n[ \t]*---[ \t]*\n/).map(b => b.trim()).filter(Boolean);
+  if (blocks.length <= 1)
+    blocks = content.split(/\n+(?=\*\*Q\d)/).map(b => b.trim()).filter(Boolean);
+  if (blocks.length <= 1)
+    blocks = content.split(/\n\n+(?=\d+\.)/).map(b => b.trim()).filter(Boolean);
+
   const pairs: { q: string; a: string }[] = [];
-  const regex = /\*\*Q\d+\.\*\*\s*([\s\S]*?)\n\*\*Answer:\*\*\s*([\s\S]*?)(?=\n\*\*Q\d+\.\*\*|$)/g;
-  let match;
-  while ((match = regex.exec(content)) !== null) {
-    const q = match[1].trim();
-    const a = match[2].trim();
+  for (const block of blocks) {
+    const match = QUIZ_ANSWER_RE.exec(block);
+    if (!match) continue;
+    const q = block.slice(0, match.index).trim().replace(/^\*?\*?Q?\d+[.)]\*?\*?\s*/i, "");
+    const a = block.slice(match.index + match[0].length).trim();
     if (q && a) pairs.push({ q, a });
   }
   return pairs.length > 0 ? pairs : null;
@@ -71,14 +79,14 @@ function QuizViewer({ pairs }: { pairs: { q: string; a: string }[] }) {
     <div className="flex flex-col gap-4">
       {pairs.map((p, i) => (
         <div key={i} className="border border-border rounded-xl p-4 bg-surface">
-          <p className="font-semibold text-text mb-3">
+          <p className="font-semibold text-text mb-3" dir="auto">
             <span className="text-muted text-xs font-bold uppercase mr-2">Q{i + 1}</span>
             <InlineMath text={p.q} />
           </p>
           {revealed.has(i) ? (
             <div className="border-t border-border pt-3 mt-1">
               <p className="text-xs font-bold uppercase text-muted mb-1">Answer</p>
-              <p className="text-sm text-text"><InlineMath text={p.a} /></p>
+              <p className="text-sm text-text" dir="auto"><InlineMath text={p.a} /></p>
             </div>
           ) : (
             <button
@@ -134,7 +142,7 @@ function MessageBlock({ msg }: { msg: Message }) {
 
   return (
     <div className="mb-8">
-      <article className="prose">
+      <article className="prose" dir="auto">
         <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
           {msg.content}
         </ReactMarkdown>
@@ -231,7 +239,7 @@ function NotePageInner() {
 
       <header className="mb-7">
         <div className="flex items-start gap-3 flex-wrap">
-          <h1 className="text-2xl font-extrabold text-text flex-1 leading-snug">
+          <h1 className="text-2xl font-extrabold text-text flex-1 leading-snug" dir="auto">
             {titleMatch?.[1] ?? filename}
           </h1>
           <span className={`text-xs font-bold uppercase tracking-wide px-2 py-1 rounded-lg border shrink-0 ${badge.color}`}>
@@ -254,7 +262,7 @@ function NotePageInner() {
       ) : mode === "quiz" && quiz ? (
         <QuizViewer pairs={quiz} />
       ) : (
-        <article className="prose">
+        <article className="prose" dir="auto">
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkMath]}
             rehypePlugins={[rehypeKatex]}

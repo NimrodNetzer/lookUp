@@ -2220,13 +2220,25 @@ const QUIZ_ANSWER_RE = /\*\*(?:Answer|תשובה)[^*\n]*\*\*\s*:?\s*/i;
 
 function renderQuiz(markdown) {
   const quizPrefix = `qz${++_uid}`;
+  const revealLabel = _lang === "he" ? "▶ הצג תשובה" : "▶ Show Answer";
+  const hideLabel   = _lang === "he" ? "▼ הסתר תשובה" : "▼ Hide Answer";
 
-  // Split at every question start — handles plain "1.", bold "**1.**", and legacy "**Q1.**"/"**ש1.**"
-  // The lookahead keeps the delimiter in the following chunk.
-  const blocks = markdown
-    .split(/\n(?=\s*\*?\*?[Qש]?\d+[.)]\*?\*?\s)/)
-    .map(b => b.trim())
-    .filter(Boolean);
+  // Line-by-line grouping: more robust than lookahead-split, handles Hebrew where
+  // the model may omit the space after the number (e.g. "2.שאלה" with no space).
+  const Q_LINE_RE = /^\s*(?:\*\*)?[Qש]?\s*\d+[.)]\*?\*?/;
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+
+  const blocks = [];
+  let cur = [];
+  for (const line of lines) {
+    if (Q_LINE_RE.test(line) && cur.length > 0) {
+      blocks.push(cur.join("\n"));
+      cur = [line];
+    } else {
+      cur.push(line);
+    }
+  }
+  if (cur.length > 0) blocks.push(cur.join("\n"));
 
   let html = "";
   let qNum = 0;
@@ -2234,18 +2246,16 @@ function renderQuiz(markdown) {
   for (const block of blocks) {
     const answerMatch = QUIZ_ANSWER_RE.exec(block);
     if (!answerMatch) {
-      // No answer marker — render as plain markdown (intro text, etc.)
-      html += `<div class="md-body" dir="${bidiDir(block)}">${renderMarkdown(block)}</div>`;
+      const trimmed = block.trim();
+      if (trimmed) html += `<div class="md-body" dir="${bidiDir(trimmed)}">${renderMarkdown(trimmed)}</div>`;
       continue;
     }
 
     qNum++;
     // Strip the leading question-number label (e.g. "1. " / "**Q1.** " / "**ש1.** ")
-    const rawQ = block.slice(0, answerMatch.index).replace(/^\s*\*?\*?[Qש]?\d+[.)]\*?\*?\s*/i, "").trim();
+    const rawQ = block.slice(0, answerMatch.index).replace(/^\s*(?:\*\*)?[Qש]?\s*\d+[.)]\s*\*?\*?\s*/i, "").trim();
     const answerPart = block.slice(answerMatch.index + answerMatch[0].length).trim();
     const id = `${quizPrefix}-ans-${qNum}`;
-    const revealLabel = _lang === "he" ? "▶ הצג תשובה" : "▶ Show Answer";
-    const hideLabel   = _lang === "he" ? "▼ הסתר תשובה" : "▼ Hide Answer";
 
     html += `
       <div class="quiz-block">
