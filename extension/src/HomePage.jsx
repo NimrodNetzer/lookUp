@@ -27,7 +27,7 @@ function ChatMenuDropdown({ onClose }) {
     if (!message.trim()) return;
     const subject = encodeURIComponent("LookUp — Feedback");
     const body    = encodeURIComponent(message.trim());
-    window.open(`mailto:nimrodnetzer@gmail.com?subject=${subject}&body=${body}`);
+    chrome.tabs.create({ url: `mailto:nimrodnetzer@gmail.com?subject=${subject}&body=${body}` });
     onClose();
   }
 
