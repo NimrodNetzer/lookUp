@@ -28,58 +28,129 @@ hljs.registerLanguage("sh", bash);
 hljs.registerLanguage("html", xml);
 hljs.registerLanguage("xml", xml);
 
-// ── Lightweight markdown renderer ─────────────────────────────────────────────
-function renderMd(raw) {
-  // Extract math segments first (before HTML-escaping) to avoid double-escaping
-  const mathSlots = [];
-  function stash(expr, display) {
-    try {
-      const html = katex.renderToString(expr.trim(), { displayMode: display, throwOnError: false, output: "html" });
-      mathSlots.push(html);
-    } catch {
-      mathSlots.push(`<span class="math-err">${expr}</span>`);
-    }
-    return `\x00MATH${mathSlots.length - 1}\x00`;
-  }
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function escapeHtml(str = "") {
+  return String(str)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
 
-  // Also stash fenced code blocks before escaping
-  const codeSlots = [];
-  function stashCode(lang, code) {
+function bidiDir(text) {
+  const plain = text.replace(/<[^>]+>/g, " ");
+  const rtl = (plain.match(/[\u0590-\u05FF\u0600-\u06FF\uFB1D-\uFB4F]/g) ?? []).length;
+  const ltr = (plain.match(/[A-Za-z]/g) ?? []).length;
+  return rtl > ltr ? "rtl" : "auto";
+}
+
+function renderMathExpr(expr, displayMode) {
+  try {
+    return katex.renderToString(expr.trim(), { displayMode, throwOnError: false, output: "html" });
+  } catch {
+    return escapeHtml(expr);
+  }
+}
+
+// ── Markdown renderer (mirrors sidepanel renderMarkdown + hljs code blocks) ───
+function renderMd(raw) {
+  const blocks = [];
+
+  // 1. Stash fenced code blocks (with hljs highlighting)
+  let text = raw.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const l = lang.trim();
     let highlighted;
     try {
-      highlighted = lang && hljs.getLanguage(lang)
-        ? hljs.highlight(code, { language: lang }).value
-        : hljs.highlightAuto(code).value;
-    } catch { highlighted = code.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-    const id = `cb${Date.now()}-${codeSlots.length}`;
-    const html = `<div class="chat-code-block"><div class="chat-code-header"><span class="chat-code-lang">${lang || "code"}</span><button class="chat-code-copy" data-code-id="${id}" onclick="(function(b){const pre=b.closest('.chat-code-block').querySelector('code');navigator.clipboard.writeText(pre.innerText).then(()=>{b.textContent='Copied!';setTimeout(()=>b.textContent='Copy',2000)}).catch(()=>{})})(this)">Copy</button></div><pre class="chat-pre"><code id="${id}" class="hljs">${highlighted}</code></pre></div>`;
-    codeSlots.push(html);
-    return `\x00CODE${codeSlots.length - 1}\x00`;
+      highlighted = l && hljs.getLanguage(l)
+        ? hljs.highlight(code.trimEnd(), { language: l }).value
+        : hljs.highlightAuto(code.trimEnd()).value;
+    } catch {
+      highlighted = escapeHtml(code.trimEnd());
+    }
+    const id = `cb${Date.now()}-${blocks.length}`;
+    blocks.push(
+      `<div class="chat-code-block">` +
+      `<div class="chat-code-header"><span class="chat-code-lang">${l || "code"}</span>` +
+      `<button class="chat-code-copy" onclick="(function(b){const pre=b.closest('.chat-code-block').querySelector('code');navigator.clipboard.writeText(pre.innerText).then(()=>{b.textContent='Copied!';setTimeout(()=>b.textContent='Copy',2000)}).catch(()=>{})})(this)">Copy</button></div>` +
+      `<pre class="chat-pre"><code id="${id}" class="hljs">${highlighted}</code></pre></div>`
+    );
+    return `\x00B${blocks.length - 1}\x00`;
+  });
+
+  // 2. Stash block math \begin{cases}...\end{cases}
+  text = text.replace(/\\begin\{cases\}([\s\S]*?)\\end\{cases\}/g, (_, body) => {
+    blocks.push(`<div class="math-block">${renderMathExpr(`\\begin{cases}${body}\\end{cases}`, true)}</div>`);
+    return `\x00B${blocks.length - 1}\x00`;
+  });
+
+  // 3. Stash $$...$$ block math
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
+    blocks.push(`<div class="math-block">${renderMathExpr(math.trim(), true)}</div>`);
+    return `\x00B${blocks.length - 1}\x00`;
+  });
+
+  // 4. Stash $...$ inline math
+  text = text.replace(/\$([^$\n]+?)\$/g, (_, math) => {
+    blocks.push(`<span class="math-inline">${renderMathExpr(math.trim(), false)}</span>`);
+    return `\x00B${blocks.length - 1}\x00`;
+  });
+
+  // 5. HTML-escape the rest
+  text = text
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // 6. Stash inline code
+  text = text.replace(/`([^`\n]+)`/g, (_, c) => {
+    blocks.push(`<code class="chat-code">${c}</code>`);
+    return `\x00B${blocks.length - 1}\x00`;
+  });
+
+  // 7. Block-level inline transforms
+  text = text.replace(/^#### (.+)$/gm, '<h4 class="chat-h4" dir="auto">$1</h4>');
+  text = text.replace(/^### (.+)$/gm,  '<h3 class="chat-h3" dir="auto">$1</h3>');
+  text = text.replace(/^## (.+)$/gm,   '<h2 class="chat-h2" dir="auto">$1</h2>');
+  text = text.replace(/^# (.+)$/gm,    '<h2 class="chat-h2" dir="auto">$1</h2>');
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/\*(.+?)\*/g,     '<em>$1</em>');
+  text = text.replace(/__(.+?)__/g,     '<strong>$1</strong>');
+  text = text.replace(/_(.+?)_/g,       '<em>$1</em>');
+  text = text.replace(/^---+$/gm,       '<hr class="chat-hr">');
+  text = text.replace(/^&gt; (.+)$/gm,  '<blockquote class="chat-bq">$1</blockquote>');
+
+  // 8. Line-by-line: build lists and paragraphs
+  const BLOCK_STARTS = ['<h2', '<h3', '<h4', '<hr', '<blockquote', '<div', '\x00B'];
+  const lines = text.split('\n');
+  const out = [];
+  let inUl = false, inOl = false;
+
+  for (const line of lines) {
+    if (/^[*-] /.test(line)) {
+      if (inOl) { out.push('</ol>'); inOl = false; }
+      if (!inUl) { out.push('<ul class="chat-ul">'); inUl = true; }
+      const li = line.replace(/^[*-] /, '');
+      out.push(`<li dir="${bidiDir(li)}">${li}</li>`);
+    } else if (/^\d+\. /.test(line)) {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (!inOl) { out.push('<ol class="chat-ol">'); inOl = true; }
+      const li = line.replace(/^\d+\. /, '');
+      out.push(`<li dir="${bidiDir(li)}">${li}</li>`);
+    } else {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (inOl) { out.push('</ol>'); inOl = false; }
+      const t = line.trim();
+      if (!t) {
+        out.push('<div class="chat-gap"></div>');
+      } else if (BLOCK_STARTS.some(b => t.startsWith(b))) {
+        out.push(t);
+      } else {
+        out.push(`<p class="chat-p" dir="${bidiDir(t)}">${t}</p>`);
+      }
+    }
   }
+  if (inUl) out.push('</ul>');
+  if (inOl) out.push('</ol>');
 
-  let h = raw
-    .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => stashCode(lang.trim(), code.trimEnd()))
-    .replace(/\$\$([^$]+?)\$\$/gs, (_, e) => stash(e, true))
-    .replace(/\$([^$\n]+?)\$/g,    (_, e) => stash(e, false));
-
-  h = h
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/^#### (.+)$/gm, '<h4 class="chat-h4" dir="auto">$1</h4>')
-    .replace(/^### (.+)$/gm,  '<h3 class="chat-h3" dir="auto">$1</h3>')
-    .replace(/^## (.+)$/gm,   '<h2 class="chat-h2" dir="auto">$1</h2>')
-    .replace(/^# (.+)$/gm,    '<h2 class="chat-h2" dir="auto">$1</h2>')
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g,     "<em>$1</em>")
-    .replace(/`([^`\n]+)`/g,   '<code class="chat-code">$1</code>')
-    .replace(/^---+$/gm,       '<hr class="chat-hr">')
-    .replace(/^[*-] (.+)$/gm,  '<li dir="auto">$1</li>');
-  h = h.replace(/(<li[\s\S]*?<\/li>)(\n<li[\s\S]*?<\/li>)*/g,
-    (m) => `<ul class="chat-ul">${m}</ul>`);
-  h = h.replace(/\n\n+/g, '</p><p class="chat-p" dir="auto">').replace(/\n/g, "<br>");
-  // Restore math and code slots
-  h = h.replace(/\x00MATH(\d+)\x00/g, (_, i) => mathSlots[+i] ?? "");
-  h = h.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeSlots[+i] ?? "");
-  return `<p class="chat-p" dir="auto">${h}</p>`;
+  // 9. Restore stashed blocks
+  return out.join('\n').replace(/\x00B(\d+)\x00/g, (_, i) => blocks[+i] ?? "");
 }
 
 function parseFlashcards(content) {
@@ -109,26 +180,35 @@ function FlashcardGrid({ cards }) {
   );
 }
 
+const QUIZ_ANSWER_RE = /\*\*(?:Answer|תשובה)[^*\n]*\*\*[:\s]*/i;
+
 function QuizContent({ content }) {
   const [revealed, setRevealed] = useState({});
-  let blocks = content.split(/\n[ \t]*---[ \t]*\n/);
-  if (blocks.length <= 1 && (content.match(/\*\*Answer:\*\*/g) ?? []).length > 1)
-    blocks = content.split(/\n\n(?=\*\*Q\d)/);
-  let qIdx = 0;
+
+  // 3-strategy split (mirrors sidepanel renderQuiz)
+  let blocks = content.split(/\n[ \t]*---[ \t]*\n/).map(b => b.trim()).filter(Boolean);
+  if (blocks.length <= 1)
+    blocks = content.split(/\n+(?=\*\*Q\d)/).map(b => b.trim()).filter(Boolean);
+  if (blocks.length <= 1)
+    blocks = content.split(/\n\n+(?=\d+\.)/).map(b => b.trim()).filter(Boolean);
+
+  let qNum = 0;
   return (
     <div>
       {blocks.map((block, bi) => {
-        const trimmed = block.trim();
-        if (!trimmed) return null;
-        const answerAt = trimmed.indexOf("**Answer:**");
-        if (answerAt === -1) return <div key={bi} dangerouslySetInnerHTML={{ __html: renderMd(trimmed) }} />;
-        const q = qIdx++;
-        const questionPart = trimmed.slice(0, answerAt).trim();
-        const answerPart   = trimmed.slice(answerAt + "**Answer:**".length).trim();
+        if (!block) return null;
+        const match = QUIZ_ANSWER_RE.exec(block);
+        if (!match) return <div key={bi} dangerouslySetInnerHTML={{ __html: renderMd(block) }} />;
+        const q = qNum++;
+        const questionPart = block.slice(0, match.index).trim().replace(/^\*?\*?Q?\d+[.)]\*?\*?\s*/i, "");
+        const answerPart   = block.slice(match.index + match[0].length).trim();
         return (
           <div key={bi} className="chat-quiz-block">
-            <div dangerouslySetInnerHTML={{ __html: renderMd(questionPart) }} />
-            <button className="chat-quiz-reveal" onClick={() => setRevealed((r) => ({ ...r, [q]: !r[q] }))}>
+            <div className="chat-quiz-question">
+              <span className="chat-quiz-num">Q{q + 1}.</span>
+              <span dangerouslySetInnerHTML={{ __html: renderMd(questionPart) }} />
+            </div>
+            <button className="chat-quiz-reveal" onClick={() => setRevealed(r => ({ ...r, [q]: !r[q] }))}>
               {revealed[q] ? "▼ Hide Answer" : "▶ Show Answer"}
             </button>
             {revealed[q] && <div className="chat-quiz-answer" dangerouslySetInnerHTML={{ __html: renderMd(answerPart) }} />}
@@ -201,6 +281,33 @@ function buildModePrefix(mode) {
     flashcard: "Generate flashcards. Return ONLY a valid JSON array, no markdown fences:\n[{\"front\":\"Question\",\"back\":\"Answer\"}]\n\n",
   };
   return map[mode] ?? "";
+}
+
+// ── Note context menu (with expandable Delete sub-options) ───────────────────
+function NoteCtxMenu({ menu, onRename, onCloseTab, onDeleteStorage }) {
+  const [showDeleteOpts, setShowDeleteOpts] = useState(false);
+  return (
+    <div className="chat-ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+      <button className="chat-ctx-item" onClick={onRename}>Rename</button>
+      {!showDeleteOpts ? (
+        <button className="chat-ctx-item chat-ctx-delete" onClick={() => setShowDeleteOpts(true)}>
+          Delete ▸
+        </button>
+      ) : (
+        <>
+          <button className="chat-ctx-item chat-ctx-delete" onClick={onCloseTab}>
+            ✕ Close tab
+          </button>
+          <button className="chat-ctx-item chat-ctx-delete" onClick={onDeleteStorage}>
+            🗑 Delete from storage
+          </button>
+          <button className="chat-ctx-item" onClick={() => setShowDeleteOpts(false)}>
+            ← Back
+          </button>
+        </>
+      )}
+    </div>
+  );
 }
 
 // ── Main chat page ────────────────────────────────────────────────────────────
@@ -445,6 +552,17 @@ export default function ChatPage() {
     });
 
     await switchConversation(convId);
+
+    // If the conversation has no messages (note was created before conversation
+    // linking worked, or messages were lost), bootstrap from the note's content.
+    const existingMsgs = await Messages.listByConversation(convId).catch(() => []);
+    if (existingMsgs.length === 0) {
+      const fullNote = await Notes.get(note.filename).catch(() => null);
+      if (fullNote?.content) {
+        await Messages.append(convId, "assistant", fullNote.content).catch(() => {});
+        setMessages([{ role: "assistant", content: fullNote.content }]);
+      }
+    }
   }
 
 
@@ -753,7 +871,8 @@ export default function ChatPage() {
                 <span className="chat-conv-label">{note.title || note.filename}</span>
               </button>
             ))}
-            {conversations.map((conv) =>
+            {/* Regular conversations — exclude those already shown as pinned note tabs */}
+            {conversations.filter(conv => !pinnedNotes.some(n => n.conversation_id === conv.id)).map((conv) =>
               renamingId === conv.id ? (
                 <div key={conv.id} className="chat-conv-item active">
                   <input
@@ -1011,14 +1130,12 @@ export default function ChatPage() {
 
         {/* ── Note context menu ──────────────────────────────────────── */}
         {noteCtxMenu && (
-          <div className="chat-ctx-menu" style={{ left: noteCtxMenu.x, top: noteCtxMenu.y }} onClick={(e) => e.stopPropagation()}>
-            <button className="chat-ctx-item" onClick={() => { renameNote(noteCtxMenu.note); setNoteCtxMenu(null); }}>
-              Rename
-            </button>
-            <button className="chat-ctx-item chat-ctx-delete" onClick={() => { deleteNote(noteCtxMenu.note); setNoteCtxMenu(null); }}>
-              Delete
-            </button>
-          </div>
+          <NoteCtxMenu
+            menu={noteCtxMenu}
+            onRename={() => { renameNote(noteCtxMenu.note); setNoteCtxMenu(null); }}
+            onCloseTab={() => { setPinnedNotes(prev => prev.filter(n => n.filename !== noteCtxMenu.note.filename)); setNoteCtxMenu(null); }}
+            onDeleteStorage={() => { deleteNote(noteCtxMenu.note); setNoteCtxMenu(null); }}
+          />
         )}
       </div>
     </>

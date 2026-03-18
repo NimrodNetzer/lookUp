@@ -225,8 +225,8 @@ export async function analyzeScreenshot(base64Image, mimeType = "image/png", mod
 
   // For quiz/flashcard: use a fixed count and send image directly — avoids a double API call
   if (mode === "quiz") {
-    const langNote = _responseLanguage === "he" ? "\n\nכתוב את כל השאלות והתשובות בעברית." : "";
-    prompt = `Create a 5-question quiz testing real understanding (not just recall). Mix explanation, application, and comparison questions.\n\nFormat:\n**Q1.** [Question]\n**Answer:** [5–60 words — concise but complete]${langNote}`;
+    const langNote = _responseLanguage === "he" ? "\n\nכתוב את השאלות והתשובות בעברית. שמור על הפורמט המדויק: מספר ונקודה לשאלה, ו-**Answer:** לתשובה." : "";
+    prompt = `Create a 5-question quiz testing real understanding (not just recall). Mix explanation, application, and comparison questions.\n\nFormat each question exactly like this:\n1. [Question]\n**Answer:** [5–60 words — concise but complete]\n\n2. [Question]\n**Answer:** [5–60 words]${langNote}`;
   } else if (mode === "flashcard") {
     prompt = `Generate 5 flashcards from this screenshot.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]`;
   }
@@ -313,11 +313,11 @@ export async function* analyzeWithQuestionStream(base64Image, mimeType = "image/
  */
 export async function analyzeText(selectedText, mode = "summary") {
   const key = await getKey();
-  const langNote = _responseLanguage === "he" ? " כתוב את כל השאלות והתשובות בעברית." : "";
+  const langNote = _responseLanguage === "he" ? " כתוב את השאלות והתשובות בעברית. שמור על הפורמט המדויק: מספר ונקודה לשאלה, ו-**Answer:** לתשובה." : "";
   const instructions = {
     summary:   "Summarize and organize this text for a student, using your structured summary format:",
     explain:   "Explain this text in depth as a patient tutor — motivate the topic, walk through concepts, use analogies, close with the key insight:",
-    quiz:      `Generate a ${quizQuestionCount(selectedText)}-question quiz based on this text, testing real understanding. Format: **Q1.** [Question]\\n**Answer:** [5–60 words — concise but complete]. No lengthy paragraphs.${langNote}`,
+    quiz:      `Generate a ${quizQuestionCount(selectedText)}-question quiz based on this text, testing real understanding. Format each question as:\n1. [Question]\n**Answer:** [5–60 words — concise but complete]\n\n2. [Question]\n**Answer:** [...]\nNo lengthy paragraphs.${langNote}`,
     flashcard: `Generate exactly ${flashcardCount(selectedText)} flashcards from this text.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]`,
   };
   const instruction = instructions[mode] ?? instructions.summary;
@@ -338,21 +338,55 @@ export async function analyzeText(selectedText, mode = "summary") {
 // Groq Whisper hard limit is 25 MB — stay safely under it.
 const MAX_WHISPER_BYTES = 20 * 1024 * 1024; // 20 MB
 
+// Preferred Whisper models in priority order (fastest/cheapest first).
+const WHISPER_PREFERRED = ["whisper-large-v3-turbo", "whisper-large-v3"];
+
+// Cache the resolved model per API key so we only query /models once per session.
+let _resolvedAudioModel = null;
+
+async function resolveAudioModel(key) {
+  if (_resolvedAudioModel) return _resolvedAudioModel;
+  try {
+    const res = await fetch(`${GROQ_API}/models`, {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    if (res.ok) {
+      const { data } = await res.json();
+      const available = new Set((data ?? []).map(m => m.id));
+      const match = WHISPER_PREFERRED.find(m => available.has(m));
+      if (match) { _resolvedAudioModel = match; return match; }
+    }
+  } catch {}
+  // Fall back to trying models in order if the /models call fails
+  return null;
+}
+
 async function transcribeBlob(key, blob, filename = "audio.webm") {
-  const form = new FormData();
-  form.append("file", blob, filename);
-  form.append("model", AUDIO_MODEL);
-  form.append("response_format", "text");
-  const res = await fetch(`${GROQ_API}/audio/transcriptions`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}` },
-    body: form,
-  });
-  if (!res.ok) {
+  const resolved = await resolveAudioModel(key);
+  const modelsToTry = resolved ? [resolved] : WHISPER_PREFERRED;
+  let lastError = "";
+  for (const model of modelsToTry) {
+    const form = new FormData();
+    form.append("file", blob, filename);
+    form.append("model", model);
+    form.append("response_format", "text");
+    const res = await fetch(`${GROQ_API}/audio/transcriptions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    });
+    if (res.ok) {
+      _resolvedAudioModel = model; // remember what worked
+      return (await res.text()).trim();
+    }
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message ?? `Transcription error ${res.status}`);
+    lastError = err.error?.message ?? `Transcription error ${res.status}`;
+    const isBlocked = (res.status === 400 || res.status === 403) && lastError.toLowerCase().includes("blocked");
+    const isDecommissioned = lastError.toLowerCase().includes("decommissioned");
+    if (isBlocked || isDecommissioned) { _resolvedAudioModel = null; continue; }
+    throw new Error(lastError);
   }
-  return (await res.text()).trim();
+  throw new Error("No Whisper model is enabled on your Groq account. Go to console.groq.com/settings/project/limits and enable whisper-large-v3-turbo or whisper-large-v3.");
 }
 
 // Build valid WebM segment blobs from raw MediaRecorder chunks.
@@ -404,11 +438,11 @@ export async function transcribeAndSummarize(audioBlob, mode = "summary", userNo
 
   const n = quizQuestionCount(transcript);
   const noteCtx = userNote ? `\n\nUser's instruction: "${userNote}"` : "";
-  const langNote = _responseLanguage === "he" ? "\n\nכתוב את כל השאלות והתשובות בעברית." : "";
+  const langNote = _responseLanguage === "he" ? "\n\nכתוב את השאלות והתשובות בעברית. שמור על הפורמט המדויק: מספר ונקודה לשאלה, ו-**Answer:** לתשובה." : "";
   const audioPrompts = {
     summary:   `${modePrompts.summary}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
     explain:   `${modePrompts.explain}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
-    quiz:      `Generate a ${n}-question quiz from this transcript testing real understanding. Mix explanation, application, and comparison questions.\n\nFormat:\n**Q1.** [Question]\n**Answer:** [5–60 words — concise but complete]${langNote}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
+    quiz:      `Generate a ${n}-question quiz from this transcript testing real understanding. Mix explanation, application, and comparison questions.\n\nFormat each question exactly like this:\n1. [Question]\n**Answer:** [5–60 words — concise but complete]\n\n2. [Question]\n**Answer:** [...]${langNote}${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
     flashcard: `Generate exactly ${flashcardCount(transcript)} flashcards from this transcript.\nReturn ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:\n[{"front": "Question or term", "back": "Answer or definition"}]${noteCtx}\n\nTranscript to analyze:\n${transcript}`,
   };
 

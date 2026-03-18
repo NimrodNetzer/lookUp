@@ -326,10 +326,26 @@ async function openNoteInSidepanel(note) {
   moreDropdown.classList.remove("open");
   moreBtn.classList.remove("open");
 
-  // Create a new conversation tab named after the note
-  const conv = await Conversations.create(full.title ?? note.filename);
+  // Reuse the note's linked conversation if it still exists; otherwise create one
+  let convId = full.conversation_id;
+  if (convId) {
+    const existing = await Conversations.get(convId).catch(() => null);
+    if (!existing) convId = null;
+  }
+  if (!convId) {
+    const conv = await Conversations.create(full.title ?? note.filename);
+    convId = conv.id;
+    await Notes.updateMeta(note.filename, { conversation_id: convId }).catch(() => {});
+  }
+
   await loadConversations();
-  await switchConversation(conv.id);
+  await switchConversation(convId);
+
+  // Persist the note content as a message so the chatpage can show it
+  const existingMsgs = await Messages.listByConversation(convId).catch(() => []);
+  if (existingMsgs.length === 0 && full.content) {
+    await Messages.append(convId, "assistant", full.content).catch(() => {});
+  }
 
   const cards = full.cards ?? (() => { try { return JSON.parse(full.content); } catch { return null; } })();
   if (Array.isArray(cards) && cards[0]?.front !== undefined) {
@@ -339,7 +355,7 @@ async function openNoteInSidepanel(note) {
   }
 
   // Cache the rendered content so switching away and back restores it
-  tabResults.set(conv.id, resultArea.innerHTML);
+  tabResults.set(convId, resultArea.innerHTML);
 }
 
 async function openNoteInDashboard(filename) {
@@ -1192,7 +1208,7 @@ resultArea.addEventListener("click", (e) => {
     if (!el) return;
     const hidden = el.style.display === "none";
     el.style.display = hidden ? "block" : "none";
-    btn.textContent = hidden ? "▼ Hide Answer" : "▶ Show Answer";
+    btn.textContent = hidden ? (btn.dataset.hideLabel || "▼ Hide Answer") : (btn.dataset.revealLabel || "▶ Show Answer");
   }
 });
 
@@ -2109,49 +2125,42 @@ function escapeHtml(str = "") {
 }
 
 // ── Quiz renderer — shows questions with hidden answers ──────────────────────
-// Answer marker: handles English "**Answer:**" and Hebrew "**תשובה:**" (model translates when lang=he)
-// Matches full bold answer label: **Answer:** / **Answer**: / **תשובה:** etc.
-// Consumes closing ** so they don't bleed into the answer text.
-const QUIZ_ANSWER_RE = /\*\*(?:Answer|תשובה)[^*\n]*\*\*[:\s]*/i;
+// Matches the answer marker in both English and Hebrew (model may translate despite instructions).
+const QUIZ_ANSWER_RE = /\*\*(?:Answer|תשובה)[^*\n]*\*\*\s*:?\s*/i;
 
 function renderQuiz(markdown) {
-  // Strategy 1: explicit --- separators
-  let blocks = markdown.split(/\n[ \t]*---[ \t]*\n/).map(b => b.trim()).filter(Boolean);
+  const quizPrefix = `qz${++_uid}`;
 
-  // Strategy 2: split before any **Q{n} marker (single or double newline)
-  if (blocks.length <= 1) {
-    blocks = markdown.split(/\n+(?=\*\*Q\d)/).map(b => b.trim()).filter(Boolean);
-  }
-
-  // Strategy 3: split on blank line before numbered question
-  if (blocks.length <= 1) {
-    blocks = markdown.split(/\n\n+(?=\d+\.)/).map(b => b.trim()).filter(Boolean);
-  }
+  // Split at every question start — handles plain "1.", bold "**1.**", and legacy "**Q1.**"/"**ש1.**"
+  // The lookahead keeps the delimiter in the following chunk.
+  const blocks = markdown
+    .split(/\n(?=\s*\*?\*?[Qש]?\d+[.)]\*?\*?\s)/)
+    .map(b => b.trim())
+    .filter(Boolean);
 
   let html = "";
   let qNum = 0;
-  const quizPrefix = `qz${++_uid}`;
 
   for (const block of blocks) {
-    if (!block) continue;
-
-    const match = QUIZ_ANSWER_RE.exec(block);
-    if (!match) {
+    const answerMatch = QUIZ_ANSWER_RE.exec(block);
+    if (!answerMatch) {
+      // No answer marker — render as plain markdown (intro text, etc.)
       html += `<div class="md-body" dir="${bidiDir(block)}">${renderMarkdown(block)}</div>`;
       continue;
     }
 
     qNum++;
-    // Strip leading **Q{n}.** / Q{n}. / **{n}.** label — we render our own numeric prefix
-    const rawQuestion  = block.slice(0, match.index).trim().replace(/^\*?\*?Q?\d+[.)]\*?\*?\s*/i, "");
-    const questionPart = rawQuestion;
-    const answerPart   = block.slice(match.index + match[0].length).trim();
+    // Strip the leading question-number label (e.g. "1. " / "**Q1.** " / "**ש1.** ")
+    const rawQ = block.slice(0, answerMatch.index).replace(/^\s*\*?\*?[Qש]?\d+[.)]\*?\*?\s*/i, "").trim();
+    const answerPart = block.slice(answerMatch.index + answerMatch[0].length).trim();
     const id = `${quizPrefix}-ans-${qNum}`;
+    const revealLabel = _lang === "he" ? "▶ הצג תשובה" : "▶ Show Answer";
+    const hideLabel   = _lang === "he" ? "▼ הסתר תשובה" : "▼ Hide Answer";
 
     html += `
       <div class="quiz-block">
-        <div class="quiz-question md-body" dir="${bidiDir(questionPart)}"><span class="quiz-num">${_lang === "he" ? `${qNum}.` : `Q${qNum}.`}</span> ${renderMarkdown(questionPart)}</div>
-        <button class="quiz-reveal-btn" data-answer-id="${id}">▶ Show Answer</button>
+        <div class="quiz-question md-body" dir="${bidiDir(rawQ)}"><span class="quiz-num">${qNum}.</span> ${renderMarkdown(rawQ)}</div>
+        <button class="quiz-reveal-btn" data-answer-id="${id}" data-reveal-label="${revealLabel}" data-hide-label="${hideLabel}">${revealLabel}</button>
         <div class="quiz-answer md-body" id="${id}" dir="${bidiDir(answerPart)}" style="display:none">${renderMarkdown(answerPart)}</div>
       </div>`;
   }
