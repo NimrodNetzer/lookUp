@@ -282,7 +282,7 @@ describe("analyzeScreenshot", () => {
     const userMsg = body.messages.find((m) => m.role === "user");
     const textBlock = userMsg.content.find((c) => c.type === "text");
     expect(textBlock.text).toMatch(/quiz/i);
-    expect(textBlock.text).toMatch(/5-question/);
+    expect(textBlock.text).toMatch(/2 and 8 questions/);
   });
 
   it("uses flashcard prompt for flashcard mode", async () => {

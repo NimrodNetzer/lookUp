@@ -422,7 +422,7 @@ describe("ChatPage — input edge cases", () => {
     await waitForChatInit();
     await userEvent.type(screen.getByPlaceholderText(/ask a question/i), "Hello there");
     await userEvent.click(screen.getByLabelText("Send"));
-    await waitFor(() => expect(screen.getByText("Hello there")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0));
   });
 
   it("special HTML characters in message appear as text not as HTML", async () => {
@@ -431,7 +431,7 @@ describe("ChatPage — input edge cases", () => {
     await userEvent.type(screen.getByPlaceholderText(/ask a question/i), "<b>bold</b>");
     await userEvent.click(screen.getByLabelText("Send"));
     // The raw string appears as text content, not rendered as bold
-    await waitFor(() => expect(screen.getByText("<b>bold</b>")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("<b>bold</b>").length).toBeGreaterThan(0));
   });
 
   it("Enter key triggers send and message appears in chat", async () => {
@@ -439,7 +439,7 @@ describe("ChatPage — input edge cases", () => {
     await waitForChatInit();
     const input = screen.getByPlaceholderText(/ask a question/i);
     await userEvent.type(input, "Press enter to send{Enter}");
-    await waitFor(() => expect(screen.getByText("Press enter to send")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Press enter to send").length).toBeGreaterThan(0));
   });
 
   it("Shift+Enter does not send — adds a newline", async () => {

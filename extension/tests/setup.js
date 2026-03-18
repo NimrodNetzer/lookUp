@@ -27,6 +27,19 @@ global.chrome = {
     },
   },
   runtime: { getURL: (path) => `chrome-extension://test-id/${path}` },
+  windows: {
+    getAll:        async () => [],
+    onCreated:     { addListener: () => {}, removeListener: () => {} },
+    onRemoved:     { addListener: () => {}, removeListener: () => {} },
+    onFocusChanged:{ addListener: () => {}, removeListener: () => {} },
+  },
+  tabs: {
+    create:           async () => {},
+    query:            async () => [],
+    captureVisibleTab:async () => "data:image/png;base64,",
+    onActivated:      { addListener: () => {}, removeListener: () => {} },
+    onUpdated:        { addListener: () => {}, removeListener: () => {} },
+  },
 };
 
 // ── Reset chrome store + IDB before each test ─────────────────────────────────

@@ -358,6 +358,8 @@ export default function ChatPage() {
   // Capture card picker state (shown inside the sidebar card)
   const [pickerOpen,     setPickerOpen]     = useState(false);
   const [pickerWindows,  setPickerWindows]  = useState([]);
+  const [availableWindows, setAvailableWindows] = useState(0);
+  const [panelOpen,        setPanelOpen]        = useState(false);
   const pickerRef = useRef(null);
 
   const bottomRef   = useRef(null);
@@ -577,6 +579,8 @@ export default function ChatPage() {
     if (!newTitle?.trim()) return;
     try {
       await Notes.updateMeta(note.filename, { title: newTitle.trim() });
+      // Update pinned tab title in-place so the sidebar reflects it immediately
+      setPinnedNotes(prev => prev.map(n => n.filename === note.filename ? { ...n, title: newTitle.trim() } : n));
       // Refresh search results
       if (searchQuery.trim()) setNoteResults(await Notes.search(searchQuery));
     } catch {}
@@ -607,6 +611,23 @@ export default function ChatPage() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [modeDropOpen]);
+
+  // Track available Chrome windows to show/hide capture row
+  useEffect(() => {
+    async function updateWindowCount() {
+      try {
+        const wins = await chrome.windows.getAll();
+        setAvailableWindows(wins.filter(w => w.type === "normal").length);
+      } catch { setAvailableWindows(0); }
+    }
+    updateWindowCount();
+    chrome.windows.onCreated.addListener(updateWindowCount);
+    chrome.windows.onRemoved.addListener(updateWindowCount);
+    return () => {
+      chrome.windows.onCreated.removeListener(updateWindowCount);
+      chrome.windows.onRemoved.removeListener(updateWindowCount);
+    };
+  }, []);
 
   // Close picker when clicking outside
   useEffect(() => {
@@ -742,7 +763,7 @@ export default function ChatPage() {
       if (conv && conv.title === "New Conversation") {
         const title = (text || "Image").slice(0, 48) + ((text?.length ?? 0) > 48 ? "…" : "");
         await Conversations.rename(activeId, title);
-        await loadConversations();
+        setConversations(prev => prev.map(c => c.id === activeId ? { ...c, title } : c));
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -776,6 +797,7 @@ export default function ChatPage() {
     try {
       await Conversations.delete(id);
       const remaining = conversations.filter((c) => c.id !== id);
+      setConversations(remaining); // immediate sidebar update — no ghost tab
       if (id === activeId) {
         if (remaining.length > 0) {
           await switchConversation(remaining[0].id);
@@ -783,9 +805,9 @@ export default function ChatPage() {
           const c = await Conversations.create("New Conversation");
           setActiveId(c.id); setMessages([]);
           await Conversations.setActive(c.id);
+          await loadConversations();
         }
       }
-      await loadConversations();
     } catch {}
   }
 
@@ -796,7 +818,8 @@ export default function ChatPage() {
       try {
         await Conversations.rename(renamingId, trimmed);
         await Notes.updateByConversationId(renamingId, { title: trimmed });
-        await loadConversations();
+        setConversations(prev => prev.map(c => c.id === renamingId ? { ...c, title: trimmed } : c));
+        setPinnedNotes(prev => prev.map(n => n.conversation_id === renamingId ? { ...n, title: trimmed } : n));
       } catch {}
     }
     setRenamingId(null);
@@ -818,12 +841,19 @@ export default function ChatPage() {
     setCtxMenu({ x: e.clientX, y: e.clientY, id, title });
   }
 
-  function openCaptureWindow() {
-    window.open(
-      chrome.runtime.getURL("sidepanel.html"),
-      "lookupCapture",
-      "width=420,height=680,resizable=yes,scrollbars=yes"
-    );
+  async function openCaptureWindow() {
+    try {
+      if (panelOpen) {
+        await chrome.runtime.sendMessage({ type: "closeSidePanel" });
+        setPanelOpen(false);
+      } else {
+        const win = await chrome.windows.getCurrent();
+        await chrome.sidePanel.open({ windowId: win.id });
+        setPanelOpen(true);
+      }
+    } catch {
+      window.open(chrome.runtime.getURL("sidepanel.html"), "lookupCapture", "width=420,height=680,resizable=yes,scrollbars=yes");
+    }
   }
 
 
@@ -961,8 +991,8 @@ export default function ChatPage() {
               )}
             </div>
 
-            {/* Compact capture source button */}
-            <div className="chat-cap-row">
+            {/* Compact capture source button — hidden when only one window and nothing selected */}
+            <div className="chat-cap-row" style={!captureSource && availableWindows <= 1 ? { display: "none" } : {}}>
               {captureSource ? (
                 <>
                   <button className="chat-cap-btn active" onClick={openPicker} title="Change capture window">

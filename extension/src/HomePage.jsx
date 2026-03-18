@@ -3,8 +3,8 @@ import LearningHub from "./LearningHub.jsx";
 import GlobalSearch from "./GlobalSearch.jsx";
 
 // ── Chat menu dropdown (AI usage · Project info · Contact) ───────────────────
-function ChatMenuDropdown({ onClose }) {
-  const [section,  setSection]  = useState(null); // null | "usage"
+function ChatMenuDropdown({ onClose, panelOpen, setPanelOpen }) {
+  const [section, setSection] = useState(null); // null | "usage"
 
   const ref = useRef(null);
   const { tokens, resetIn } = useTokenUsage();
@@ -25,10 +25,35 @@ function ChatMenuDropdown({ onClose }) {
 
   function toggle(s) { setSection((v) => v === s ? null : s); }
 
+  async function togglePanel() {
+    try {
+      if (panelOpen) {
+        await chrome.runtime.sendMessage({ type: "closeSidePanel" });
+        setPanelOpen(false);
+      } else {
+        const win = await chrome.windows.getCurrent();
+        await chrome.sidePanel.open({ windowId: win.id });
+        setPanelOpen(true);
+      }
+    } catch {
+      window.open(chrome.runtime.getURL("sidepanel.html"), "lookupCapture", "width=420,height=680,resizable=yes,scrollbars=yes");
+    }
+    onClose();
+  }
+
   return (
     <div ref={ref}
       className="absolute right-0 top-full mt-1.5 z-50 bg-surface border border-border rounded-xl shadow-2xl overflow-hidden min-w-[210px]"
       style={{ fontFamily: "inherit" }}>
+
+      {/* Open/close sidepanel */}
+      <button onClick={togglePanel}
+        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-semibold text-accent hover:bg-accent/10 transition-colors">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+        {panelOpen ? "Close panel" : "Open panel"}
+      </button>
+
+      <div className="border-t border-border/60" />
 
       {/* AI usage */}
       <button onClick={() => toggle("usage")}
@@ -173,6 +198,7 @@ function ActionsDropdown({ onSearch, hubActionsRef }) {
 export default function HomePage({ onOpenNote }) {
   const [searchOpen,    setSearchOpen]    = useState(false);
   const [feedbackOpen,  setFeedbackOpen]  = useState(false);
+  const [panelOpen,     setPanelOpen]     = useState(false);
   const hubActionsRef = useRef(null);
 
   useEffect(() => {
@@ -186,6 +212,7 @@ export default function HomePage({ onOpenNote }) {
   function openChat() {
     window.open(chrome.runtime.getURL("built/chat.html"), "_blank");
   }
+
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
@@ -216,7 +243,7 @@ export default function HomePage({ onOpenNote }) {
                 <polyline points="6 9 12 15 18 9"/>
               </svg>
             </button>
-            {feedbackOpen && <ChatMenuDropdown onClose={() => setFeedbackOpen(false)} />}
+            {feedbackOpen && <ChatMenuDropdown onClose={() => setFeedbackOpen(false)} panelOpen={panelOpen} setPanelOpen={setPanelOpen} />}
           </div>
           <ActionsDropdown onSearch={() => setSearchOpen(true)} hubActionsRef={hubActionsRef} />
         </div>

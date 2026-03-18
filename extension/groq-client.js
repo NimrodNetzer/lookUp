@@ -137,7 +137,7 @@ function groq429Message(err) {
     return "Rate limit hit — you're sending too fast or the request is too large. Wait a moment and try again.";
   if (code === "tokens_per_day_exceeded" || msg.toLowerCase().includes("day"))
     return "Daily token quota reached. Your quota resets every 24 hours — try again tomorrow, or upgrade at console.groq.com.";
-  return msg || "Too many requests — wait a moment and try again (Groq 429).";
+  return "Too many requests — wait a moment and try again (Groq 429).";
 }
 
 async function* chatCompletionStream(key, messages, temperature = 0.6, max_tokens = undefined) {

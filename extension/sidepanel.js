@@ -1389,7 +1389,7 @@ async function processPendingCapture() {
       markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
     }
 
-    const noteTitle = pendingCapture.tabTitle || selectedMode;
+    const noteTitle = extractTopic(markdown, pendingCapture.tabTitle || selectedMode);
     const saved = await saveNote({ title: noteTitle, mode: selectedMode, markdown, cards });
     await Messages.append(activeConversationId, "user", `📸 Screenshot (${selectedMode})`);
     await Messages.append(activeConversationId, "assistant", selectedMode === "flashcard" ? JSON.stringify(cards) : markdown);
@@ -1421,7 +1421,7 @@ async function processPendingExplain() {
     const raw = await analyzeText(text, "explain");
     refreshUsageDisplay();
 
-    const noteTitle = text.slice(0, 60);
+    const noteTitle = extractTopic(raw, text.slice(0, 60));
     const saved = await saveNote({ title: noteTitle, mode: "explain", markdown: raw, cards: null });
     await Messages.append(activeConversationId, "user", `📝 Explain: "${text.slice(0, 80)}…"`);
     await Messages.append(activeConversationId, "assistant", raw);
@@ -1588,7 +1588,6 @@ captureBtn.addEventListener("click", async () => {
 
     const raw = await analyzeScreenshot(base64, mimeType, selectedMode);
     refreshUsageDisplay();
-    const noteTitle = titleInput.value.trim() || selectedMode;
 
     let markdown = raw;
     let cards = null;
@@ -1603,6 +1602,7 @@ captureBtn.addEventListener("click", async () => {
       markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
     }
 
+    const noteTitle = extractTopic(markdown, titleInput.value.trim() || selectedMode);
     const saved = await saveNote({ title: noteTitle, mode: selectedMode, markdown, cards });
 
     // Append to conversation
@@ -1645,6 +1645,7 @@ function clearSelection() {
 }
 
 chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "closeSidePanel") { window.close(); return; }
   if (msg.type !== "textSelection") return;
   if (msg.text && msg.text.length >= 3) {
     setSelectionActive(msg.text);
@@ -1665,7 +1666,6 @@ askBtn.addEventListener("click", async () => {
     clearSelection();
     const raw = await analyzeText(capturedText, selectedMode);
     refreshUsageDisplay();
-    const noteTitle = titleInput.value.trim() || "Selected text";
 
     let markdown = raw;
     let cards = null;
@@ -1680,6 +1680,7 @@ askBtn.addEventListener("click", async () => {
       markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
     }
 
+    const noteTitle = extractTopic(markdown, titleInput.value.trim() || "Selected text");
     const saved = await saveNote({ title: noteTitle, mode: selectedMode, markdown, cards });
 
     await Messages.append(activeConversationId, "user", `📝 Selected text (${selectedMode})`);
@@ -1726,7 +1727,6 @@ sessionFinish.addEventListener("click", async () => {
   try {
     const raw = await analyzeMulti(sessionFrames, selectedMode);
     refreshUsageDisplay();
-    const noteTitle = titleInput.value.trim() || `Multi (${sessionFrames.length} pages)`;
 
     let markdown = raw;
     let cards = null;
@@ -1741,6 +1741,7 @@ sessionFinish.addEventListener("click", async () => {
       markdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
     }
 
+    const noteTitle = extractTopic(markdown, titleInput.value.trim() || `Multi (${sessionFrames.length} pages)`);
     const saved = await saveNote({ title: noteTitle, mode: selectedMode, markdown, cards });
 
     await Messages.append(activeConversationId, "user", `📸 ${sessionFrames.length} pages (${selectedMode})`);
@@ -1957,7 +1958,6 @@ async function finishAudio() {
     let { markdown } = await transcribeAndSummarize(blob, selectedMode, userNote, chunks);
     refreshUsageDisplay();
 
-    const noteTitle = userNote || "Recording";
     let finalMarkdown = markdown;
     let cards;
 
@@ -1966,6 +1966,7 @@ async function finishAudio() {
       finalMarkdown = cards.map((c, i) => `**Q${i + 1}:** ${c.front}\n**A:** ${c.back}`).join("\n\n");
     }
 
+    const noteTitle = extractTopic(finalMarkdown, userNote || "Recording");
     const saved = await saveNote({ title: noteTitle, mode: audioMode, markdown: finalMarkdown, cards });
 
     await Messages.append(activeConversationId, "user", `🎙️ Recording (${selectedMode})`);

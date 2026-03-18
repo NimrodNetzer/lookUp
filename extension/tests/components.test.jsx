@@ -351,7 +351,7 @@ describe("ChatPage", () => {
     await userEvent.type(screen.getByPlaceholderText(/ask a question/i), "What is entropy?");
     await userEvent.click(screen.getByLabelText("Send"));
 
-    await waitFor(() => expect(screen.getByText("What is entropy?")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("What is entropy?").length).toBeGreaterThan(0));
   });
 
   it("renders streamed assistant response", async () => {

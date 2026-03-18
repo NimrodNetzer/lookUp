@@ -293,7 +293,7 @@ function FolderHeadline({ folder, showUnattached, activeType, visibleNotes, onDr
       )}
     >
       <span className="text-2xl leading-none">{dragOver ? "📂" : "📁"}</span>
-      <h2 className="text-lg font-extrabold text-accent tracking-tight flex-1">
+      <h2 className="text-lg font-extrabold text-text tracking-tight flex-1">
         {folder?.name ?? "Folder"}
         {showUnattached ? (
           <span className="ml-2 text-sm font-semibold text-muted">— Unsorted</span>
@@ -573,10 +573,10 @@ export default function LearningHub({ onOpenNote, actionsRef }) {
           ) : (
             <div className="flex items-center gap-3 mb-5 pb-3 border-b-2 border-accent/30">
               <span className="text-2xl leading-none">📋</span>
-              <h2 className="text-lg font-extrabold text-accent tracking-tight flex-1">
+              <h2 className="text-lg font-extrabold text-text tracking-tight flex-1">
                 {activeFolderId === null && !showUnattached ? "All Notes" : "Unsorted"}
                 {activeType !== null && (
-                  <span className="ml-2 text-sm font-semibold text-accent/60">— {TYPE_GROUPS.find((g) => g.key === activeType)?.label}</span>
+                  <span className="ml-2 text-sm font-semibold text-muted">— {TYPE_GROUPS.find((g) => g.key === activeType)?.label}</span>
                 )}
               </h2>
               <span className="text-xs text-muted">{visibleNotes.length} note{visibleNotes.length !== 1 ? "s" : ""}</span>
