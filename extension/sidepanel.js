@@ -1062,6 +1062,9 @@ async function switchConversation(id) {
   if (cached !== undefined) {
     resultArea.innerHTML = cached;
     reattachResultListeners();
+    // Sync headline title to the current conversation title
+    const conv = conversations.find(c => c.id === id);
+    if (conv?.title) updateResultHeadlines(conv.title);
   } else {
     try {
       const messages = await Messages.listByConversation(id);
@@ -1151,14 +1154,17 @@ function showTabContextMenu(x, y, convId, currentTitle, labelEl) {
 }
 
 function startInlineRename(convId, currentTitle, labelEl) {
-  labelEl.style.display = "none";
+  // Insert input as a sibling of the button (outside it) to avoid
+  // invalid <input>-inside-<button> HTML which causes space to fire button click
+  const btn = labelEl.parentElement; // the <button>
+  btn.style.display = "none";
 
   const input = document.createElement("input");
   input.className = "tab-rename-input";
   input.type = "text";
   input.value = currentTitle;
   input.maxLength = 60;
-  labelEl.parentElement.insertBefore(input, labelEl);
+  btn.parentElement.insertBefore(input, btn);
   input.focus();
   input.select();
 
@@ -1167,7 +1173,7 @@ function startInlineRename(convId, currentTitle, labelEl) {
     if (finished) return;
     finished = true;
     input.remove();
-    labelEl.style.display = "";
+    btn.style.display = "";
     if (save && input.value.trim() && input.value.trim() !== currentTitle) {
       renameConvTab(convId, input.value.trim());
     }
@@ -1180,6 +1186,15 @@ function startInlineRename(convId, currentTitle, labelEl) {
   input.addEventListener("blur", () => finish(true));
 }
 
+function updateResultHeadlines(title) {
+  resultArea.querySelectorAll(".result-headline").forEach((el) => {
+    const colon = el.textContent.indexOf(":");
+    if (colon !== -1) {
+      el.textContent = el.textContent.slice(0, colon + 1) + " " + title;
+    }
+  });
+}
+
 async function renameConvTab(id, title) {
   try {
     await Conversations.rename(id, title);
@@ -1187,6 +1202,7 @@ async function renameConvTab(id, title) {
     if (noteFilename) {
       try { await Notes.updateMeta(noteFilename, { title }); } catch {}
     }
+    if (id === activeConversationId) updateResultHeadlines(title);
     await loadConversations();
   } catch (err) { console.error(err); }
 }
@@ -1308,15 +1324,17 @@ async function processPendingCapture() {
     await Messages.append(activeConversationId, "user", `📸 Screenshot (${selectedMode})`);
     await Messages.append(activeConversationId, "assistant", selectedMode === "flashcard" ? JSON.stringify(cards) : markdown);
 
+    let displayTitle = saved.title;
     const history = await Messages.listByConversation(activeConversationId);
     if (history.length <= 2) {
       const tabTitle = extractTopic(markdown, noteTitle);
-      await Conversations.rename(activeConversationId, tabTitle.slice(0, 60));
+      displayTitle = tabTitle.slice(0, 60);
+      await Conversations.rename(activeConversationId, displayTitle);
       loadConversations();
     }
 
-    if (cards) showFlashcards(cards, saved.title, selectedMode);
-    else showResult(markdown, saved.title, selectedMode);
+    if (cards) showFlashcards(cards, displayTitle, selectedMode);
+    else showResult(markdown, displayTitle, selectedMode);
   } catch (err) { showError(err.message); }
 }
 
@@ -1522,17 +1540,19 @@ captureBtn.addEventListener("click", async () => {
     await Messages.append(activeConversationId, "assistant", selectedMode === "flashcard" ? JSON.stringify(cards) : markdown);
 
     // Auto-rename tab on first capture — use AI topic if found, else mode name
+    let displayTitle = saved.title;
     const history = await Messages.listByConversation(activeConversationId);
     if (history.length <= 2) {
       const tabTitle = extractTopic(markdown, noteTitle);
-      await Conversations.rename(activeConversationId, tabTitle.slice(0, 60));
+      displayTitle = tabTitle.slice(0, 60);
+      await Conversations.rename(activeConversationId, displayTitle);
       loadConversations();
     }
 
     if (cards) {
-      showFlashcards(cards, saved.title, selectedMode);
+      showFlashcards(cards, displayTitle, selectedMode);
     } else {
-      showResult(markdown, saved.title, selectedMode);
+      showResult(markdown, displayTitle, selectedMode);
     }
   } catch (err) { showError(err.message); }
   captureBtn.disabled = false;

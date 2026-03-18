@@ -294,15 +294,57 @@
     .tech-chip:hover { border-color: rgba(124,106,245,0.45); color: var(--purple-lt); background: rgba(124,106,245,0.08); }
     .tech-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--grad); }
 
-    /* ── Demo section ──────────────────────────────────────────────────────── */
-    .demo-frame {
-      border-radius: 16px; border: 1px solid rgba(124,106,245,0.2);
-      background: rgba(10,10,20,0.7); overflow: hidden;
-      box-shadow: 0 16px 60px rgba(0,0,0,0.4); max-width: 760px; margin: 0 auto;
+    /* ── Screenshots section ───────────────────────────────────────────────── */
+    .shots-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 20px;
+      align-items: start;
     }
-    .demo-placeholder {
-      width: 100%; aspect-ratio: 16/9;
-      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    .shot-col {
+      display: flex; flex-direction: column; gap: 20px;
+    }
+    .shot-card {
+      background: rgba(12,12,22,0.7);
+      border: 1px solid rgba(124,106,245,0.18);
+      border-radius: 16px; overflow: hidden;
+      transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      position: relative;
+    }
+    .shot-card:hover {
+      border-color: rgba(124,106,245,0.45);
+      transform: translateY(-4px);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 30px rgba(124,106,245,0.1);
+    }
+    .shot-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      position: absolute; top: 14px; left: 14px; z-index: 2;
+      background: rgba(10,10,20,0.82); border: 1px solid rgba(124,106,245,0.35);
+      border-radius: 100px; padding: 4px 12px;
+      font-size: 11.5px; font-weight: 600; color: var(--purple-lt);
+      backdrop-filter: blur(8px);
+    }
+    .shot-img-wrap {
+      width: 100%; overflow: hidden;
+      background: rgba(8,8,16,0.6);
+    }
+    .shot-portrait .shot-img-wrap { max-height: 540px; }
+    .shot-landscape .shot-img-wrap { max-height: 240px; }
+    .shot-img-wrap img {
+      width: 100%; height: 100%;
+      object-fit: cover; object-position: top;
+      border-radius: 0; display: block;
+      transition: transform 0.4s ease;
+    }
+    .shot-card:hover .shot-img-wrap img { transform: scale(1.02); }
+    .shot-caption {
+      padding: 12px 16px 14px;
+      font-size: 13px; color: var(--muted); line-height: 1.5;
+    }
+    @media (max-width: 700px) {
+      .shots-layout { grid-template-columns: 1fr; }
+      .shot-portrait .shot-img-wrap { max-height: 400px; }
     }
 
     /* ── FAQ ───────────────────────────────────────────────────────────────── */
@@ -504,7 +546,7 @@
         <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
         View on GitHub
       </a>
-      <a class="btn-secondary" href="#demo">Watch demo ↓</a>
+      <a class="btn-secondary" href="#screenshots">See it in action ↓</a>
     </div>
 
     <!-- Hero screenshot — replace .screenshot-placeholder with <img src="screenshots/hero.png" ...> when ready -->
@@ -617,17 +659,42 @@
 
   <div class="divider"></div>
 
-  <!-- ── Demo ───────────────────────────────────────────────────────────────── -->
-  <section class="section container centered" id="demo">
-    <div class="section-label fade-up">Demo</div>
-    <h2 class="section-title fade-up">See it in action</h2>
-    <p class="section-sub fade-up">A quick walkthrough of the capture → chat → save workflow.</p>
-    <div class="demo-frame fade-up">
-      <!-- TO ADD: replace this div with <img src="demo/demo.gif" alt="LookUp demo"> or a <video> tag -->
-      <div class="demo-placeholder">
-        <div class="placeholder-icon">▶</div>
-        <span class="placeholder-text">Demo GIF coming soon</span>
+  <!-- ── Screenshots ──────────────────────────────────────────────────────────── -->
+  <section class="section container" id="screenshots">
+    <div class="centered">
+      <div class="section-label fade-up">Screenshots</div>
+      <h2 class="section-title fade-up">See it in action</h2>
+      <p class="section-sub fade-up">From quiz generation to your personal knowledge hub — all inside Chrome.</p>
+    </div>
+    <div class="shots-layout fade-up">
+
+      <!-- Left: tall portrait sidepanel screenshot -->
+      <div class="shot-card shot-portrait">
+        <div class="shot-badge">❓ Quiz Mode</div>
+        <div class="shot-img-wrap">
+          <img src="screenshots/Screenshot 2026-03-18 112550.png" alt="LookUp quiz mode — AI-generated questions with reveal-on-demand answers" />
+        </div>
+        <p class="shot-caption">Turn any topic into an instant quiz. Reveal answers one by one.</p>
       </div>
+
+      <!-- Right column: two landscape screenshots stacked -->
+      <div class="shot-col">
+        <div class="shot-card shot-landscape">
+          <div class="shot-badge">🗂️ Dashboard</div>
+          <div class="shot-img-wrap">
+            <img src="screenshots/Screenshot 2026-03-18 113848.png" alt="LookUp dashboard — folders and notes overview" />
+          </div>
+          <p class="shot-caption">Browse all your saved notes, sorted into folders.</p>
+        </div>
+        <div class="shot-card shot-landscape">
+          <div class="shot-badge">💬 AI Chat</div>
+          <div class="shot-img-wrap">
+            <img src="screenshots/Screenshot 2026-03-18 115143.png" alt="LookUp chat page — AI explanation with full formatting" />
+          </div>
+          <p class="shot-caption">Ask follow-up questions and get structured explanations.</p>
+        </div>
+      </div>
+
     </div>
   </section>
 
