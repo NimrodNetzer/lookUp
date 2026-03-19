@@ -3,7 +3,7 @@ import katex from "katex";
 import "katex/dist/katex.min.css";
 import CosmicBg from "./CosmicBg.jsx";
 import { Conversations, Messages, Notes, Settings } from "../storage.js";
-import { chatStream, chatStreamRich, transcribeOnly } from "../groq-client.js";
+import { chatStream, chatStreamRich, transcribeOnly, setResponseLanguage } from "../groq-client.js";
 import hljs from "highlight.js/lib/core";
 import javascript from "highlight.js/lib/languages/javascript";
 import python from "highlight.js/lib/languages/python";
@@ -370,6 +370,12 @@ export default function ChatPage() {
   // Load persisted mode on mount
   useEffect(() => {
     Settings.getChatMode().then(m => setActiveModeState(m)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    Settings.getPreferences().then(p => {
+      if (p?.language) setResponseLanguage(p.language);
+    }).catch(() => {});
   }, []);
 
   async function setActiveMode(mode) {
