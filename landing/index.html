@@ -9,13 +9,15 @@
   <meta property="og:description" content="Capture. Ask. Learn. An AI study assistant that lives in your browser." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://lookup-app.vercel.app" />
-  <!-- OG image: drop a 1200×630 screenshot at landing/og-image.png and uncomment: -->
-  <!-- <meta property="og:image" content="https://lookup-app.vercel.app/og-image.png" /> -->
-  <!-- <meta property="og:image:width" content="1200" /> -->
-  <!-- <meta property="og:image:height" content="630" /> -->
+  <!-- OG image: drop a 1200×630 screenshot at landing/og-image.png to enable social previews -->
+  <meta property="og:image" content="https://lookup-app.vercel.app/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:image" content="https://lookup-app.vercel.app/og-image.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="LookUp — AI Study Assistant" />
   <meta name="twitter:description" content="Capture. Ask. Learn. An AI study assistant that lives in your browser." />
+  <meta name="robots" content="index, follow" />
   <!-- <meta name="twitter:image" content="https://lookup-app.vercel.app/og-image.png" /> -->
 
   <!-- ✦ Favicon (SVG, matches logo) -->
@@ -457,6 +459,15 @@
       margin-top: 20px;
       font-size: 12.5px; color: #444; font-style: italic;
     }
+    .copy-url-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-top: 10px; padding: 6px 14px;
+      background: rgba(124,106,245,0.1); border: 1px solid rgba(124,106,245,0.3);
+      border-radius: 8px; color: var(--purple-lt);
+      font-size: 12.5px; font-weight: 500; cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .copy-url-btn:hover { background: rgba(124,106,245,0.2); border-color: rgba(124,106,245,0.5); }
 
     /* ── Divider ───────────────────────────────────────────────────────────── */
     .divider { height: 1px; background: linear-gradient(90deg, transparent 0%, rgba(124,106,245,0.2) 50%, transparent 100%); }
@@ -662,6 +673,10 @@
         <div class="setup-step-body">
           <h4>Enable Developer Mode</h4>
           <p>Open <strong>chrome://extensions</strong> in Chrome and toggle on <strong>Developer mode</strong> in the top-right corner.</p>
+          <button class="copy-url-btn" onclick="navigator.clipboard.writeText('chrome://extensions').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy chrome://extensions',2000)})">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy chrome://extensions
+          </button>
         </div>
       </div>
       <div class="setup-step">
@@ -845,7 +860,7 @@
           <span class="faq-chevron">▾</span>
         </button>
         <div class="faq-a">
-          Groq offers a generous free tier — more than enough for daily study use. You create a free key at console.groq.com in under a minute. LookUp uses your key directly, so you're always in control of usage and costs.
+          Groq offers a generous free tier — more than enough for daily study use. You create a free key at <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a> in under a minute. LookUp uses your key directly, so you're always in control of usage and costs.
         </div>
       </div>
 
@@ -902,8 +917,8 @@
     "quiz me on this.",
     "summarise my lecture.",
     "generate flashcards.",
-    "transcribe my audio.",
-    "analyse this screenshot.",
+    "turn my notes into a quiz.",
+    "prep me for my exam.",
   ];
   const el = document.getElementById("typed-text");
   let pi = 0, ci = 0, deleting = false;
