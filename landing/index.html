@@ -195,7 +195,8 @@
     .stat-text span { color: var(--purple-lt); }
 
     /* ── Hero screenshot ───────────────────────────────────────────────────── */
-    .hero-screenshot { margin: 68px auto 0; max-width: 420px; position: relative; }
+    .hero-screenshots { margin: 68px auto 0; display: flex; gap: 24px; justify-content: center; align-items: flex-start; }
+    .hero-screenshot { max-width: 380px; position: relative; flex: 1; }
     .hero-screenshot-glow {
       position: absolute; inset: -60px;
       background: radial-gradient(ellipse at 50% 50%, rgba(124,106,245,0.22) 0%, transparent 65%);
@@ -553,17 +554,31 @@
       <a class="btn-secondary" href="#screenshots">See it in action ↓</a>
     </div>
 
-    <!-- Hero screenshot — replace .screenshot-placeholder with <img src="screenshots/hero.png" ...> when ready -->
-    <div class="hero-screenshot fade-up">
-      <div class="hero-screenshot-glow"></div>
-      <div class="screenshot-frame">
-        <div class="screenshot-bar">
-          <span class="screenshot-dot red"></span>
-          <span class="screenshot-dot yel"></span>
-          <span class="screenshot-dot grn"></span>
-          <span class="screenshot-title">LookUp — AI Study Assistant</span>
+    <!-- Hero screenshots: Quiz (left) + Flashcards (right) -->
+    <div class="hero-screenshots fade-up">
+      <div class="hero-screenshot">
+        <div class="hero-screenshot-glow"></div>
+        <div class="screenshot-frame">
+          <div class="screenshot-bar">
+            <span class="screenshot-dot red"></span>
+            <span class="screenshot-dot yel"></span>
+            <span class="screenshot-dot grn"></span>
+            <span class="screenshot-title">LookUp — AI Study Assistant</span>
+          </div>
+          <img src="screenshots/Screenshot 2026-03-18 112550.png" alt="LookUp quiz mode" style="width:100%;display:block;border-radius:0;" />
         </div>
-        <img src="screenshots/hero.png" alt="LookUp extension showing AI-generated flashcards" style="width:100%;display:block;border-radius:0;" />
+      </div>
+      <div class="hero-screenshot">
+        <div class="hero-screenshot-glow"></div>
+        <div class="screenshot-frame">
+          <div class="screenshot-bar">
+            <span class="screenshot-dot red"></span>
+            <span class="screenshot-dot yel"></span>
+            <span class="screenshot-dot grn"></span>
+            <span class="screenshot-title">LookUp — AI Study Assistant</span>
+          </div>
+          <img src="screenshots/hero.png" alt="LookUp flashcards mode" style="width:100%;display:block;border-radius:0;" />
+        </div>
       </div>
     </div>
   </section>
@@ -670,26 +685,7 @@
       <h2 class="section-title fade-up">See it in action</h2>
       <p class="section-sub fade-up">From quiz generation to your personal knowledge hub — all inside Chrome.</p>
     </div>
-    <!-- Row 1: Quiz + Flashcards side by side in apple frames -->
     <div class="shots-layout fade-up">
-      <div class="shot-card shot-portrait">
-        <div class="shot-badge">❓ Quiz Mode</div>
-        <div class="shot-img-wrap">
-          <img src="screenshots/Screenshot 2026-03-18 112550.png" alt="LookUp quiz mode — AI-generated questions with reveal-on-demand answers" />
-        </div>
-        <p class="shot-caption">Turn any topic into an instant quiz. Reveal answers one by one.</p>
-      </div>
-      <div class="shot-card shot-portrait">
-        <div class="shot-badge">🃏 Flashcards</div>
-        <div class="shot-img-wrap">
-          <img src="screenshots/Screenshot 2026-03-19 142631.png" alt="LookUp flashcard mode — AI-generated flashcards for active recall" />
-        </div>
-        <p class="shot-caption">Generate flashcards instantly from any content. Study smarter.</p>
-      </div>
-    </div>
-
-    <!-- Row 2: Dashboard + Chat each full width -->
-    <div class="shots-layout fade-up" style="margin-top:2rem;">
       <div class="shot-card shot-landscape" style="flex:1;">
         <div class="shot-badge">🗂️ Dashboard</div>
         <div class="shot-img-wrap">
