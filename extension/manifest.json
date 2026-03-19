@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "LookUp — Study Sensei",
   "version": "1.0.0",
-  "description": "Capture your screen on-demand for AI-powered summaries, formulas, and Q&A.",
+  "description": "Capture your screen on-demand for AI-powered summaries, flashcards, and Q&A.",
 
   "permissions": [
     "activeTab",
