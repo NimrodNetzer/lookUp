@@ -190,28 +190,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.runtime.sendMessage({ type: "recordingError", error: msg.error }).catch(() => {});
     return;
   }
-});
 
-// Relay tab audio stream ID to the side panel.
-// chrome.tabCapture.getMediaStreamId must be called from the service worker;
-// the side panel then uses the returned streamId with getUserMedia.
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.type !== "getTabCaptureStreamId") return false;
-  // Try without targetTabId first — works for the active tab without requiring
-  // that the extension was previously "invoked" on that specific tab.
-  chrome.tabCapture.getMediaStreamId({}, (streamId) => {
-    if (!chrome.runtime.lastError) { sendResponse({ streamId }); return; }
-    // Fallback: query the active tab explicitly
-    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-      if (!tab) { sendResponse({ error: "No active tab" }); return; }
-      chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id }, (streamId2) => {
-        if (chrome.runtime.lastError) {
-          sendResponse({ error: chrome.runtime.lastError.message });
-        } else {
-          sendResponse({ streamId: streamId2 });
-        }
+  // ── Relay tab audio stream ID to the side panel ───────────────────────────
+  // chrome.tabCapture.getMediaStreamId must be called from the service worker;
+  // the side panel then uses the returned streamId with getUserMedia.
+  if (msg.type === "getTabCaptureStreamId") {
+    // Try without targetTabId first — works for the active tab without requiring
+    // that the extension was previously "invoked" on that specific tab.
+    chrome.tabCapture.getMediaStreamId({}, (streamId) => {
+      if (!chrome.runtime.lastError) { sendResponse({ streamId }); return; }
+      // Fallback: query the active tab explicitly
+      chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+        if (!tab) { sendResponse({ error: "No active tab" }); return; }
+        chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id }, (streamId2) => {
+          if (chrome.runtime.lastError) {
+            sendResponse({ error: chrome.runtime.lastError.message });
+          } else {
+            sendResponse({ streamId: streamId2 });
+          }
+        });
       });
     });
-  });
-  return true; // keep channel open for async sendResponse
+    return true; // keep channel open for async sendResponse
+  }
 });

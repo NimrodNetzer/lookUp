@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — LookUp</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%239d8cff'/><stop offset='50%25' stop-color='%237c6af5'/><stop offset='100%25' stop-color='%235eead4'/></linearGradient></defs><text y='.9em' font-size='90' fill='url(%23g)'>✦</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: Inter, system-ui, sans-serif;
+      background: #010108;
+      color: #e8e8f0;
+      line-height: 1.7;
+    }
+    a { color: #9d8cff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    :root {
+      --purple:    #7c6af5;
+      --purple-lt: #9d8cff;
+      --teal:      #5eead4;
+      --border:    rgba(124,106,245,0.2);
+      --muted:     #888;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.2rem 2rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .logo {
+      font-size: 1.2rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--purple-lt), var(--teal));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    nav a.back {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    nav a.back:hover { color: #e8e8f0; text-decoration: none; }
+
+    main {
+      max-width: 720px;
+      margin: 3rem auto 5rem;
+      padding: 0 1.5rem;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 0.4rem;
+      background: linear-gradient(135deg, var(--purple-lt), var(--teal));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .updated {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 2.5rem;
+    }
+
+    section { margin-bottom: 2rem; }
+    h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--purple-lt);
+      margin-bottom: 0.6rem;
+    }
+    p { color: #c8c8d8; margin-bottom: 0.8rem; }
+    ul {
+      color: #c8c8d8;
+      padding-left: 1.4rem;
+      margin-bottom: 0.8rem;
+    }
+    ul li { margin-bottom: 0.3rem; }
+
+    .highlight {
+      background: rgba(124,106,245,0.08);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.2rem;
+      margin-bottom: 1rem;
+      color: #c8c8d8;
+    }
+    .highlight strong { color: var(--teal); }
+
+    footer {
+      text-align: center;
+      padding: 2rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">LookUp ✦</span>
+  <a class="back" href="/">← Back to home</a>
+</nav>
+
+<main>
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: March 2026</p>
+
+  <div class="highlight">
+    <strong>Short version:</strong> LookUp runs entirely on your device. Your screenshots, audio, notes, and API key never leave your browser except when you explicitly send a query to Groq's AI API. We collect nothing.
+  </div>
+
+  <section>
+    <h2>1. What LookUp Is</h2>
+    <p>LookUp is a Chrome extension that acts as an AI-powered study assistant. It can capture screenshots, transcribe audio, and chat with an AI model to help you understand what's on your screen.</p>
+  </section>
+
+  <section>
+    <h2>2. Data We Do NOT Collect</h2>
+    <p>We do not operate any servers, databases, or analytics. We have no way to collect your data because there is no backend to send it to. Specifically, we never collect:</p>
+    <ul>
+      <li>Your name, email address, or any account information</li>
+      <li>Your screenshots or screen content</li>
+      <li>Your audio recordings</li>
+      <li>Your notes or conversation history</li>
+      <li>Your Groq API key</li>
+      <li>Browsing history or visited URLs</li>
+      <li>Usage analytics or crash reports</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>3. Data Stored Locally on Your Device</h2>
+    <p>All data is stored exclusively on your device using Chrome's built-in storage APIs:</p>
+    <ul>
+      <li><strong>IndexedDB</strong> — stores your notes, conversations, and messages locally in Chrome</li>
+      <li><strong>chrome.storage.local</strong> — stores your Groq API key and display preferences</li>
+    </ul>
+    <p>This data never leaves your device except as described in Section 4. You can delete it at any time by removing the extension.</p>
+  </section>
+
+  <section>
+    <h2>4. Data Sent to Groq (Third Party)</h2>
+    <p>When you ask a question, LookUp sends your query (and optionally a screenshot or audio transcript) directly from your browser to <strong>Groq's API</strong> at <code style="color:var(--teal)">api.groq.com</code>. This is the only external service the extension communicates with.</p>
+    <p>What is sent to Groq:</p>
+    <ul>
+      <li>The text of your question or prompt</li>
+      <li>A screenshot image, only when you explicitly trigger a screen capture</li>
+      <li>Transcribed audio text, only when you explicitly record audio</li>
+    </ul>
+    <p>Groq's own privacy policy governs how they handle this data. We recommend reviewing it at <a href="https://groq.com/privacy-policy" target="_blank">groq.com/privacy-policy</a>.</p>
+    <p>Your Groq API key is sent as an authorization header with each request — it is never logged or stored by us.</p>
+  </section>
+
+  <section>
+    <h2>5. Permissions Explained</h2>
+    <ul>
+      <li><strong>Screenshots / activeTab / tabs</strong> — used only when you explicitly click "Capture" to take a screenshot of your current tab</li>
+      <li><strong>Audio / tabCapture / offscreen</strong> — used only when you explicitly start an audio recording</li>
+      <li><strong>sidePanel</strong> — displays the LookUp panel inside Chrome</li>
+      <li><strong>storage</strong> — saves your notes, conversations, and API key locally on your device</li>
+      <li><strong>contextMenus</strong> — adds a right-click option to send selected text to LookUp</li>
+      <li><strong>notifications</strong> — shows a notification when a screenshot is captured via keyboard shortcut while the panel is closed</li>
+      <li><strong>&lt;all_urls&gt; host permission</strong> — required so the content script can detect text selections on any webpage, and so the extension can capture screenshots of any tab the user is actively viewing</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>6. Children's Privacy</h2>
+    <p>LookUp is not directed at children under 13. We do not knowingly collect any information from children.</p>
+  </section>
+
+  <section>
+    <h2>7. Changes to This Policy</h2>
+    <p>If we make material changes to this policy, we will update the "Last updated" date above. Continued use of the extension after changes constitutes acceptance of the updated policy.</p>
+  </section>
+
+  <section>
+    <h2>8. Contact</h2>
+    <p>Questions about this privacy policy? Open an issue on our <a href="https://github.com/nmro184/lookUp" target="_blank">GitHub repository</a>.</p>
+  </section>
+</main>
+
+<footer>
+  &copy; 2026 LookUp. All rights reserved.
+</footer>
+
+</body>
+</html>
