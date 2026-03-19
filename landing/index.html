@@ -410,6 +410,48 @@
     .footer-link { font-size: 12.5px; color: #444; transition: color 0.15s; }
     .footer-link:hover { color: var(--purple-lt); }
 
+    /* ── Get Started section ───────────────────────────────────────────────── */
+    .get-started-section {
+      padding: 80px 0 64px;
+      text-align: center;
+    }
+    .get-started-dl {
+      display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+      margin-bottom: 52px;
+    }
+    .setup-steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+      max-width: 900px;
+      margin: 0 auto;
+      text-align: left;
+    }
+    .setup-step {
+      background: rgba(12,12,22,0.65);
+      border: 1px solid rgba(124,106,245,0.16);
+      border-radius: 14px;
+      padding: 22px 20px;
+      display: flex; gap: 14px; align-items: flex-start;
+      transition: border-color 0.2s, transform 0.18s;
+    }
+    .setup-step:hover { border-color: rgba(124,106,245,0.38); transform: translateY(-2px); }
+    .setup-step-num {
+      flex-shrink: 0;
+      width: 32px; height: 32px; border-radius: 50%;
+      background: linear-gradient(135deg, rgba(124,106,245,0.25), rgba(94,234,212,0.1));
+      border: 1px solid rgba(124,106,245,0.4);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 800; color: var(--purple-lt);
+    }
+    .setup-step-body h4 { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 5px; }
+    .setup-step-body p  { font-size: 13px; color: var(--muted); line-height: 1.55; }
+    .setup-step-body a  { color: var(--purple-lt); text-decoration: underline; }
+    .setup-note {
+      margin-top: 20px;
+      font-size: 12.5px; color: #444; font-style: italic;
+    }
+
     /* ── Divider ───────────────────────────────────────────────────────────── */
     .divider { height: 1px; background: linear-gradient(90deg, transparent 0%, rgba(124,106,245,0.2) 50%, transparent 100%); }
 
@@ -581,6 +623,57 @@
         </div>
       </div>
     </div>
+  </section>
+
+  <!-- ── Get Started ──────────────────────────────────────────────────────── -->
+  <div class="divider"></div>
+  <section class="get-started-section container" id="get-started">
+    <div class="section-label fade-up">Get Started</div>
+    <h2 class="section-title fade-up">Ready in under a minute</h2>
+    <p class="section-sub fade-up" style="margin-left:auto;margin-right:auto;max-width:500px;">
+      No account. No server. No subscription. Just download, load in Chrome, and start asking.
+    </p>
+    <div class="get-started-dl fade-up">
+      <a class="btn-primary" href="/LookUp-extension.zip" download>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download for Chrome
+      </a>
+      <span class="btn-secondary" style="opacity:0.5;cursor:default;pointer-events:none;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Chrome Web Store — coming soon
+      </span>
+    </div>
+    <div class="setup-steps fade-up">
+      <div class="setup-step">
+        <div class="setup-step-num">1</div>
+        <div class="setup-step-body">
+          <h4>Download &amp; extract</h4>
+          <p>Click the button above to download the zip. Extract it anywhere on your computer.</p>
+        </div>
+      </div>
+      <div class="setup-step">
+        <div class="setup-step-num">2</div>
+        <div class="setup-step-body">
+          <h4>Load in Chrome</h4>
+          <p>Open <strong>chrome://extensions</strong>, enable <em>Developer mode</em> (top-right toggle), then click <strong>Load unpacked</strong> and select the extracted folder.</p>
+        </div>
+      </div>
+      <div class="setup-step">
+        <div class="setup-step-num">3</div>
+        <div class="setup-step-body">
+          <h4>Get a free Groq API key</h4>
+          <p>Sign up at <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a> (30 seconds, no card needed) and copy your API key.</p>
+        </div>
+      </div>
+      <div class="setup-step">
+        <div class="setup-step-num">4</div>
+        <div class="setup-step-body">
+          <h4>Paste &amp; go</h4>
+          <p>Click the LookUp icon in your Chrome toolbar, paste your API key when prompted, and you're live.</p>
+        </div>
+      </div>
+    </div>
+    <p class="setup-note fade-up">Brave, Edge, and all Chromium-based browsers are supported. Firefox is not currently supported.</p>
   </section>
 
   <!-- ── Stats strip ────────────────────────────────────────────────────────── -->
