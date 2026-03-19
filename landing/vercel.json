@@ -1,6 +1,15 @@
 {
   "rewrites": [
     { "source": "/privacy", "destination": "/privacy.html" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!LookUp-extension\\.zip).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/LookUp-extension.zip",
+      "headers": [
+        { "key": "Content-Type", "value": "application/zip" },
+        { "key": "Content-Disposition", "value": "attachment; filename=\"LookUp-extension.zip\"" }
+      ]
+    }
   ]
 }
