@@ -195,8 +195,10 @@
     .stat-text span { color: var(--purple-lt); }
 
     /* ── Hero screenshot ───────────────────────────────────────────────────── */
-    .hero-screenshots { margin: 68px auto 0; display: flex; gap: 24px; justify-content: center; align-items: flex-start; }
-    .hero-screenshot { max-width: 380px; position: relative; flex: 1; }
+    .hero-screenshots { margin: 68px auto 0; display: flex; gap: 24px; justify-content: center; align-items: stretch; }
+    .hero-screenshot { max-width: 380px; position: relative; flex: 1; display: flex; flex-direction: column; }
+    .hero-screenshot .screenshot-frame { flex: 1; display: flex; flex-direction: column; }
+    .hero-screenshot .screenshot-frame img { flex: 1; object-fit: cover; object-position: top; height: 0; min-height: 200px; }
     .hero-screenshot-glow {
       position: absolute; inset: -60px;
       background: radial-gradient(ellipse at 50% 50%, rgba(124,106,245,0.22) 0%, transparent 65%);
@@ -297,10 +299,9 @@
 
     /* ── Screenshots section ───────────────────────────────────────────────── */
     .shots-layout {
-      display: grid;
-      grid-template-columns: 260px 1fr;
+      display: flex;
       gap: 20px;
-      align-items: start;
+      align-items: stretch;
     }
     .shot-col {
       display: flex; flex-direction: column; gap: 20px;
@@ -312,6 +313,8 @@
       transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
       box-shadow: 0 8px 32px rgba(0,0,0,0.4);
       position: relative;
+      display: flex; flex-direction: column;
+      flex: 1;
     }
     .shot-card:hover {
       border-color: rgba(124,106,245,0.45);
@@ -329,23 +332,23 @@
     .shot-img-wrap {
       width: 100%; overflow: hidden;
       background: rgba(8,8,16,0.6);
+      flex: 1;
     }
-    .shot-portrait .shot-img-wrap { max-height: 540px; }
-    .shot-landscape .shot-img-wrap { max-height: 240px; }
     .shot-img-wrap img {
       width: 100%; height: 100%;
       object-fit: cover; object-position: top;
       border-radius: 0; display: block;
       transition: transform 0.4s ease;
+      min-height: 220px;
     }
     .shot-card:hover .shot-img-wrap img { transform: scale(1.02); }
     .shot-caption {
       padding: 12px 16px 14px;
       font-size: 13px; color: var(--muted); line-height: 1.5;
+      flex-shrink: 0;
     }
     @media (max-width: 700px) {
-      .shots-layout { grid-template-columns: 1fr; }
-      .shot-portrait .shot-img-wrap { max-height: 400px; }
+      .shots-layout { flex-direction: column; }
     }
 
     /* ── FAQ ───────────────────────────────────────────────────────────────── */
@@ -421,11 +424,14 @@
     }
     .setup-steps {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      grid-template-columns: repeat(3, 1fr);
       gap: 16px;
-      max-width: 900px;
+      max-width: 960px;
       margin: 0 auto;
       text-align: left;
+    }
+    @media (max-width: 720px) {
+      .setup-steps { grid-template-columns: 1fr; }
     }
     .setup-step {
       background: rgba(12,12,22,0.65);
@@ -648,32 +654,46 @@
         <div class="setup-step-num">1</div>
         <div class="setup-step-body">
           <h4>Download &amp; extract</h4>
-          <p>Click the button above to download the zip. Extract it anywhere on your computer.</p>
+          <p>Click the button above to download the zip. Extract the folder anywhere on your computer.</p>
         </div>
       </div>
       <div class="setup-step">
         <div class="setup-step-num">2</div>
         <div class="setup-step-body">
-          <h4>Load in Chrome</h4>
-          <p>Open <strong>chrome://extensions</strong>, enable <em>Developer mode</em> (top-right toggle), then click <strong>Load unpacked</strong> and select the extracted folder.</p>
+          <h4>Enable Developer Mode</h4>
+          <p>Open <strong>chrome://extensions</strong> in Chrome and toggle on <strong>Developer mode</strong> in the top-right corner.</p>
         </div>
       </div>
       <div class="setup-step">
         <div class="setup-step-num">3</div>
+        <div class="setup-step-body">
+          <h4>Load unpacked</h4>
+          <p>Click <strong>Load unpacked</strong>, select the extracted folder, and LookUp will appear in your extensions.</p>
+        </div>
+      </div>
+      <div class="setup-step">
+        <div class="setup-step-num">4</div>
         <div class="setup-step-body">
           <h4>Get a free Groq API key</h4>
           <p>Sign up at <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a> (30 seconds, no card needed) and copy your API key.</p>
         </div>
       </div>
       <div class="setup-step">
-        <div class="setup-step-num">4</div>
+        <div class="setup-step-num">5</div>
         <div class="setup-step-body">
           <h4>Paste &amp; go</h4>
           <p>Click the LookUp icon in your Chrome toolbar, paste your API key when prompted, and you're live.</p>
         </div>
       </div>
+      <div class="setup-step">
+        <div class="setup-step-num">6</div>
+        <div class="setup-step-body">
+          <h4>Capture &amp; ask</h4>
+          <p>Screenshot any tab, record a lecture, or paste text — then ask LookUp to explain, quiz, summarise, or generate flashcards.</p>
+        </div>
+      </div>
     </div>
-    <p class="setup-note fade-up">Brave, Edge, and all Chromium-based browsers are supported. Firefox is not currently supported.</p>
+    <p class="setup-note fade-up">Works on Chrome, Brave, Edge, and all Chromium-based browsers. Firefox is not currently supported.</p>
   </section>
 
   <!-- ── Stats strip ────────────────────────────────────────────────────────── -->
@@ -743,34 +763,6 @@
 
   <div class="divider"></div>
 
-  <!-- ── How it works ───────────────────────────────────────────────────────── -->
-  <section class="section container" id="how-it-works">
-    <div class="centered">
-      <div class="section-label fade-up">How it works</div>
-      <h2 class="section-title fade-up">Three steps to your AI tutor</h2>
-      <p class="section-sub fade-up">No account. No server. No cost. Just load unpacked in Chrome and you're ready.</p>
-    </div>
-    <div class="steps">
-      <div class="step fade-up">
-        <div class="step-num">1</div>
-        <h3>Install the extension</h3>
-        <p>Download the zip above, extract it, and load it in Chrome via <strong>chrome://extensions → Load unpacked</strong> — takes under a minute. Enter your free Groq API key and you're live. <em>Chrome Web Store listing coming soon.</em></p>
-      </div>
-      <div class="step fade-up">
-        <div class="step-num">2</div>
-        <h3>Capture your content</h3>
-        <p>Screenshot any tab, paste an image, drop a file, or record your voice. LookUp understands text, visuals, and audio equally.</p>
-      </div>
-      <div class="step fade-up">
-        <div class="step-num">3</div>
-        <h3>Ask anything</h3>
-        <p>Type your question. Get a clear explanation, a quiz, flashcards, or a structured summary — instantly, using state-of-the-art AI.</p>
-      </div>
-    </div>
-  </section>
-
-  <div class="divider"></div>
-
   <!-- ── Screenshots ──────────────────────────────────────────────────────────── -->
   <section class="section container" id="screenshots">
     <div class="centered">
@@ -789,7 +781,7 @@
       <div class="shot-card shot-landscape" style="flex:1;">
         <div class="shot-badge">💬 AI Chat</div>
         <div class="shot-img-wrap">
-          <img src="screenshots/Screenshot 2026-03-18 115143.png" alt="LookUp chat page — AI explanation with full formatting" />
+          <img src="screenshots/chatPageWeb.png" alt="LookUp chat page — AI explanation with full formatting" />
         </div>
         <p class="shot-caption">Ask follow-up questions and get structured explanations.</p>
       </div>
