@@ -256,8 +256,8 @@ document.getElementById("moreFullscreenBtn").addEventListener("click", () => {
 });
 
 // ── Sidepanel zoom controls ───────────────────────────────────────────────────
-const ZOOM_STEPS = [0.7, 0.8, 0.9, 0.95, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
-const ZOOM_DEFAULT = 4; // index of 1.0
+const ZOOM_STEPS = [0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.4, 1.5, 1.6, 1.75, 2.0];
+const ZOOM_DEFAULT = 8; // index of 1.0
 const BASE_ZOOM = 0.9; // baked-in base scale so "100%" feels like 90% browser zoom
 let _zoomIdx = ZOOM_DEFAULT;
 
