@@ -58,9 +58,11 @@ async function storeMeta(obj) {
 
 let mediaRecorder = null;
 let _blobType = "audio/webm";
+let _pendingChunks = []; // track in-flight storeChunk promises so onstop can await them
 
 async function startRecording({ source, streamId }) {
   await clearRecordingDB();
+  _pendingChunks = [];
 
   let stream;
   if (source === "tab") {
@@ -79,12 +81,19 @@ async function startRecording({ source, streamId }) {
   _blobType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg";
   mediaRecorder = new MediaRecorder(stream, { mimeType: _blobType });
 
-  mediaRecorder.ondataavailable = async (e) => {
-    if (e.data.size > 0) await storeChunk(e.data);
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) {
+      const p = storeChunk(e.data);
+      _pendingChunks.push(p);
+    }
   };
 
   mediaRecorder.onstop = async () => {
     stream.getTracks().forEach(t => t.stop());
+    // Wait for ALL chunk writes to finish before storing meta and notifying sidepanel.
+    // Without this, the last chunk (fired just before onstop) may not be in IDB yet.
+    await Promise.all(_pendingChunks);
+    _pendingChunks = [];
     await storeMeta({ blobType: _blobType });
     chrome.runtime.sendMessage({ type: "recordingDone" });
   };

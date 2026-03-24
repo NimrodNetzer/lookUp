@@ -393,19 +393,29 @@ async function transcribeBlob(key, blob, filename = "audio.webm") {
 // Build valid WebM segment blobs from raw MediaRecorder chunks.
 // The first chunk always contains the WebM init header (EBML + Tracks).
 // Every segment must start with it so ffmpeg/Whisper can decode it.
+// Splits by actual byte size (not chunk count) to stay under MAX_WHISPER_BYTES.
 function buildSegmentBlobs(chunks, blobType) {
   if (!chunks || chunks.length === 0) return [];
   const totalSize = chunks.reduce((s, c) => s + c.size, 0);
-  const numSegments = Math.ceil(totalSize / MAX_WHISPER_BYTES);
-  if (numSegments <= 1) return [new Blob(chunks, { type: blobType })];
+  if (totalSize <= MAX_WHISPER_BYTES) return [new Blob(chunks, { type: blobType })];
 
   const initChunk = chunks[0];
   const dataChunks = chunks.slice(1);
-  const perSegment = Math.ceil(dataChunks.length / numSegments);
   const blobs = [];
-  for (let i = 0; i < dataChunks.length; i += perSegment) {
-    blobs.push(new Blob([initChunk, ...dataChunks.slice(i, i + perSegment)], { type: blobType }));
+  let current = [initChunk];
+  let currentSize = initChunk.size;
+
+  for (const chunk of dataChunks) {
+    // If adding this chunk would exceed the limit, flush current segment first
+    if (currentSize + chunk.size > MAX_WHISPER_BYTES && current.length > 1) {
+      blobs.push(new Blob(current, { type: blobType }));
+      current = [initChunk]; // every segment must start with the init chunk
+      currentSize = initChunk.size;
+    }
+    current.push(chunk);
+    currentSize += chunk.size;
   }
+  if (current.length > 1) blobs.push(new Blob(current, { type: blobType }));
   return blobs;
 }
 
