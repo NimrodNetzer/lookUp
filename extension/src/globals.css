@@ -380,6 +380,12 @@
 /* ── Math error fallback ──────────────────────────────────────────────────── */
 .math-err { color: #f87171; font-size: 12px; }
 
+/* ── Math direction (always LTR regardless of surrounding RTL text) ───────── */
+.math-block, .math-inline, .katex, .katex * {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
 /* ── Drag overlay ─────────────────────────────────────────────────────────── */
 .chat-drag-overlay {
   position: fixed; inset: 0; z-index: 9000;

@@ -77,19 +77,19 @@ function renderMd(raw) {
 
   // 2. Stash block math \begin{cases}...\end{cases}
   text = text.replace(/\\begin\{cases\}([\s\S]*?)\\end\{cases\}/g, (_, body) => {
-    blocks.push(`<div class="math-block">${renderMathExpr(`\\begin{cases}${body}\\end{cases}`, true)}</div>`);
+    blocks.push(`<div class="math-block" dir="ltr">${renderMathExpr(`\\begin{cases}${body}\\end{cases}`, true)}</div>`);
     return `\x00B${blocks.length - 1}\x00`;
   });
 
   // 3. Stash $$...$$ block math
   text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
-    blocks.push(`<div class="math-block">${renderMathExpr(math.trim(), true)}</div>`);
+    blocks.push(`<div class="math-block" dir="ltr">${renderMathExpr(math.trim(), true)}</div>`);
     return `\x00B${blocks.length - 1}\x00`;
   });
 
   // 4. Stash $...$ inline math
   text = text.replace(/\$([^$\n]+?)\$/g, (_, math) => {
-    blocks.push(`<span class="math-inline">${renderMathExpr(math.trim(), false)}</span>`);
+    blocks.push(`<span class="math-inline" dir="ltr">${renderMathExpr(math.trim(), false)}</span>`);
     return `\x00B${blocks.length - 1}\x00`;
   });
 

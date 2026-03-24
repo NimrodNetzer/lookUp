@@ -61,25 +61,7 @@
     }
   ],
 
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "built/dashboard.html",
-        "built/chat.html",
-        "built/assets/*",
-        "mic-permission.html",
-        "mic-permission.js",
-        "vendor/katex.min.js",
-        "vendor/katex.min.css",
-        "vendor/fonts/*",
-        "vendor/pdf.worker.min.js",
-        "vendor/pdf.min.js",
-        "pdf-viewer.html",
-        "pdf-viewer.js"
-      ],
-      "matches": ["chrome-extension://*/*"]
-    }
-  ],
+  "minimum_chrome_version": "116",
 
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"

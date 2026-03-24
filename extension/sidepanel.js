@@ -1576,6 +1576,10 @@ captureBtn.addEventListener("click", async () => {
     startAudioCapture(); return;
   }
 
+  // If the user has typed a question, route through sendChatMessage so the
+  // question is included with the screenshot instead of being ignored.
+  if (titleInput.value.trim()) { sendChatMessage(); return; }
+
   // In multi-page session, Capture adds a frame instead of analyzing immediately
   if (inSession) { addPageBtn.click(); return; }
 
@@ -2296,19 +2300,19 @@ function renderMarkdown(raw) {
 
   text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
     const i = blocks.length;
-    blocks.push(`<div class="math-block">${renderMath(math.trim(), true)}</div>`);
+    blocks.push(`<div class="math-block" dir="ltr">${renderMath(math.trim(), true)}</div>`);
     return `\x00B${i}\x00`;
   });
 
   text = text.replace(/\$([^$\n]+?)\$/g, (_, math) => {
     const i = blocks.length;
-    blocks.push(`<span class="math-inline">${renderMath(math.trim(), false)}</span>`);
+    blocks.push(`<span class="math-inline" dir="ltr">${renderMath(math.trim(), false)}</span>`);
     return `\x00B${i}\x00`;
   });
 
   text = text.replace(/\\begin\{cases\}([\s\S]*?)\\end\{cases\}/g, (_, body) => {
     const i = blocks.length;
-    blocks.push(`<div class="math-block">${renderMath(`\\begin{cases}${body}\\end{cases}`, true)}</div>`);
+    blocks.push(`<div class="math-block" dir="ltr">${renderMath(`\\begin{cases}${body}\\end{cases}`, true)}</div>`);
     return `\x00B${i}\x00`;
   });
 
