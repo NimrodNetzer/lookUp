@@ -196,6 +196,29 @@
     .stat-text { font-size: 14px; font-weight: 600; color: #ccc; letter-spacing: 0.2px; }
     .stat-text span { color: var(--purple-lt); }
 
+    /* ── Overview video ───────────────────────────────────────────────────── */
+    .video-section { padding: 80px 0 20px; text-align: center; }
+    .video-wrapper {
+      position: relative; margin: 40px auto 0; max-width: 820px;
+    }
+    .video-glow {
+      position: absolute; inset: -60px;
+      background: radial-gradient(ellipse at 50% 50%, rgba(124,106,245,0.25) 0%, transparent 65%);
+      pointer-events: none; z-index: 0;
+    }
+    .video-frame {
+      position: relative; z-index: 1;
+      border-radius: 16px; border: 1px solid rgba(124,106,245,0.25);
+      background: rgba(12,12,22,0.85); overflow: hidden;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(124,106,245,0.1);
+    }
+    .video-bar {
+      display: flex; align-items: center; gap: 7px; padding: 12px 16px;
+      border-bottom: 1px solid rgba(124,106,245,0.1); background: rgba(8,8,16,0.6);
+    }
+    .video-bar .screenshot-title { margin-left: auto; margin-right: auto; font-size: 11.5px; color: #444; letter-spacing: 0.3px; }
+    .video-frame iframe { display: block; }
+
     /* ── Hero screenshot ───────────────────────────────────────────────────── */
     .hero-screenshots { margin: 68px auto 0; display: flex; gap: 24px; justify-content: center; align-items: stretch; }
     .hero-screenshot { max-width: 380px; position: relative; flex: 1; display: flex; flex-direction: column; }
@@ -610,7 +633,7 @@
         <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
         View on GitHub
       </a>
-      <a class="btn-secondary" href="#screenshots">See it in action ↓</a>
+      <a class="btn-secondary" href="#overview">See it in action ↓</a>
     </div>
 
     <!-- Hero screenshots: Quiz (left) + Flashcards (right) -->
@@ -638,6 +661,34 @@
           </div>
           <img src="screenshots/flashcardsWeb.png" alt="LookUp flashcards mode" style="width:100%;display:block;border-radius:0;" />
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Overview Video ──────────────────────────────────────────────────── -->
+  <div class="divider"></div>
+  <section class="video-section container" id="overview">
+    <div class="section-label fade-up">See it in action</div>
+    <h2 class="section-title fade-up">Watch the overview</h2>
+    <p class="section-sub fade-up" style="margin-left:auto;margin-right:auto;max-width:520px;">
+      See how LookUp captures your screen, asks your AI tutor, and saves notes — all in under two minutes.
+    </p>
+    <div class="video-wrapper fade-up">
+      <div class="video-glow"></div>
+      <div class="video-frame">
+        <div class="video-bar">
+          <span class="screenshot-dot red"></span>
+          <span class="screenshot-dot yel"></span>
+          <span class="screenshot-dot grn"></span>
+          <span class="screenshot-title">LookUp — Overview</span>
+        </div>
+        <iframe
+          src="https://www.youtube.com/embed/cxC8Wj3lXS8"
+          title="LookUp Overview"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowfullscreen
+          style="width:100%;aspect-ratio:16/9;display:block;border:0;">
+        </iframe>
       </div>
     </div>
   </section>
