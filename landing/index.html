@@ -443,54 +443,116 @@
       padding: 80px 0 64px;
       text-align: center;
     }
-    .get-started-dl {
-      display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
-      margin-bottom: 52px;
-    }
-    .setup-steps {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-      max-width: 960px;
-      margin: 0 auto;
+
+    /* ── Install paths ── */
+    .install-paths {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 20px; max-width: 860px; margin: 44px auto 0;
       text-align: left;
     }
-    @media (max-width: 720px) {
-      .setup-steps { grid-template-columns: 1fr; }
+    @media (max-width: 700px) { .install-paths { grid-template-columns: 1fr; } }
+
+    .install-card {
+      position: relative; overflow: hidden;
+      border-radius: 20px; padding: 32px 28px 28px;
+      display: flex; flex-direction: column; gap: 20px;
+      transition: transform 0.2s, box-shadow 0.2s;
     }
-    .setup-step {
-      background: rgba(12,12,22,0.65);
-      border: 1px solid rgba(124,106,245,0.16);
-      border-radius: 14px;
-      padding: 22px 20px;
-      display: flex; gap: 14px; align-items: flex-start;
-      transition: border-color 0.2s, transform 0.18s;
+    .install-card:hover { transform: translateY(-3px); }
+
+    .install-card.primary {
+      background: linear-gradient(145deg, rgba(124,106,245,0.18) 0%, rgba(94,234,212,0.07) 100%);
+      border: 1px solid rgba(124,106,245,0.45);
+      box-shadow: 0 0 0 1px rgba(124,106,245,0.08), 0 20px 60px rgba(124,106,245,0.18);
     }
-    .setup-step:hover { border-color: rgba(124,106,245,0.38); transform: translateY(-2px); }
-    .setup-step-num {
-      flex-shrink: 0;
-      width: 32px; height: 32px; border-radius: 50%;
-      background: linear-gradient(135deg, rgba(124,106,245,0.25), rgba(94,234,212,0.1));
-      border: 1px solid rgba(124,106,245,0.4);
+    .install-card.primary::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(ellipse at 20% 0%, rgba(124,106,245,0.18) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .install-card.secondary {
+      background: rgba(12,12,22,0.7);
+      border: 1px solid rgba(255,255,255,0.07);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    }
+
+    .install-card-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 12px; border-radius: 20px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase;
+      width: fit-content;
+    }
+    .install-card.primary .install-card-badge {
+      background: rgba(124,106,245,0.2); border: 1px solid rgba(124,106,245,0.4);
+      color: var(--purple-lt);
+    }
+    .install-card.secondary .install-card-badge {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      color: #666;
+    }
+    .install-card-title {
+      font-size: 20px; font-weight: 800; color: var(--text); margin-bottom: 4px;
+    }
+    .install-card.primary .install-card-title {
+      background: var(--grad); -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .install-card-desc { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+
+    .install-steps { display: flex; flex-direction: column; gap: 14px; }
+    .install-step {
+      display: flex; align-items: flex-start; gap: 13px;
+    }
+    .install-step-num {
+      flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      font-size: 13px; font-weight: 800; color: var(--purple-lt);
+      font-size: 12px; font-weight: 800;
     }
-    .setup-step-body h4 { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 5px; }
-    .setup-step-body p  { font-size: 13px; color: var(--muted); line-height: 1.55; }
-    .setup-step-body a  { color: var(--purple-lt); text-decoration: underline; }
-    .setup-note {
-      margin-top: 20px;
-      font-size: 12.5px; color: #444; font-style: italic;
+    .install-card.primary .install-step-num {
+      background: linear-gradient(135deg, rgba(124,106,245,0.3), rgba(94,234,212,0.15));
+      border: 1px solid rgba(124,106,245,0.5); color: var(--purple-lt);
     }
+    .install-card.secondary .install-step-num {
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); color: #555;
+    }
+    .install-step-body { padding-top: 3px; }
+    .install-step-body strong { font-size: 13px; font-weight: 700; color: var(--text); display: block; margin-bottom: 2px; }
+    .install-step-body span { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+    .install-step-body a { color: var(--purple-lt); text-decoration: underline; }
+
+    .install-card-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+      padding: 13px 22px; border-radius: 12px;
+      font-size: 14px; font-weight: 700; cursor: pointer;
+      transition: opacity 0.15s, transform 0.12s, box-shadow 0.15s;
+      text-decoration: none; border: none;
+    }
+    .install-card.primary .install-card-btn {
+      background: linear-gradient(135deg, #7c6af5, #5eead4);
+      color: #fff;
+      box-shadow: 0 4px 22px rgba(124,106,245,0.45);
+    }
+    .install-card.primary .install-card-btn:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 6px 28px rgba(124,106,245,0.6); }
+    .install-card.secondary .install-card-btn {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+      color: #aaa;
+    }
+    .install-card.secondary .install-card-btn:hover { background: rgba(124,106,245,0.1); border-color: rgba(124,106,245,0.35); color: var(--purple-lt); }
+
     .copy-url-btn {
       display: inline-flex; align-items: center; gap: 6px;
-      margin-top: 10px; padding: 6px 14px;
+      margin-top: 8px; padding: 5px 12px;
       background: rgba(124,106,245,0.1); border: 1px solid rgba(124,106,245,0.3);
       border-radius: 8px; color: var(--purple-lt);
-      font-size: 12.5px; font-weight: 500; cursor: pointer;
+      font-size: 12px; font-weight: 500; cursor: pointer;
       transition: background 0.15s, border-color 0.15s;
     }
     .copy-url-btn:hover { background: rgba(124,106,245,0.2); border-color: rgba(124,106,245,0.5); }
+
+    .setup-note {
+      margin-top: 28px;
+      font-size: 12.5px; color: #444; font-style: italic;
+    }
 
     /* ── Divider ───────────────────────────────────────────────────────────── */
     .divider { height: 1px; background: linear-gradient(90deg, transparent 0%, rgba(124,106,245,0.2) 50%, transparent 100%); }
@@ -697,67 +759,92 @@
   <div class="divider"></div>
   <section class="get-started-section container" id="get-started">
     <div class="section-label fade-up">Get Started</div>
-    <h2 class="section-title fade-up">Ready in under a minute</h2>
+    <h2 class="section-title fade-up">Up and running in seconds</h2>
     <p class="section-sub fade-up" style="margin-left:auto;margin-right:auto;max-width:500px;">
-      No account. No server. No subscription. Just download, load in Chrome, and start asking.
+      No account. No server. No subscription. Install, paste your free API key, and start asking.
     </p>
-    <div class="get-started-dl fade-up">
-      <a class="btn-primary" href="/LookUp-extension.zip" download>
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Download for Chrome
-      </a>
-      <span class="btn-secondary" style="opacity:0.5;cursor:default;pointer-events:none;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        Chrome Web Store — coming soon
-      </span>
-    </div>
-    <div class="setup-steps fade-up">
-      <div class="setup-step">
-        <div class="setup-step-num">1</div>
-        <div class="setup-step-body">
-          <h4>Download &amp; extract</h4>
-          <p>Click the button above to download the zip. Extract the folder anywhere on your computer.</p>
+
+    <div class="install-paths fade-up">
+
+      <!-- ── Primary: Chrome Web Store ── -->
+      <div class="install-card primary">
+        <div>
+          <div class="install-card-badge">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            Recommended
+          </div>
+          <div class="install-card-title" style="margin-top:12px;">Chrome Web Store</div>
+          <p class="install-card-desc">One-click install directly from Google. No zip, no developer mode, no fuss.</p>
         </div>
-      </div>
-      <div class="setup-step">
-        <div class="setup-step-num">2</div>
-        <div class="setup-step-body">
-          <h4>Enable Developer Mode</h4>
-          <p>Open <strong>chrome://extensions</strong> in Chrome and toggle on <strong>Developer mode</strong> in the top-right corner.</p>
-          <button class="copy-url-btn" onclick="navigator.clipboard.writeText('chrome://extensions').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy chrome://extensions',2000)})">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            Copy chrome://extensions
-          </button>
+        <div class="install-steps">
+          <div class="install-step">
+            <div class="install-step-num">1</div>
+            <div class="install-step-body">
+              <strong>Click Install</strong>
+              <span>Hit the button below — Chrome handles everything automatically.</span>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">2</div>
+            <div class="install-step-body">
+              <strong>Get a free Groq API key</strong>
+              <span>Sign up at <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a> — 30 seconds, no card needed.</span>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">3</div>
+            <div class="install-step-body">
+              <strong>Paste &amp; go</strong>
+              <span>Open LookUp from your toolbar, paste your key, and start learning.</span>
+            </div>
+          </div>
         </div>
+        <a class="install-card-btn" href="https://chromewebstore.google.com/detail/lookup-%E2%80%94-study-sensei/dabfmkkhhjffnggmnjbpgeekicihhdnd" target="_blank" rel="noopener">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Add to Chrome — it's free
+        </a>
       </div>
-      <div class="setup-step">
-        <div class="setup-step-num">3</div>
-        <div class="setup-step-body">
-          <h4>Load unpacked</h4>
-          <p>Click <strong>Load unpacked</strong>, select the extracted folder, and LookUp will appear in your extensions.</p>
+
+      <!-- ── Secondary: Manual zip ── -->
+      <div class="install-card secondary">
+        <div>
+          <div class="install-card-badge">Manual install</div>
+          <div class="install-card-title" style="margin-top:12px;">Load from ZIP</div>
+          <p class="install-card-desc">For developers or if you prefer to install unpacked. Requires Developer Mode.</p>
         </div>
-      </div>
-      <div class="setup-step">
-        <div class="setup-step-num">4</div>
-        <div class="setup-step-body">
-          <h4>Get a free Groq API key</h4>
-          <p>Sign up at <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a> (30 seconds, no card needed) and copy your API key.</p>
+        <div class="install-steps">
+          <div class="install-step">
+            <div class="install-step-num">1</div>
+            <div class="install-step-body">
+              <strong>Download &amp; extract</strong>
+              <span>Download the zip below and extract the folder anywhere on your computer.</span>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">2</div>
+            <div class="install-step-body">
+              <strong>Enable Developer Mode</strong>
+              <span>Open <strong style="color:#ccc">chrome://extensions</strong> and toggle on Developer mode.</span>
+              <button class="copy-url-btn" onclick="navigator.clipboard.writeText('chrome://extensions').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy URL',2000)})">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy URL
+              </button>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">3</div>
+            <div class="install-step-body">
+              <strong>Load unpacked</strong>
+              <span>Click <strong style="color:#ccc">Load unpacked</strong>, select the extracted folder, then paste your Groq API key.</span>
+            </div>
+          </div>
         </div>
+        <a class="install-card-btn" href="/LookUp-extension.zip" download>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download ZIP
+        </a>
       </div>
-      <div class="setup-step">
-        <div class="setup-step-num">5</div>
-        <div class="setup-step-body">
-          <h4>Paste &amp; go</h4>
-          <p>Click the LookUp icon in your Chrome toolbar, paste your API key when prompted, and you're live.</p>
-        </div>
-      </div>
-      <div class="setup-step">
-        <div class="setup-step-num">6</div>
-        <div class="setup-step-body">
-          <h4>Capture &amp; ask</h4>
-          <p>Screenshot any tab, record a lecture, or paste text — then ask LookUp to explain, quiz, summarise, or generate flashcards.</p>
-        </div>
-      </div>
+
     </div>
     <p class="setup-note fade-up">Works on Chrome, Brave, Edge, and all Chromium-based browsers. Firefox is not currently supported.</p>
   </section>
