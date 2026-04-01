@@ -276,19 +276,7 @@
     .centered .section-sub { margin-left: auto; margin-right: auto; }
 
     /* ── Features grid ─────────────────────────────────────────────────────── */
-    /* ── Features carousel ─────────────────────────────────────────────────── */
-    .features-carousel-wrap { position: relative; }
-    .features-track-outer { overflow: hidden; }
-    .features-track {
-      display: flex; gap: 18px;
-      transition: transform 0.45s cubic-bezier(.4,0,.2,1);
-    }
-    .feature-card {
-      min-width: calc(33.333% - 12px); flex-shrink: 0;
-    }
-    @media (max-width: 700px) {
-      .feature-card { min-width: calc(85% - 12px); }
-    }
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
     .feature-card {
       background: rgba(12,12,22,0.6); border: 1px solid rgba(124,106,245,0.14);
       border-radius: 16px; padding: 28px 26px;
@@ -361,7 +349,7 @@
     }
     .carousel-slide img {
       width: 100%; display: block; border-radius: 0;
-      max-height: 420px; object-fit: cover; object-position: top;
+      max-height: 520px; object-fit: contain; background: #0a0a14;
     }
     .carousel-badge {
       position: absolute; top: 14px; left: 14px;
@@ -840,13 +828,42 @@
         </a>
       </div>
 
-      <!-- ── Secondary: Manual zip (compact, for developers) ── -->
-      <div class="install-card secondary" style="display:flex;flex-direction:column;justify-content:center;align-items:center;gap:10px;padding:24px 28px;text-align:center;">
-        <div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:#444;text-transform:uppercase;">For developers</div>
-        <div style="font-size:15px;font-weight:700;color:#888;">Prefer to load unpacked?</div>
-        <p style="font-size:12.5px;color:#555;line-height:1.5;max-width:220px;">Download the ZIP and load it manually via <span style="color:#777">chrome://extensions</span> → Developer Mode → Load unpacked.</p>
-        <a href="/LookUp-extension.zip" download style="margin-top:4px;display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:#666;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:7px 14px;transition:color 0.15s,border-color 0.15s;" onmouseover="this.style.color='#aaa';this.style.borderColor='rgba(255,255,255,0.2)'" onmouseout="this.style.color='#666';this.style.borderColor='rgba(255,255,255,0.08)'">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <!-- ── Secondary: Manual zip ── -->
+      <div class="install-card secondary">
+        <div>
+          <div class="install-card-badge">Manual install</div>
+          <div class="install-card-title" style="margin-top:12px;">Load from ZIP</div>
+          <p class="install-card-desc">For developers or if you prefer to install unpacked. Requires Developer Mode.</p>
+        </div>
+        <div class="install-steps">
+          <div class="install-step">
+            <div class="install-step-num">1</div>
+            <div class="install-step-body">
+              <strong>Download &amp; extract</strong>
+              <span>Download the zip below and extract the folder anywhere on your computer.</span>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">2</div>
+            <div class="install-step-body">
+              <strong>Enable Developer Mode</strong>
+              <span>Open <strong style="color:#ccc">chrome://extensions</strong> and toggle on Developer mode.</span>
+              <button class="copy-url-btn" onclick="navigator.clipboard.writeText('chrome://extensions').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy URL',2000)})">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy URL
+              </button>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">3</div>
+            <div class="install-step-body">
+              <strong>Load unpacked</strong>
+              <span>Click <strong style="color:#ccc">Load unpacked</strong>, select the extracted folder, then paste your Groq API key.</span>
+            </div>
+          </div>
+        </div>
+        <a class="install-card-btn" href="/LookUp-extension.zip" download>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Download ZIP
         </a>
       </div>
@@ -886,66 +903,39 @@
       <h2 class="section-title fade-up">Everything you need to study smarter</h2>
       <p class="section-sub fade-up">One extension. Zero extra setup. Completely free. Just install, capture, and ask.</p>
     </div>
-    <div class="features-carousel-wrap fade-up">
-      <div class="features-track-outer">
-        <div class="features-track" id="featTrack">
-          <div class="feature-card">
-            <div class="feature-icon">📸</div>
-            <div class="feature-title">Screenshot Capture</div>
-            <div class="feature-desc">Capture any tab instantly. Ask the AI to explain diagrams, slides, PDFs, or anything on your screen.</div>
-          </div>
-          <div class="feature-card">
-            <div class="feature-icon">🎙️</div>
-            <div class="feature-title">Audio Transcription</div>
-            <div class="feature-desc">Record your lecture or voice note and get an instant transcript powered by Whisper — then ask questions about it.</div>
-          </div>
-          <div class="feature-card">
-            <div class="feature-icon">💬</div>
-            <div class="feature-title">AI Chat</div>
-            <div class="feature-desc">Multi-turn conversations with Llama 4. Attach files, images, and code — all in one thread with full history. Free to use.</div>
-          </div>
-          <div class="feature-card">
-            <div class="feature-icon">📝</div>
-            <div class="feature-title">Smart Notes</div>
-            <div class="feature-desc">Save any AI response as a note. Browse, search, and revisit your knowledge base from the built-in dashboard.</div>
-          </div>
-          <div class="feature-card">
-            <div class="feature-icon">🃏</div>
-            <div class="feature-title">Flashcard Mode</div>
-            <div class="feature-desc">Ask LookUp to turn any topic into interactive flashcards. Flip, review, and test yourself — all in-browser.</div>
-          </div>
-          <div class="feature-card">
-            <div class="feature-icon">🧠</div>
-            <div class="feature-title">Quiz Generation</div>
-            <div class="feature-desc">One click to convert any material into a quiz with reveal-on-demand answers. Perfect for exam prep — and completely free.</div>
-          </div>
-        </div>
+    <div class="features-grid">
+      <div class="feature-card fade-up">
+        <div class="feature-icon">📸</div>
+        <div class="feature-title">Screenshot Capture</div>
+        <div class="feature-desc">Capture any tab instantly. Ask the AI to explain diagrams, slides, PDFs, or anything on your screen.</div>
       </div>
-      <div class="carousel-dots" style="margin-top:22px;" id="featDots">
-        <button class="carousel-dot active" onclick="featGo(0)"></button>
-        <button class="carousel-dot"        onclick="featGo(1)"></button>
-        <button class="carousel-dot"        onclick="featGo(2)"></button>
-        <button class="carousel-dot"        onclick="featGo(3)"></button>
+      <div class="feature-card fade-up">
+        <div class="feature-icon">🎙️</div>
+        <div class="feature-title">Audio Transcription</div>
+        <div class="feature-desc">Record your lecture or voice note and get an instant transcript powered by Whisper — then ask questions about it.</div>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon">💬</div>
+        <div class="feature-title">AI Chat</div>
+        <div class="feature-desc">Multi-turn conversations with Llama 4. Attach files, images, and code — all in one thread with full history. Free to use.</div>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon">📝</div>
+        <div class="feature-title">Smart Notes</div>
+        <div class="feature-desc">Save any AI response as a note. Browse, search, and revisit your knowledge base from the built-in dashboard.</div>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon">🃏</div>
+        <div class="feature-title">Flashcard Mode</div>
+        <div class="feature-desc">Ask LookUp to turn any topic into interactive flashcards. Flip, review, and test yourself — all in-browser.</div>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon">🧠</div>
+        <div class="feature-title">Quiz Generation</div>
+        <div class="feature-desc">One click to convert any material into a quiz with reveal-on-demand answers. Perfect for exam prep — and completely free.</div>
       </div>
     </div>
   </section>
-  <script>
-    (function() {
-      var fi = 0;
-      // Each "page" shows 3 cards; 6 total = 4 pages (0,1,2,3 offset by 1 card each)
-      // Card width = (100% - 2*18px gaps) / 3
-      function featUpdate() {
-        var track = document.getElementById('featTrack');
-        var card = track.children[0];
-        var cardW = card.offsetWidth + 18; // card + gap
-        track.style.transform = 'translateX(-' + (fi * cardW) + 'px)';
-        document.querySelectorAll('#featDots .carousel-dot').forEach(function(d,i){ d.classList.toggle('active', i===fi); });
-      }
-      window.featGo = function(i) { fi = i; featUpdate(); };
-      // Arrow key / swipe not needed — dots are enough for 6 cards
-      window.addEventListener('resize', function(){ featUpdate(); });
-    })();
-  </script>
 
   <div class="divider"></div>
 
