@@ -77,12 +77,12 @@
         "pdf-viewer.html",
         "pdf-viewer.js"
       ],
-      "matches": ["<all_urls>"]
+      "matches": ["chrome-extension://*/*"]
     }
   ],
 
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://api.groq.com"
   },
 
   "icons": {
