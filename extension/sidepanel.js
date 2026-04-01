@@ -1478,10 +1478,12 @@ function resizeDataUrl(dataUrl, quality = 0.85) {
 }
 
 // ── Tab capture helper ──────────────────────────────────────────────────────
-// Uses null windowId (= current window) to avoid a tabs.query round-trip,
-// which would burn the user-gesture context before captureVisibleTab is called.
+// Delegates to the background service worker to avoid the "activeTab not in
+// effect" error on first install — the SW's <all_urls> permission always works.
 async function captureTab() {
-  const dataUrl = await chrome.tabs.captureVisibleTab(targetWindowId, { format: "jpeg", quality: 85 });
+  const resp = await chrome.runtime.sendMessage({ type: "captureVisibleTab", windowId: targetWindowId });
+  if (resp?.error) throw new Error(resp.error);
+  const dataUrl = resp.dataUrl;
   // Downscale to max MAX_CAP px longest side — cuts image tokens vs. full HD with no AI quality loss
   const result = await resizeDataUrl(dataUrl);
   _cachedScreenshot = result;

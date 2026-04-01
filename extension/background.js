@@ -191,6 +191,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return;
   }
 
+  // ── Screenshot capture ───────────────────────────────────────────────────
+  // captureVisibleTab called from the sidepanel fails on first install because
+  // activeTab hasn't been "invoked" yet. Delegating to the background worker
+  // (which has <all_urls>) avoids this restriction entirely.
+  if (msg.type === "captureVisibleTab") {
+    const windowId = msg.windowId;
+    chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 85 }, (dataUrl) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ error: chrome.runtime.lastError.message });
+      } else {
+        sendResponse({ dataUrl });
+      }
+    });
+    return true; // keep channel open for async sendResponse
+  }
+
   // ── Relay tab audio stream ID to the side panel ───────────────────────────
   // chrome.tabCapture.getMediaStreamId must be called from the service worker;
   // the side panel then uses the returned streamId with getUserMedia.
