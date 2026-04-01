@@ -332,6 +332,9 @@ export default function ChatPage() {
   const [noteCtxMenu,    setNoteCtxMenu]    = useState(null); // { x, y, note }
   const searchRef                           = useRef(null);
 
+  // Image lightbox
+  const [lightboxSrc,    setLightboxSrc]    = useState(null);
+
   // Attachment state (manual drag/paste/file)
   const [attachedFiles,  setAttachedFiles]  = useState([]);
 
@@ -395,7 +398,7 @@ export default function ChatPage() {
     setPickerOpen(false);
     try {
       const msgs = await Messages.listByConversation(id);
-      setMessages(msgs.map((m) => ({ role: m.role, content: m.content })));
+      setMessages(msgs.map((m) => ({ role: m.role, content: m.content, _images: m.images ?? [], hasImage: !!m.hasImage })));
       await Conversations.setActive(id);
     } catch {}
   }, []);
@@ -719,7 +722,7 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, userDisplayMsg, { role: "assistant", content: "" }]);
 
     try {
-      await Messages.append(activeId, "user", effectiveText || "(image)");
+      await Messages.append(activeId, "user", effectiveText || "(image)", imageFiles.length > 0 ? imageFiles : null);
 
       let fullResponse = "";
 
@@ -971,8 +974,8 @@ export default function ChatPage() {
 
           {/* ── Bottom: capture + mode ──────────────────────────────── */}
           <div className="chat-sidebar-bottom">
-            {/* Mode dropdown — always visible */}
-            <div className="chat-mode-select" ref={modeDropRef}>
+            {/* Mode dropdown — only shown when a capture source is selected */}
+            <div className="chat-mode-select" ref={modeDropRef} style={!captureSource ? { display: "none" } : {}}>
               <button
                 className="chat-mode-trigger"
                 onClick={() => setModeDropOpen(o => !o)}
@@ -1074,9 +1077,12 @@ export default function ChatPage() {
                     {m._images?.length > 0 && (
                       <div className="msg-user-imgs">
                         {m._images.map((img, ii) => (
-                          <img key={ii} src={`data:${img.mimeType};base64,${img.base64}`} alt={img.name} className="msg-user-thumb" />
+                          <img key={ii} src={`data:${img.mimeType};base64,${img.base64}`} alt={img.name || ""} className="msg-user-thumb" style={{cursor:"zoom-in"}} onClick={() => setLightboxSrc(`data:${img.mimeType};base64,${img.base64}`)} />
                         ))}
                       </div>
+                    )}
+                    {m._images?.length === 0 && m.hasImage && (
+                      <div className="msg-img-placeholder">📷 Screenshot</div>
                     )}
                     {m._fileNames?.length > 0 && (
                       <div className="msg-user-chips">
@@ -1204,6 +1210,20 @@ export default function ChatPage() {
           />
         )}
       </div>
+
+      {/* ── Image lightbox ─────────────────────────────────────────────── */}
+      {lightboxSrc && (
+        <div
+          className="img-lightbox-overlay"
+          onClick={() => setLightboxSrc(null)}
+          onKeyDown={(e) => e.key === "Escape" && setLightboxSrc(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <img src={lightboxSrc} alt="" className="img-lightbox-img" onClick={(e) => e.stopPropagation()} />
+          <button className="img-lightbox-close" onClick={() => setLightboxSrc(null)} aria-label="Close">✕</button>
+        </div>
+      )}
     </>
   );
 }

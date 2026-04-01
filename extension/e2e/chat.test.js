@@ -90,8 +90,9 @@ test("multiple messages can be sent in sequence", async ({ chatPage }) => {
   await input.press("Enter");
   await expect(chatPage.getByText("First question")).toBeVisible({ timeout: 8000 });
 
-  // Wait for response before sending next
-  await expect(chatPage.getByText(/mock AI response/i)).toBeVisible({ timeout: 15000 });
+  // Wait for response — use .first() because other tests in the shared context may
+  // have also produced mock AI responses; we just need at least one to be present.
+  await expect(chatPage.getByText(/mock AI response/i).first()).toBeVisible({ timeout: 15000 });
 
   await input.fill("Second question");
   await input.press("Enter");

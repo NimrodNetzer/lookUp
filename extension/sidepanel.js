@@ -274,9 +274,10 @@ async function initZoom() {
 function applyZoom() {
   const z = ZOOM_STEPS[_zoomIdx];
   const actualZoom = BASE_ZOOM * z;
-  document.documentElement.style.zoom = actualZoom;
-  // Compensate height so body always fills the full viewport after scaling
-  document.documentElement.style.height = `calc(100vh / ${actualZoom})`;
+  // Set zoom and height compensation in one cssText assignment to avoid
+  // a reflow flicker between the two operations that causes the input bar to jump.
+  document.documentElement.style.cssText =
+    `zoom: ${actualZoom}; height: calc(100vh / ${actualZoom});`;
   document.getElementById("zoomLabel").textContent = Math.round(z * 100) + "%";
   document.getElementById("zoomOut").disabled = _zoomIdx === 0;
   document.getElementById("zoomIn").disabled  = _zoomIdx === ZOOM_STEPS.length - 1;
@@ -301,10 +302,15 @@ document.getElementById("zoomOut").addEventListener("click", async (e) => {
 
 initZoom();
 
-// Intercept Ctrl+wheel and Ctrl+±/0 so browser zoom doesn't bypass our system
+// Intercept Ctrl+wheel and Ctrl+±/0 so browser zoom doesn't bypass our system.
+// Throttle to one step per 300ms — touchpads fire many tiny events per gesture
+// which would blow through all zoom levels in a single swipe without this.
+let _zoomWheelTimer = null;
 window.addEventListener("wheel", (e) => {
   if (!e.ctrlKey) return;
   e.preventDefault();
+  if (_zoomWheelTimer) return; // ignore rapid follow-up events
+  _zoomWheelTimer = setTimeout(() => { _zoomWheelTimer = null; }, 300);
   if (e.deltaY < 0 && _zoomIdx < ZOOM_STEPS.length - 1) { _zoomIdx++; }
   else if (e.deltaY > 0 && _zoomIdx > 0)                 { _zoomIdx--; }
   applyZoom();
@@ -634,7 +640,7 @@ async function sendChatMessage() {
   if (localFiles.length > 0) {
     const thumbsHtml = localFiles.map(f =>
       f.isImage
-        ? `<img src="data:${f.mimeType};base64,${f.base64}" class="msg-attachment-thumb" alt="" />`
+        ? `<img src="data:${f.mimeType};base64,${f.base64}" class="msg-attachment-thumb sp-lightbox-trigger" alt="" style="cursor:zoom-in" />`
         : `<div class="msg-attachment-file">📎 ${escapeHtml(f.name)}</div>`
     ).join("");
     userBubbleHtml += `<div class="msg-thumbs-row">${thumbsHtml}</div>`;
@@ -698,7 +704,7 @@ async function sendChatMessage() {
     }
 
     // Save effectiveMessage so file contents are preserved in history for follow-ups
-    await Messages.append(activeConversationId, "user", effectiveMessage || message);
+    await Messages.append(activeConversationId, "user", effectiveMessage || message, imageFiles.length > 0);
     await Messages.append(activeConversationId, "assistant", reply);
 
     if (history.length === 0) {
@@ -1281,8 +1287,36 @@ function reattachResultListeners() {
   // No-op — quiz/flashcard listeners are now delegated on resultArea and never need reattachment
 }
 
+// ── Image lightbox ────────────────────────────────────────────────────────────
+const lightboxOverlay = document.createElement("div");
+lightboxOverlay.id = "sp-lightbox";
+lightboxOverlay.innerHTML = `<img id="sp-lightbox-img" alt="" /><button id="sp-lightbox-close">✕</button>`;
+lightboxOverlay.style.cssText = "display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.88);align-items:center;justify-content:center;cursor:zoom-out";
+document.body.appendChild(lightboxOverlay);
+const lightboxImg = document.getElementById("sp-lightbox-img");
+lightboxImg.style.cssText = "max-width:92vw;max-height:90vh;border-radius:10px;object-fit:contain;box-shadow:0 8px 40px rgba(0,0,0,.6);cursor:default";
+const lightboxClose = document.getElementById("sp-lightbox-close");
+lightboxClose.style.cssText = "position:absolute;top:18px;right:22px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:18px;width:36px;height:36px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center";
+
+function openLightbox(src) {
+  lightboxImg.src = src;
+  lightboxOverlay.style.display = "flex";
+}
+function closeLightbox() {
+  lightboxOverlay.style.display = "none";
+  lightboxImg.src = "";
+}
+lightboxOverlay.addEventListener("click", closeLightbox);
+lightboxImg.addEventListener("click", (e) => e.stopPropagation());
+lightboxClose.addEventListener("click", closeLightbox);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeLightbox(); });
+
 // Single delegated listener — survives any innerHTML replacement
 resultArea.addEventListener("click", (e) => {
+  // Image lightbox
+  const thumb = e.target.closest(".sp-lightbox-trigger");
+  if (thumb) { openLightbox(thumb.src); return; }
+
   // Flashcard flip
   const fc = e.target.closest(".flashcard");
   if (fc && resultArea.contains(fc)) fc.classList.toggle("flipped");
@@ -1304,7 +1338,8 @@ function renderAllMessages(messages) {
     if (msg.role === "user") {
       const el = document.createElement("div");
       el.className = "msg-user";
-      el.innerHTML = `<div>${escapeHtml(msg.content)}</div>`;
+      const imgHtml = msg.hasImage ? `<div class="msg-img-placeholder">📷 Screenshot</div>` : "";
+      el.innerHTML = `${imgHtml}<div>${escapeHtml(msg.content)}</div>`;
       resultArea.appendChild(el);
     } else if (msg.role === "assistant") {
       let cards = null;
@@ -1391,7 +1426,7 @@ async function processPendingCapture() {
 
     const noteTitle = extractTopic(markdown, pendingCapture.tabTitle || selectedMode);
     const saved = await saveNote({ title: noteTitle, mode: selectedMode, markdown, cards });
-    await Messages.append(activeConversationId, "user", `📸 Screenshot (${selectedMode})`);
+    await Messages.append(activeConversationId, "user", `📸 Screenshot (${selectedMode})`, true);
     await Messages.append(activeConversationId, "assistant", selectedMode === "flashcard" ? JSON.stringify(cards) : markdown);
 
     let displayTitle = saved.title;
@@ -1612,7 +1647,7 @@ captureBtn.addEventListener("click", async () => {
     const saved = await saveNote({ title: noteTitle, mode: selectedMode, markdown, cards });
 
     // Append to conversation
-    await Messages.append(activeConversationId, "user", `📸 Screenshot (${selectedMode})`);
+    await Messages.append(activeConversationId, "user", `📸 Screenshot (${selectedMode})`, true);
     await Messages.append(activeConversationId, "assistant", selectedMode === "flashcard" ? JSON.stringify(cards) : markdown);
 
     // Auto-rename tab on first capture — use AI topic if found, else mode name
@@ -1805,7 +1840,16 @@ async function readAllChunks() {
 async function startAudioCapture() {
   captureBtn.disabled = true;
   try {
-    const resp = await sendMessageSafe({ type: "startRecording", source: "tab", label: "Recording tab audio…" });
+    // Get the stream ID here in the sidepanel (extension page with user gesture),
+    // NOT in the service worker — Chrome requires "invocation" context for tabCapture
+    // and service workers can't satisfy that requirement.
+    const streamId = await new Promise((res, rej) => {
+      chrome.tabCapture.getMediaStreamId({}, (id) => {
+        if (chrome.runtime.lastError) rej(new Error(chrome.runtime.lastError.message));
+        else res(id);
+      });
+    });
+    const resp = await sendMessageSafe({ type: "startRecording", source: "tab", streamId, label: "Recording tab audio…" });
     if (!resp?.ok) throw new Error(resp?.error ?? "Could not start recording");
     recSeconds = 0;
     document.getElementById("audioBarLabel").textContent = "Recording tab audio…";
@@ -1818,17 +1862,13 @@ async function startAudioCapture() {
       recTimer.textContent = `${m}:${s}`;
     }, 1000);
   } catch (err) {
-    const isChromePage = err.message.includes("not been invoked") || err.message.includes("cannot be captured") || err.message.includes("activeTab");
-    if (isChromePage) {
-      // Tab audio is blocked on this page — auto-fall back to mic
-      avOptMic.classList.add("active");
-      avOptAudio.classList.remove("active");
-      chrome.storage.local.set({ savedAudioSrc: "mic" });
-      startMicCapture();
+    const isRestrictedPage = err.message.includes("not been invoked") || err.message.includes("cannot be captured") || err.message.includes("activeTab") || err.message.includes("chrome://");
+    if (isRestrictedPage) {
+      showError("Tab audio isn't available on this page. Switch to Mic to record your microphone instead.");
     } else {
       showError(err.message);
-      captureBtn.disabled = false;
     }
+    captureBtn.disabled = false;
   }
 }
 

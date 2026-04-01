@@ -276,9 +276,11 @@ export const Messages = {
   },
 
   // role: "user" | "assistant" | "system"
-  async append(conversationId, role, content) {
+  // hasImage: optional boolean — marks that this message included a screenshot/image
+  async append(conversationId, role, content, hasImage = false) {
     const db = await openDB();
     const msg = { conversationId, role, content, createdAt: Date.now() };
+    if (hasImage) msg.hasImage = true;
     const t = tx(db, ["messages"], "readwrite");
     const id = await req2p(t.store("messages").add(msg));
     await t.done;
