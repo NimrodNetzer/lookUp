@@ -479,9 +479,15 @@ export async function chat(messages) {
  */
 export async function* chatStream(messages) {
   const key = await getKey();
+  const langSuffix = _responseLanguage === "he" ? "\n\nכתוב את כל התשובה בעברית בלבד." : "\n\n[Respond in English only.]";
+  const lastIdx = messages.length - 1;
+  const messagesWithLang = messages.map((m, i) => {
+    if (i !== lastIdx || m.role !== "user") return m;
+    return { ...m, content: (typeof m.content === "string" ? m.content : m.content) + langSuffix };
+  });
   yield* chatCompletionStream(key, [
     { role: "system", content: buildSystemPrompt() },
-    ...messages,
+    ...messagesWithLang,
   ], 0.6, 1000);
 }
 

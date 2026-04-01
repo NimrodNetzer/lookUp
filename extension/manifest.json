@@ -5,7 +5,6 @@
   "description": "Capture your screen on-demand for AI-powered summaries, formulas, and Q&A.",
 
   "permissions": [
-    "activeTab",
     "tabs",
     "sidePanel",
     "tabCapture",
@@ -25,6 +24,7 @@
     "default_title": "Open LookUp",
     "default_icon": {
       "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
@@ -77,7 +77,7 @@
         "pdf-viewer.html",
         "pdf-viewer.js"
       ],
-      "matches": ["chrome-extension://*/*"]
+      "matches": ["<all_urls>"]
     }
   ],
 

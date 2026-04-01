@@ -136,19 +136,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       try {
         let streamId = null;
         if (msg.source === "tab") {
-          // Get a tab-capture stream ID consumable by the offscreen doc
-          streamId = await new Promise((res, rej) => {
-            chrome.tabCapture.getMediaStreamId({}, (id) => {
-              if (!chrome.runtime.lastError) { res(id); return; }
-              chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-                if (!tab) { rej(new Error("No active tab")); return; }
-                chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id }, (id2) => {
-                  if (chrome.runtime.lastError) rej(new Error(chrome.runtime.lastError.message));
-                  else res(id2);
-                });
-              });
-            });
-          });
+          // Stream ID is obtained by the sidepanel (extension page) before sending
+          // this message — service workers can't call getMediaStreamId reliably.
+          if (!msg.streamId) throw new Error("No stream ID provided for tab capture.");
+          streamId = msg.streamId;
         }
         await ensureOffscreen();
         chrome.runtime.sendMessage({ type: "offscreen:start", source: msg.source, streamId });

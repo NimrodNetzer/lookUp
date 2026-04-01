@@ -23,7 +23,7 @@
 .chat-new-btn {
   width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
   background: rgba(124,106,245,0.1); border: 1px solid rgba(124,106,245,0.25);
-  color: #9d8cff; font-size: 16px; cursor: pointer;
+  color: #9d8cff; font-size: 16px; cursor: pointer; padding: 0;
   display: flex; align-items: center; justify-content: center; line-height: 1;
   transition: background 0.15s, border-color 0.15s;
 }
@@ -437,7 +437,37 @@
 .msg-user-thumb {
   max-width: 200px; max-height: 160px; border-radius: 10px;
   object-fit: cover; border: 1px solid rgba(255,255,255,0.12);
+  transition: opacity 0.15s;
 }
+.msg-user-thumb:hover { opacity: 0.85; }
+.msg-img-placeholder {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: rgba(255,255,255,0.55);
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px; padding: 3px 8px; margin-bottom: 5px;
+}
+
+/* ── Image lightbox ───────────────────────────────────────────────────────── */
+.img-lightbox-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.88);
+  display: flex; align-items: center; justify-content: center;
+  cursor: zoom-out;
+}
+.img-lightbox-img {
+  max-width: 92vw; max-height: 90vh;
+  border-radius: 10px; object-fit: contain;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+  cursor: default;
+}
+.img-lightbox-close {
+  position: absolute; top: 18px; right: 22px;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+  color: #fff; font-size: 18px; width: 36px; height: 36px;
+  border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s;
+}
+.img-lightbox-close:hover { background: rgba(255,255,255,0.22); }
 .msg-user-chips {
   display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px;
 }

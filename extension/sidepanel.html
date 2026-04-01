@@ -909,6 +909,14 @@
     .msg-thumbs-row .msg-attachment-thumb {
       width: auto; max-width: 100%; max-height: 110px;
       border-radius: 8px; object-fit: cover; flex-shrink: 0;
+      transition: opacity 0.15s;
+    }
+    .msg-thumbs-row .msg-attachment-thumb:hover { opacity: 0.82; }
+    .msg-img-placeholder {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; color: rgba(255,255,255,0.55);
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px; padding: 3px 8px; margin-bottom: 5px;
     }
 
     .chat-input-wrap {
