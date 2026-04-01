@@ -159,6 +159,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return;
   }
 
+  // ── Tab screenshot capture (sidepanel delegates here to use activeTab grant) ─
+  if (msg.type === "captureTab") {
+    const windowId = msg.windowId ?? _focusedWindowId;
+    chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 85 }, (dataUrl) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ ok: false, error: chrome.runtime.lastError.message });
+      } else {
+        sendResponse({ ok: true, dataUrl });
+      }
+    });
+    return true; // async
+  }
+
   // ── Recording: query state ────────────────────────────────────────────────
   if (msg.type === "getRecordingState") {
     sendResponse(_recordingState);

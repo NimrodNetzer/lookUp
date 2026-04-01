@@ -274,9 +274,10 @@ async function initZoom() {
 function applyZoom() {
   const z = ZOOM_STEPS[_zoomIdx];
   const actualZoom = BASE_ZOOM * z;
-  document.documentElement.style.zoom = actualZoom;
-  // Compensate height so body always fills the full viewport after scaling
-  document.documentElement.style.height = `calc(100vh / ${actualZoom})`;
+  // Set zoom and height compensation in one cssText assignment to avoid
+  // a reflow flicker between the two operations that causes the input bar to jump.
+  document.documentElement.style.cssText =
+    `zoom: ${actualZoom}; height: calc(100vh / ${actualZoom});`;
   document.getElementById("zoomLabel").textContent = Math.round(z * 100) + "%";
   document.getElementById("zoomOut").disabled = _zoomIdx === 0;
   document.getElementById("zoomIn").disabled  = _zoomIdx === ZOOM_STEPS.length - 1;
@@ -1512,12 +1513,13 @@ function resizeDataUrl(dataUrl, quality = 0.85) {
 }
 
 // ── Tab capture helper ──────────────────────────────────────────────────────
-// Uses null windowId (= current window) to avoid a tabs.query round-trip,
-// which would burn the user-gesture context before captureVisibleTab is called.
+// Delegates to background.js which holds the activeTab grant from the user's
+// icon click. Calling captureVisibleTab directly from the sidepanel page fails
+// because the activeTab grant is only given to the service worker context.
 async function captureTab() {
-  const dataUrl = await chrome.tabs.captureVisibleTab(targetWindowId, { format: "jpeg", quality: 85 });
-  // Downscale to max MAX_CAP px longest side — cuts image tokens vs. full HD with no AI quality loss
-  const result = await resizeDataUrl(dataUrl);
+  const resp = await sendMessageSafe({ type: "captureTab", windowId: targetWindowId });
+  if (!resp?.ok) throw new Error(resp?.error ?? "Could not capture tab");
+  const result = await resizeDataUrl(resp.dataUrl);
   _cachedScreenshot = result;
   _cacheTs = Date.now();
   return result;

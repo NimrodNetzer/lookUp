@@ -5,6 +5,7 @@
   "description": "Capture your screen on-demand for AI-powered summaries, formulas, and Q&A.",
 
   "permissions": [
+    "activeTab",
     "tabs",
     "sidePanel",
     "tabCapture",
