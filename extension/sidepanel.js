@@ -1313,6 +1313,12 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeLight
 
 // Single delegated listener — survives any innerHTML replacement
 resultArea.addEventListener("click", (e) => {
+  // Open extension settings (for "Allow access to file URLs")
+  if (e.target.closest("#openExtSettingsBtn")) {
+    chrome.runtime.sendMessage({ type: "openExtensionSettings" });
+    return;
+  }
+
   // Image lightbox
   const thumb = e.target.closest(".sp-lightbox-trigger");
   if (thumb) { openLightbox(thumb.src); return; }
@@ -1517,7 +1523,13 @@ function resizeDataUrl(dataUrl, quality = 0.85) {
 // effect" error on first install — the SW's <all_urls> permission always works.
 async function captureTab() {
   const resp = await chrome.runtime.sendMessage({ type: "captureVisibleTab", windowId: targetWindowId });
-  if (resp?.error) throw new Error(resp.error);
+  if (resp?.error) {
+    // Show a helpful message if Chrome blocked access to a local file URL
+    if (resp.error.includes("file:///") || resp.error.includes("file://") || resp.error.includes("Allow access to file URLs")) {
+      throw new Error("Allow access to file URLs");
+    }
+    throw new Error(resp.error);
+  }
   const dataUrl = resp.dataUrl;
   // Downscale to max MAX_CAP px longest side — cuts image tokens vs. full HD with no AI quality loss
   const result = await resizeDataUrl(dataUrl);
@@ -2214,6 +2226,7 @@ function showError(msg) {
   const existing = resultArea.querySelector(".error-card:last-child");
 
   const isQuotaError = msg.toLowerCase().includes("daily token limit") || msg.toLowerCase().includes("quota");
+  const isFileError = msg.includes("Allow access to file URLs");
   const html = isQuotaError
     ? `<div class="error-card error-card-quota">
         <div class="quota-icon">🚫</div>
@@ -2221,9 +2234,24 @@ function showError(msg) {
         <p>Your free Groq quota resets every 24 hours.</p>
         <a class="quota-upgrade-btn" href="https://console.groq.com" target="_blank">↗ Upgrade at console.groq.com</a>
       </div>`
+    : isFileError
+    ? `<div class="error-card">
+        <strong>Local file access not enabled</strong>
+        <p style="margin:6px 0 8px">To capture local files, Chrome requires one-time permission:</p>
+        <button id="openExtSettingsBtn" style="
+          display:block; width:100%; padding:9px; margin-bottom:8px;
+          background:linear-gradient(135deg,#7c6af5,#5b53d4); border:none;
+          border-radius:9px; color:#fff; font-size:13px; font-weight:700;
+          cursor:pointer; letter-spacing:0.02em;">
+          Open Extension Settings ↗
+        </button>
+        <p style="margin:0;font-size:11px;color:#888;line-height:1.5">
+          Turn on <strong style="color:#bbb">"Allow access to file URLs"</strong>, then reload the file and try again.
+        </p>
+      </div>`
     : `<div class="error-card"><strong>Error:</strong> ${escapeHtml(msg)}</div>`;
 
-  if (existing && !isQuotaError) {
+  if (existing && !isQuotaError && !isFileError) {
     existing.innerHTML = `<strong>Error:</strong> ${escapeHtml(msg)}`;
     return;
   }

@@ -233,4 +233,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     });
     return true; // keep channel open for async sendResponse
   }
+
+  // ── Open extension settings page (for "Allow access to file URLs") ──────────
+  if (msg.type === "openExtensionSettings") {
+    chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
+    sendResponse({ ok: true });
+    return;
+  }
 });
